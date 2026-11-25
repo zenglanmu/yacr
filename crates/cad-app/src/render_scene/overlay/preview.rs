@@ -205,7 +205,7 @@ pub fn draw_preview_overlay(
         // existing cursor/chain; the discovered loops are built at commit, so no
         // candidate polyline is fabricated here.
         | DrawToolKind::Boundary
-        | DrawToolKind::ChamferEdge
+        | DrawToolKind::ChamferEdge | DrawToolKind::PressPull | DrawToolKind::Extrude
         // ALIGN captures four free points (two source/destination pairs); STRETCH
         // captures four free points (two window corners plus a base and a
         // displacement point). Both use the existing cursor/chain preview (no new

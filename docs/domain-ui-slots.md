@@ -38,35 +38,47 @@ registerDomainUi('concept', {
 
 ## 3. 插件增量 patch
 
-```ts
-import { registerPluginUi, unregisterPluginUi } from '../plugins/ui.ts';
+公开的插件作者面是 `@yacr/plugin-api` 的 `api.ui.register`（客户端本地，无描述符行）；
+宿主侧落到同一个 `registerPluginUi` 合并路径。插件只提供**数据**，不能注入 JSX/HTML/自定义
+托盘 body；每个可点项仍是 `RibbonItem`，经 `runItem` → `canCommand` → `cad_command`/`runAction`。
 
-registerPluginUi({
+```ts
+api.ui.register({
   id: 'acme.roof-tools',
   domain: '*',                    // 或 'concept' / 'cad2d' / ...
+  menu: [{ id: 'acme.roof', title: 'Roof', items: [
+    { id: 'ROOF', label: 'Roof', command: 'LINE' },
+  ] }],
   toolbar: [{
     id: 'concept.construction',   // 已有组：追加；新 id：整组追加
-    titleKey: 'concept.toolbar.construction',
-    items: [{ id: 'ACME_ROOF', labelKey: 'acme.roof', icon: 'line', command: 'LINE' }],
+    title: 'Roof',
+    items: [
+      { id: 'ACME_ROOF', label: 'Roof', icon: 'line', command: 'LINE' },
+      { id: 'ACME_DORMER', label: 'Dormer', pendingReason: 'no dormer kernel op' },
+    ],
   }],
   tray: [{
     id: 'acme.roof-panel',
-    titleKey: 'acme.roof.panel',
-    kind: 'pending',
-    pendingKey: 'acme.roof.panel.pending',
+    title: 'Acme',
+    pendingReason: 'no panel body yet',
   }],
 });
 ```
 
-- 菜单/工具组按 id 合并：已有分组**追加**项，新分组追加到末尾；item id 冲突时**域自己的行优先**，
-  patch 的重复项被跳过（避免 React key 冲突，也不允许插件遮蔽域命令）。
-- 托盘按 id 合并：同 id 由 patch 覆盖，新 id 追加。
-- `id` 必须唯一；卸载用同一个 id，重复卸载是 no-op（deactivation 幂等）。
-- patch 只能填**数据**：不能注入 JSX/HTML，也不能新增内置托盘 body。新增 body 是
-  `DomainTray.tsx` 的代码改动，保持写入路径可审。
-- 当前插件通过 `apps/desktop-ui/src/plugins/ui.ts` 直接注册（same-privilege，ADR-0029/0030/0034）。
-  `packages/cad-plugin-api` 的 `ui.register` 命名空间**尚未发布**；在描述符 JSON、宿主能力表
-  与 WebView adapter 一起落地前，不要在任何能力表或 UI 里声称它 supported。
+- `label` / `title` / `pendingReason` 是插件提供的**字面文本**（宿主模型里的
+  `RibbonItem.label`、`RibbonPanel.title`、`RibbonTab.label`、`TrayPanel.title` /
+  `pendingText`），渲染时优先于 i18n 目录；`labelKey`/`titleKey` 只是稳定合成键，不显示。
+  插件不能在宿主 i18n 目录里加行，因此语言切换需插件在注册前自行处理（v1 限制）。
+- `command` 与 `pendingReason` **恰好一个**：前者经共享准入（不可用就 disabled），后者渲染为
+  disabled 行和插件自己的说明，不假装可运行。
+- 菜单/工具组按 id 合并：已有分组**追加**项，新分组追加到末尾；item id 冲突时域自己的行优先。
+  托盘按 id 合并：同 id 由 patch 覆盖，新 id 追加。
+- `id` 是卸载句柄，客户端内唯一；`api.ui.unregister(id)` 显式移除，`deactivate` 时 loader
+  自动移除该插件注册的全部贡献。宿主没有 `onUiRegister` 钩子时
+  `api.ui.register` 以 `unsupported-runtime: cad_api.Ui.register` 拒绝。
+- 插件仍是 same-privilege 模块（ADR-0029/0030/0034）；这不是沙箱。`ui.register` 是
+  **client-local**，不在 `crates/cad-ui-core/api/plugin-api.json` 的能力表里，不要写成
+  `supported` 描述符操作。
 
 ## 4. 验证
 

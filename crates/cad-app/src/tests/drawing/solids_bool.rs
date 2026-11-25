@@ -37,6 +37,8 @@ impl SolidModeler for FakeModeler {
             booleans: true,
             mass_properties: false,
             chamfer: false,
+            offset_face: false,
+            extrude_profile: false,
             fillet: false,
             shell: false,
             nurbs: false,

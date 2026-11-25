@@ -2,8 +2,8 @@
 
 - 状态：**Accepted（2026-11-13，可用的二次开发 API）**。本 ADR 定的是**契约与目录边界**：API
   包、宿主 adapter、能力描述符与显式拒绝语义、只读通道 `cad_api_call`、写/会话通道
-  `cad_api_submit` + `cad_api_poll`、异步提示通道，以及插件装载与命令派发。**17 行宿主操作中
-  16 行已服务**；只剩 `document.lock` 是保留行。
+  `cad_api_submit` + `cad_api_poll`、异步提示通道，以及插件装载与命令派发。**18 行宿主操作中
+  17 行已服务**；只剩 `document.lock` 是保留行。
   证据只到 Node 契约测试与 Linux 上的 `cargo check`/`cargo test`；真实 GUI、真机、WebView、
   GPU/像素全部 **NOT VERIFIED**。
 - 日期：2026-11-13。
@@ -111,7 +111,7 @@ tsconfig/vite 别名或裸包名：仓库没有 npm workspace、也没有签入�
 5. 自洽性：`documentOwner: 'none'` 却出现 `supported` 的 `ApplicationServices`/`DatabaseServices`
    行 → 拒绝 `api.descriptor_invalid: documentOwner`（没有文档所有者却声称服务文档操作）。
 
-**本版本状态（诚实表）**：描述符 17 行——**16 行 `supported` + 1 行 `pending`**
+**本版本状态（诚实表）**：描述符 18 行——**17 行 `supported` + 1 行 `pending`**
 （仅 `document.lock`）。已服务：文档身份/列表、revision、符号表、当前选择、handle→ObjectId、
 按 id 读实体、事务提交，以及全部七个提示与 `selectAll`。`Runtime.registerCommand`、
 `editor.writeMessage` 与事务的 start/abort/addNewlyCreated 是**客户端本地**操作，没有描述符行；
@@ -137,7 +137,7 @@ Geometry/Colors/`parsePluginManifest` 同样是包内特性。
   （`Line`/`Circle`/`Arc`/`Polyline`/`DBText`/`MText`）成判别联合，未知/缺失标签是
   `api.invalid_argument: bridge.answer.typeName`；没有调用方指定的 `as T`。
 - `addNewlyCreatedDBObject(obj, add)` 也在任意深度可用：实体类型是**闭集**
-  `Line`/`Circle`/`Arc`（`SUPPORTED_NEW_ENTITY_TYPES`），带 layer **名字**与 host 定义的 space；
+  `Line`/`Circle`/`Arc`/`Polyline`/`DBText`（`SUPPORTED_NEW_ENTITY_TYPES`），带 layer **名字**与 host 定义的 space；
   同一事务对同一 `ObjectId` 的第二次 `translate`/`delete` 是
   `api.invalid_argument: edits.duplicate`（对齐宿主"一个批次不能重复编辑同一实体"）。
 - 嵌套 **LIFO 只约束 `commit`/`abort`**（外层先关闭 = `api.transaction.nesting_order`），深度
@@ -249,7 +249,7 @@ interface CommitParameters {
 }
 
 type TransactionEdit =
-  | { kind: 'insert'; typeName: 'Line' | 'Circle' | 'Arc';
+  | { kind: 'insert'; typeName: 'Line' | 'Circle' | 'Arc' | 'Polyline' | 'DBText';
       layer: string;             // 层名，不是 handle
       space: string;             // host 定义的 space id/name，必须等于 active space
       parameters: Readonly<Record<string, unknown>> }

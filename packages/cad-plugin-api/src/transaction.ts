@@ -58,17 +58,19 @@ export const MAX_TRANSACTION_DEPTH = 8;
 /**
  * The entity types this build's commit envelope can create.
  *
- * The host's `NewEntity` is a closed set (`Line`/`Circle`/`Arc`); anything else is
+ * The host's `NewEntity` is a closed set (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`); anything else is
  * refused locally with `api.invalid_argument: typeName` instead of being sent and
  * refused later.
  */
-export type NewlyCreatedEntityType = 'Line' | 'Circle' | 'Arc';
+export type NewlyCreatedEntityType = 'Line' | 'Circle' | 'Arc' | 'Polyline' | 'DBText';
 
 /** The closed set of creatable entity types, in host order. */
 export const SUPPORTED_NEW_ENTITY_TYPES: readonly NewlyCreatedEntityType[] = Object.freeze([
   'Line',
   'Circle',
   'Arc',
+  'Polyline',
+  'DBText',
 ]);
 
 const NEW_ENTITY_TYPES: ReadonlySet<string> = new Set<NewlyCreatedEntityType>(
@@ -84,7 +86,8 @@ function isNewlyCreatedEntityType(value: string): value is NewlyCreatedEntityTyp
  *
  * `insert` names the entity type, the target layer **name**, the target space
  * (a host-defined space id/name) and the host's `NewEntity` parameters
- * (`start`/`end`, `center`/`radius`, or `center`/`radius`/`startAngle`/`endAngle`).
+ * (`start`/`end`, `center`/`radius`, `center`/`radius`/`startAngle`/`endAngle`,
+ * `points`/`closed`, or `value`/`origin`/`height`/`rotation`).
  * `translate`/`delete` are part of the frozen wire shape; the host maps them to a
  * `SelectionRef { document, entity, instance, sub_element }` and refuses instanced
  * or sub-element references.
@@ -303,7 +306,7 @@ export class Transaction {
    *
    * `add === true` buffers the insert; `add === false` records nothing (the object
    * exists only in plugin memory). The type must be in the host's closed set
-   * (`Line`/`Circle`/`Arc`), the layer is a layer **name**, and the space must be
+   * (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`), the layer is a layer **name**, and the space must be
    * the active space (the host refuses a mismatch). Allowed at any depth and
    * **client-local**: staging an edit is not a host operation, so nothing is gated
    * or sent until the outermost commit.

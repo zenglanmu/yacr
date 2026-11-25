@@ -244,6 +244,47 @@ pub(in crate::session) fn cad_tool(
                     ToolParameter::StretchWindow,
                     preview.kind == DrawToolKind::Stretch,
                 ),
+                line_length: number(
+                    ToolParameter::LineLength,
+                    preview.kind == DrawToolKind::Line,
+                ),
+                line_angle: number(ToolParameter::LineAngle, preview.kind == DrawToolKind::Line),
+                rect_width: number(
+                    ToolParameter::RectWidth,
+                    preview.kind == DrawToolKind::Rectang,
+                ),
+                rect_height: number(
+                    ToolParameter::RectHeight,
+                    preview.kind == DrawToolKind::Rectang,
+                ),
+                circle_radius: number(
+                    ToolParameter::CircleRadius,
+                    preview.kind == DrawToolKind::Circle,
+                ),
+                rotate_angle: number(
+                    ToolParameter::RotateAngle,
+                    preview.kind == DrawToolKind::Rotate,
+                ),
+                move_distance: number(
+                    ToolParameter::MoveDistance,
+                    preview.kind == DrawToolKind::Move,
+                ),
+                scale_factor: number(
+                    ToolParameter::ScaleFactor,
+                    preview.kind == DrawToolKind::Scale,
+                ),
+                offset_distance: number(
+                    ToolParameter::OffsetDistance,
+                    preview.kind == DrawToolKind::Offset,
+                ),
+                press_pull_distance: number(
+                    ToolParameter::PressPullDistance,
+                    preview.kind == DrawToolKind::PressPull,
+                ),
+                extrude_distance: number(
+                    ToolParameter::ExtrudeDistance,
+                    preview.kind == DrawToolKind::Extrude,
+                ),
             },
         }),
         ToolSnapshot::Measuring(preview) => Some(CadTool {
@@ -294,6 +335,17 @@ pub(in crate::session) fn cad_tool(
                 dim_rotation: None,
                 polyline_width: None,
                 stretch_window: None,
+                line_length: None,
+                line_angle: None,
+                rect_width: None,
+                rect_height: None,
+                circle_radius: None,
+                rotate_angle: None,
+                move_distance: None,
+                scale_factor: None,
+                offset_distance: None,
+                press_pull_distance: None,
+                extrude_distance: None,
             },
         }),
         ToolSnapshot::Idle | ToolSnapshot::Selecting | ToolSnapshot::Panning => None,

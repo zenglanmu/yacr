@@ -102,6 +102,7 @@ export const IMPLEMENTED_OPERATIONS: readonly string[] = [
   'EditorInput.editor.getKeyword',
   'EditorInput.editor.selectAll',
   'EditorInput.editor.currentSelection',
+  'EditorInput.editor.setSelection',
 ];
 
 /** First poll delay; doubles per attempt. */

@@ -37,4 +37,5 @@ mod tests_sysvdlg;
 mod tests_text;
 mod tests_tools;
 mod tests_tools_routing;
+mod tests_typed_dimensions;
 mod tests_wire;

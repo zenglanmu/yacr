@@ -14,9 +14,10 @@
 //! write. A missing document is `None` (the caller answers `cad_waiting`), never
 //! a fabricated placeholder document.
 
+use crate::api::SelectionMode;
 use crate::host::HostController;
 use crate::{ApiOutcome, ApiRequest, ApiTarget, AppMode, EntityEdit};
-use cad_domain::{CadError, CadResult, Revision};
+use cad_domain::{CadError, CadResult, EntityId, ObjectId, Revision};
 
 /// One open document as the plugin API reports it.
 ///
@@ -100,6 +101,47 @@ impl HostController {
             self.note_change_scope(&changes.scope);
         }
         Ok(outcome)
+    }
+
+    /// Replace the session selection with the given object ids (plugin
+    /// `EditorInput.editor.setSelection`).
+    ///
+    /// The ids are validated against the open drawing and the active space
+    /// **before** the application path runs, so a caller gets the stable
+    /// `cad_api.unknown_object: <id>` / `api.invalid_argument: objectIds.space`
+    /// marker instead of a generic command error. An empty list is the real
+    /// "clear the selection".
+    pub fn plugin_select_ids(&mut self, ids: Vec<ObjectId>) -> CadResult<ApiOutcome> {
+        let target = {
+            let drawing = self
+                .drawing()
+                .ok_or_else(|| CadError::InvalidInput("document not open".into()))?;
+            let active_space = self.session.active_space.clone();
+            for id in &ids {
+                let entity = drawing.entity(EntityId(id.0)).ok_or_else(|| {
+                    CadError::InvalidInput(format!("cad_api.unknown_object: {}", id.0))
+                })?;
+                if entity.space != active_space {
+                    return Err(CadError::InvalidInput(format!(
+                        "api.invalid_argument: objectIds.space: {}",
+                        id.0
+                    )));
+                }
+            }
+            ApiTarget {
+                document: self.document_id,
+                database: drawing.id(),
+                viewport: self.viewport_id,
+            }
+        };
+        self.application.execute_api(
+            &mut self.session,
+            target,
+            ApiRequest::SelectByObjectIds {
+                ids,
+                mode: SelectionMode::Replace,
+            },
+        )
     }
 }
 

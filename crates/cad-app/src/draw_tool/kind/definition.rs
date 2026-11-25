@@ -738,6 +738,26 @@ pub enum DrawToolKind {
     /// refuses a body whose lift needs non-planar surfaces with
     /// `solid.lift_requires_planar`). Work-only.
     ChamferEdge,
+    /// `PRESSPULL`: one pixel pick on a face of the selected exact solid moves
+    /// that face along its outward normal by the session typed distance
+    /// ([`super::ToolParameter::PressPullDistance`], signed).
+    ///
+    /// The kernel resolves the nearest **trimmed face** from the seed
+    /// (`solid.face_not_found` when none is within its tolerance) and keeps the
+    /// body valid. There is **no** face highlight and no preview geometry, so the
+    /// tool must not imply either. Deliberate subset (NOT IMPLEMENTED): pulling a
+    /// 2D profile into a new body, multiple simultaneous faces, and drag-driven
+    /// magnitude (the typed distance is the only magnitude). Work-only.
+    PressPull,
+    /// `EXTRUDE`: the selected closed planar profile extruded into a new exact
+    /// solid, by the signed session distance
+    /// ([`super::ToolParameter::ExtrudeDistance`]).
+    ///
+    /// Zero points: the selection is the whole input. Supported profiles are
+    /// LINEs forming one closed chain, one closed straight LWPOLYLINE, or one
+    /// CIRCLE, all in a plane parallel to XY; anything else is refused by name
+    /// (see `app_extrude`). Work-only.
+    Extrude,
     /// BREAK: pick one LINE/ARC/CIRCLE/SPLINE (the first click is also the
     /// **first break point**) and then click the second break point.
     ///

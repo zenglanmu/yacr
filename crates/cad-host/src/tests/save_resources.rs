@@ -332,7 +332,7 @@ fn a_document_without_the_flag_collects_nothing_and_does_not_move_the_revision()
     // header before encoding; that is the save path's clock, not the resource
     // collector. Everything else must be byte-for-byte the pre-save snapshot.
     let mut written = writes[0].clone();
-    let mut expected = before.clone();
+    let expected = before.clone();
     assert!(
         written
             .header

@@ -46,6 +46,17 @@ export type {
   RuntimeNamespace,
 } from './runtime.ts';
 
+export { createUiNamespace } from './ui.ts';
+export type {
+  UiContribution,
+  UiGroup,
+  UiItem,
+  UiMenu,
+  UiNamespace,
+  UiRegistration,
+  UiTrayPanel,
+} from './ui.ts';
+
 export {
   addPoints,
   createGeometryLibrary,

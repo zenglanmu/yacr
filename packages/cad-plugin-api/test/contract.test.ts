@@ -54,14 +54,14 @@ function namespaceNames(value: unknown): readonly unknown[] {
   });
 }
 
-test('the table is 17 host operations: one pending and 16 served', () => {
-  assert.equal(API_OPERATIONS.length, 17, 'the v1 descriptor has 17 host-operation rows');
+test('the table is 18 host operations: one pending and 17 served', () => {
+  assert.equal(API_OPERATIONS.length, 18, 'the v1 descriptor has 18 host-operation rows');
   const supported = API_OPERATIONS.filter((row) => row.status === 'supported').map(
     (row) => `${row.namespace}.${row.operation}`,
   );
-  // Sixteen capabilities are served in this build: the reflected reads (the
-  // `cad_api_call` lane), the live-session operations and the editor prompts (the
-  // `cad_api_submit` lane). Widening the set is a contract change.
+  // Seventeen capabilities are served in this build: the reflected reads (the
+  // `cad_api_call` lane), the live-session operations and the editor prompts plus
+  // `setSelection` (the `cad_api_submit` lane). Widening the set is a contract change.
   assert.deepEqual(supported, [
     'ApplicationServices.documentManager.mdiActiveDocument',
     'ApplicationServices.documentManager.documents',
@@ -79,6 +79,7 @@ test('the table is 17 host operations: one pending and 16 served', () => {
     'EditorInput.editor.getKeyword',
     'EditorInput.editor.selectAll',
     'EditorInput.editor.currentSelection',
+    'EditorInput.editor.setSelection',
   ]);
   const pending = API_OPERATIONS.filter((row) => row.status === 'pending');
   assert.deepEqual(

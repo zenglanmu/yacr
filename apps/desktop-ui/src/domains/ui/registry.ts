@@ -62,6 +62,10 @@ function nonEmpty(value: unknown): value is string {
 function validItem(value: unknown): value is RibbonItem {
   if (!isRecord(value)) return false;
   if (!nonEmpty(value['id']) || !nonEmpty(value['labelKey']) || !nonEmpty(value['icon'])) return false;
+  // Plugin contributions ship literal text because they cannot add catalog rows;
+  // host-owned items omit it and keep resolving through `labelKey`.
+  if (value['label'] !== undefined && !nonEmpty(value['label'])) return false;
+  if (value['pendingText'] !== undefined && !nonEmpty(value['pendingText'])) return false;
   // Exactly one dispatch token, or none for a labelled pending item that names
   // its own sentence. Two tokens would make dispatch order undefined.
   const tokens = ['command', 'standardView', 'action'].filter(key => nonEmpty(value[key]));
@@ -76,6 +80,7 @@ function validItem(value: unknown): value is RibbonItem {
 function validPanel(value: unknown): value is RibbonPanel {
   if (!isRecord(value)) return false;
   if (!nonEmpty(value['id']) || !nonEmpty(value['titleKey'])) return false;
+  if (value['title'] !== undefined && !nonEmpty(value['title'])) return false;
   if (!Array.isArray(value['items'])) return false;
   // A pending panel is documented as empty; a live panel needs at least one
   // item. Both are checked so an extension cannot ship a titled empty box.
@@ -86,6 +91,7 @@ function validPanel(value: unknown): value is RibbonPanel {
 function validTab(value: unknown): value is RibbonTab {
   if (!isRecord(value)) return false;
   if (!nonEmpty(value['id']) || !nonEmpty(value['labelKey'])) return false;
+  if (value['label'] !== undefined && !nonEmpty(value['label'])) return false;
   return Array.isArray(value['panels']) && value['panels'].every(validPanel);
 }
 
@@ -96,6 +102,8 @@ function validTrayPanel(value: unknown): value is TrayPanel {
   if (typeof kind !== 'string') return false;
   const kinds = ['entityInfo', 'components', 'styles', 'tags', 'scenes', 'instructor', 'pending'];
   if (!kinds.includes(kind)) return false;
+  if (value['title'] !== undefined && !nonEmpty(value['title'])) return false;
+  if (value['pendingText'] !== undefined && !nonEmpty(value['pendingText'])) return false;
   // Only the pending body needs a sentence; a real body carries its own copy.
   if (kind === 'pending') return nonEmpty(value['pendingKey']);
   return value['pendingKey'] === undefined;

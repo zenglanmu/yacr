@@ -273,10 +273,10 @@ test('add === false records nothing', async () => {
 });
 
 test('the creatable-type set is closed', () => {
-  assert.deepEqual(SUPPORTED_NEW_ENTITY_TYPES, ['Line', 'Circle', 'Arc']);
+  assert.deepEqual(SUPPORTED_NEW_ENTITY_TYPES, ['Line', 'Circle', 'Arc', 'Polyline', 'DBText']);
   const manager = managerFor(fakeBridge());
   const transaction = manager.startTransaction({ expectedRevision: 1 });
-  for (const typeName of ['Polyline', 'DBText', 'MText', '', 'line']) {
+  for (const typeName of ['MText', 'Mesh', 'Insert', '', 'line']) {
     expectSyncCode(
       () =>
         transaction.addNewlyCreatedDBObject(
@@ -286,6 +286,48 @@ test('the creatable-type set is closed', () => {
       'api.invalid_argument: typeName',
     );
   }
+});
+
+test('polyline and DBText inserts keep their host payloads', async () => {
+  const fake = fakeBridge(() => ({ revision: 2, created: ['1', '2'] }));
+  const manager = managerFor(fake);
+  const transaction = manager.startTransaction({ expectedRevision: 1 });
+  transaction.addNewlyCreatedDBObject(
+    {
+      typeName: 'Polyline',
+      layer: '0',
+      space: 'model',
+      parameters: { points: [[0, 0, 0], [10, 0, 0], [10, 10, 0]], closed: false },
+    },
+    true,
+  );
+  transaction.addNewlyCreatedDBObject(
+    {
+      typeName: 'DBText',
+      layer: '0',
+      space: 'model',
+      parameters: { value: 'Roof', origin: [0, 0, 0], height: 2.5, rotation: 0 },
+    },
+    true,
+  );
+  const result = await transaction.commit();
+  assert.deepEqual(result, { applied: true, revision: 2, created: ['1', '2'] });
+  assert.deepEqual(parametersOf(fake.mutations[0])['edits'], [
+    {
+      kind: 'insert',
+      typeName: 'Polyline',
+      layer: '0',
+      space: 'model',
+      parameters: { points: [[0, 0, 0], [10, 0, 0], [10, 10, 0]], closed: false },
+    },
+    {
+      kind: 'insert',
+      typeName: 'DBText',
+      layer: '0',
+      space: 'model',
+      parameters: { value: 'Roof', origin: [0, 0, 0], height: 2.5, rotation: 0 },
+    },
+  ]);
 });
 
 test('one transaction may not edit one entity twice', () => {

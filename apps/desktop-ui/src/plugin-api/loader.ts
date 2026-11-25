@@ -28,6 +28,7 @@ import type {
 } from '../../../../packages/cad-plugin-api/src/index.ts';
 import { registerPluginCommand, unregisterPluginCommand } from './commands.ts';
 import { openPluginApi } from './session.ts';
+import { installPluginUi, removePluginUi } from './ui.ts';
 import type { PluginApiDeps } from './session.ts';
 
 /** A loaded, activated plugin and the one call that retires it. */
@@ -105,6 +106,7 @@ export async function loadPluginModule(
   // exists; the hook refuses before that rather than installing a run that has no
   // plugin to run against.
   const names = new Set<string>();
+  const uiIds = new Set<string>();
   let context: PluginContext | null = null;
 
   const session = await openPluginApi({
@@ -130,6 +132,14 @@ export async function loadPluginModule(
       names.delete(name);
       unregisterPluginCommand(name);
     },
+    onUiRegister: (registration): void => {
+      installPluginUi(registration);
+      uiIds.add(registration.id);
+    },
+    onUiUnregister: (id: string): void => {
+      uiIds.delete(id);
+      removePluginUi(id);
+    },
   });
 
   const built: PluginContext = {
@@ -144,6 +154,8 @@ export async function loadPluginModule(
   } catch (cause) {
     for (const name of [...names]) unregisterPluginCommand(name);
     names.clear();
+    for (const id of [...uiIds]) removePluginUi(id);
+    uiIds.clear();
     throw loadFailed('activate', cause);
   }
 
@@ -155,9 +167,12 @@ export async function loadPluginModule(
       if (deactivated) return;
       deactivated = true;
       // Commands go first: a dispatch that raced the unload must not reach a
-      // plugin that is being torn down.
+      // plugin that is being torn down. Its UI goes with them, so no contribution
+      // outlives the plugin that registered it.
       for (const name of [...names]) unregisterPluginCommand(name);
       names.clear();
+      for (const id of [...uiIds]) removePluginUi(id);
+      uiIds.clear();
       if (plugin.deactivate !== undefined) await plugin.deactivate(built);
     },
   };

@@ -113,4 +113,39 @@ pub struct CadToolParams {
     /// **first phase** only — all three hand the same crossing window to the same
     /// planner.
     pub stretch_window: Option<f64>,
+    /// LINE's typed length in world units, projected only while a LINE capture is
+    /// active; `0` is the "no typed length" sentinel (`null` for every other
+    /// tool).
+    pub line_length: Option<f64>,
+    /// LINE's typed direction in degrees, projected only while a LINE capture is
+    /// active; `0` means "keep the cursor direction" (`null` for every other
+    /// tool).
+    pub line_angle: Option<f64>,
+    /// RECTANG's typed width in world units, projected only while a RECTANG
+    /// capture is active; `0` keeps the cursor's x extent (`null` otherwise).
+    pub rect_width: Option<f64>,
+    /// RECTANG's typed height in world units, projected only while a RECTANG
+    /// capture is active; `0` keeps the cursor's y extent (`null` otherwise).
+    pub rect_height: Option<f64>,
+    /// CIRCLE's typed radius in world units, projected only while a CIRCLE
+    /// capture is active; `0` keeps the cursor-defined radius (`null` otherwise).
+    pub circle_radius: Option<f64>,
+    /// ROTATE's typed absolute angle in degrees, projected only while a ROTATE
+    /// capture is active; `0` keeps the cursor-defined angle (`null` otherwise).
+    pub rotate_angle: Option<f64>,
+    /// MOVE's typed distance in world units, projected only while a MOVE capture
+    /// is active; `0` keeps the cursor-defined displacement (`null` otherwise).
+    pub move_distance: Option<f64>,
+    /// SCALE's typed factor, projected only while a SCALE capture is active; `0`
+    /// keeps the cursor-defined factor (`null` otherwise).
+    pub scale_factor: Option<f64>,
+    /// OFFSET's typed distance in world units, projected only while an OFFSET
+    /// capture is active; `0` keeps the session's stored mode (`null` otherwise).
+    pub offset_distance: Option<f64>,
+    /// PRESSPULL's signed distance in world units, projected only while a
+    /// PRESSPULL capture is active; `0` is unset (`null` otherwise).
+    pub press_pull_distance: Option<f64>,
+    /// EXTRUDE's signed distance in world units, projected only while an EXTRUDE
+    /// capture is active; `0` is unset (`null` otherwise).
+    pub extrude_distance: Option<f64>,
 }

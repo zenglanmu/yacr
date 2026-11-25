@@ -617,9 +617,10 @@ fn text_rotation_and_mtext_attachment_are_appended_after_the_gradient_members() 
             .validate(parameter.default_value())
             .unwrap_or_else(|error| panic!("{key} default refused: {error}"));
     }
-    // 36 once STRETCH's crossing-window mode was appended (slot 35).
-    assert_eq!(ToolParameter::COUNT, 36);
-    assert_eq!(ToolParameter::ALL.len(), 36);
+    // 47 once LINE's, RECTANG's, CIRCLE's, ROTATE's, MOVE's, SCALE's, OFFSET's,
+    // PRESSPULL's and EXTRUDE's typed dimensions were appended (slots 36-46).
+    assert_eq!(ToolParameter::COUNT, 47);
+    assert_eq!(ToolParameter::ALL.len(), 47);
     assert_eq!(
         ToolParameter::TextRotation.default_value(),
         ToolValue::Number(TEXT_DEFAULT_ROTATION_DEGREES)
@@ -765,4 +766,83 @@ fn polyline_width_is_a_finite_non_negative_number_appended_last() {
             .unwrap_err(),
         "polylineWidth",
     );
+}
+
+#[test]
+fn line_dimensions_are_appended_after_every_existing_member() {
+    for (parameter, key, index) in [
+        (ToolParameter::LineLength, "lineLength", 36),
+        (ToolParameter::LineAngle, "lineAngle", 37),
+        (ToolParameter::RectWidth, "rectWidth", 38),
+        (ToolParameter::RectHeight, "rectHeight", 39),
+        (ToolParameter::CircleRadius, "circleRadius", 40),
+        (ToolParameter::RotateAngle, "rotateAngle", 41),
+        (ToolParameter::MoveDistance, "moveDistance", 42),
+        (ToolParameter::ScaleFactor, "scaleFactor", 43),
+        (ToolParameter::OffsetDistance, "offsetDistance", 44),
+        (ToolParameter::PressPullDistance, "pressPullDistance", 45),
+        (ToolParameter::ExtrudeDistance, "extrudeDistance", 46),
+    ] {
+        assert_eq!(parameter.key(), key);
+        assert_eq!(ToolParameter::from_key(key), Some(parameter));
+        assert_eq!(parameter.index(), index, "{key} slot");
+        assert_eq!(parameter.kind(), ToolValueKind::Number, "{key}");
+        assert_eq!(
+            parameter.default_value(),
+            ToolValue::Number(0.0),
+            "{key} default"
+        );
+        parameter
+            .validate(parameter.default_value())
+            .unwrap_or_else(|error| panic!("{key} default refused: {error}"));
+    }
+    // Length: `0` is the unset sentinel, a positive value is a real distance.
+    assert!(ToolParameter::LineLength
+        .validate(ToolValue::Number(0.0))
+        .is_ok());
+    assert!(ToolParameter::LineLength
+        .validate(ToolValue::Number(2.5))
+        .is_ok());
+    for refused in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_refusal_names_parameter(
+            ToolParameter::LineLength
+                .validate(ToolValue::Number(refused))
+                .unwrap_err(),
+            "lineLength",
+        );
+    }
+    // Angle: any finite degrees value, no implicit wrap.
+    assert!(ToolParameter::LineAngle
+        .validate(ToolValue::Number(-30.0))
+        .is_ok());
+    assert!(ToolParameter::LineAngle
+        .validate(ToolValue::Number(0.0))
+        .is_ok());
+    for refused in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_refusal_names_parameter(
+            ToolParameter::LineAngle
+                .validate(ToolValue::Number(refused))
+                .unwrap_err(),
+            "lineAngle",
+        );
+    }
+    // RECTANG extents and CIRCLE radius: same non-negative rule as the LINE
+    // length.
+    for parameter in [
+        ToolParameter::RectWidth,
+        ToolParameter::RectHeight,
+        ToolParameter::CircleRadius,
+        ToolParameter::MoveDistance,
+        ToolParameter::ScaleFactor,
+        ToolParameter::OffsetDistance,
+    ] {
+        assert!(parameter.validate(ToolValue::Number(0.0)).is_ok());
+        assert!(parameter.validate(ToolValue::Number(4.5)).is_ok());
+        for refused in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_refusal_names_parameter(
+                parameter.validate(ToolValue::Number(refused)).unwrap_err(),
+                parameter.key(),
+            );
+        }
+    }
 }

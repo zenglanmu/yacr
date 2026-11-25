@@ -181,7 +181,7 @@ test('the ribbon reads the launcher target from the model, never from a panel id
   assert.equal(ribbon.includes("panel.id === 'layers'"), false);
   // A launcher with no target says why in its own words, not with the generic
   // "command not available" sentence it used to reuse.
-  assert.ok(ribbon.includes('title={t(PANEL_DIALOG_MISSING_KEY, { panel: t(panel.titleKey) })}'));
+  assert.ok(ribbon.includes('title={t(PANEL_DIALOG_MISSING_KEY, { panel: panelTitle(t, panel) })}'));
   const launcherBlock = ribbon.slice(ribbon.indexOf('function PanelLauncher'), ribbon.indexOf('function Panel('));
   assert.equal(launcherBlock.includes('ribbon.command_unsupported'), false);
 });

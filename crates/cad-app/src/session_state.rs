@@ -785,26 +785,6 @@ impl SessionState {
         }
     }
 
-    /// Attach the session side count to both POLYGON previews and constrain the
-    /// pending point entry (grid/ortho) so the rubber band matches the committed
-    /// point; a pending entity pick stays raw.
-    fn annotate_draw_preview(&self, mut preview: DrawPreview) -> DrawPreview {
-        preview.polygon_sides = matches!(
-            preview.kind,
-            DrawToolKind::Polygon | DrawToolKind::PolygonCircumscribed
-        )
-        .then_some(self.polygon_sides());
-        let pending_pick = matches!(
-            &self.tool,
-            ToolState::Drawing(capture) if capture.tool.requires_entity_pick()
-        );
-        if !pending_pick {
-            preview.cursor =
-                self.constrained_cursor(preview.points.last().copied(), preview.cursor);
-        }
-        preview
-    }
-
     /// Apply the session drafting constraints to a measurement preview cursor.
     ///
     /// The measurement overlay builds its rubber band from
@@ -822,13 +802,6 @@ impl SessionState {
         }
         preview.cursor = self.constrained_cursor(preview.points.last().copied(), preview.cursor);
         preview
-    }
-
-    pub fn draw_intent(&self) -> CadResult<DrawIntent> {
-        match &self.tool {
-            ToolState::Drawing(capture) => capture.tool.intent(),
-            _ => Err(CadError::InvalidInput("no drawing tool is active".into())),
-        }
     }
 
     /// Submit the terminal text of a text tool (ADR 0019 decision A.1).
@@ -912,5 +885,6 @@ impl SessionState {
 
 mod inspection;
 mod tool_authorization;
+mod typed_dimensions;
 
 pub(crate) use tool_authorization::authorizing_commands;

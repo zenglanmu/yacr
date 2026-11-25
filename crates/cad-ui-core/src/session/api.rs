@@ -211,13 +211,14 @@ mod tests {
                 );
             }
         }
-        // Sixteen operations are served in this build: the reflected reads on the
-        // read lane; the live-session operations and the editor prompts on the
-        // mutating lane. Pure value helpers and the manifest parser are package
-        // features, not descriptor rows, so they never appear here.
+        // Seventeen operations are served in this build: the reflected reads on
+        // the read lane; the live-session operations, the editor prompts and
+        // `setSelection` on the mutating lane. Pure value helpers and the manifest
+        // parser are package features, not descriptor rows, so they never appear
+        // here.
         assert_eq!(
-            supported, 16,
-            "this build serves exactly sixteen host operations"
+            supported, 17,
+            "this build serves exactly seventeen host operations"
         );
     }
 

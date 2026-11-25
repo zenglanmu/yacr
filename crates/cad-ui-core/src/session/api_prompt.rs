@@ -34,7 +34,8 @@ use cad_app::plugin_prompt::{ApiPrompt, ApiPromptDefault, ApiPromptKind, ApiProm
 
 use super::api_call::{
     api_call_invalid_argument, api_call_unknown, validate_request_id, CadApiOutcome,
-    CadApiSubmission, API_CALL_EDITOR_NAMESPACE, API_CALL_NO_DOCUMENT, API_SUBMIT_INVALID_REQUEST,
+    CadApiSubmission, API_CALL_EDITOR_NAMESPACE, API_CALL_NO_DOCUMENT, API_CALL_SET_SELECTION,
+    API_SUBMIT_INVALID_REQUEST,
 };
 
 /// The prompt operations this build serves on the submit lane.
@@ -274,6 +275,12 @@ impl super::CadSession {
         if submission.operation == API_CALL_SELECT_ALL {
             let outcome = self
                 .select_all_outcome(submission.parameters.as_ref())
+                .with_request_id(submission.request_id.clone());
+            return EditorSubmit::Settled(Box::new(outcome));
+        }
+        if submission.operation == API_CALL_SET_SELECTION {
+            let outcome = self
+                .set_selection_outcome(submission.parameters.as_ref())
                 .with_request_id(submission.request_id.clone());
             return EditorSubmit::Settled(Box::new(outcome));
         }

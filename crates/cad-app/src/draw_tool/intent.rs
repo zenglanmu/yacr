@@ -548,6 +548,21 @@ pub enum DrawIntent {
     /// ([`super::ToolParameter::ChamferDistanceA`] / `B`), read at execute time,
     /// so the intent carries no distance.
     ChamferEdge { body: SelectionRef, seed: Point3 },
+    /// `PRESSPULL`: move one face of the selected exact solid body by the signed
+    /// session distance.
+    ///
+    /// `body` is the **collapsed** body ref (a face sub-element resolves to its
+    /// body; an instance path is already refused by the host). `seed` is the
+    /// pixel pick's hit point, never a work-plane projection. The distance is the
+    /// session typed channel ([`super::ToolParameter::PressPullDistance`]), read
+    /// at execute time, so the intent carries no distance.
+    PressPull { body: SelectionRef, seed: Point3 },
+    /// `EXTRUDE`: extrude the selected closed planar profile into a new solid.
+    ///
+    /// Carries no field: the selection snapshot the caller supplies is the whole
+    /// input and the signed distance is the session typed channel
+    /// ([`super::ToolParameter::ExtrudeDistance`]), read by the command layer.
+    Extrude,
     /// DIVIDE the one pre-selected curve into equal arc-length parts, placing
     /// POINT marks at the division parameters (2026-11-01).
     ///

@@ -62,6 +62,17 @@ pub const SOLID_UNSUPPORTED: &str = "solid.unsupported";
 /// kernel. Distinct from [`SOLID_UNSUPPORTED`] so a caller can tell "this
 /// modeler cannot carry curved geometry" apart from "this family is unknown".
 pub const SOLID_NURBS_NOT_SUPPORTED: &str = "solid.nurbs_not_supported";
+/// No face of the lifted body lies within the selector's resolution tolerance
+/// of the point, so nothing was picked.
+pub const SOLID_FACE_NOT_FOUND: &str = "solid.face_not_found";
+/// The kernel refused the requested face move itself (no room, a collapsing
+/// offset, folds), so this build cannot move that face by that distance
+/// exactly. Reported as `Unsupported`, never as an approximate body.
+pub const SOLID_OFFSET_FACE_FAILED: &str = "solid.offset_face_failed";
+/// The kernel refused the requested profile extrusion (open/invalid profile, a
+/// zero-area loop, a cap it cannot build), so this build cannot make that solid
+/// exactly. Reported as `Unsupported`, never as an approximate body.
+pub const SOLID_EXTRUDE_PROFILE_FAILED: &str = "solid.extrude_profile_failed";
 /// The kernel ran but produced no usable body (for example an empty boolean
 /// result). Never an empty success.
 pub const SOLID_FAILED: &str = "solid.failed";

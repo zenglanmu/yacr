@@ -54,7 +54,7 @@ test('hostInfo() calls cad_api_status once and merges the status snapshot', asyn
   assert.equal(info.apiVersion, 1);
   assert.equal(info.carrier, 'dom-canvas');
   assert.equal(info.documentOwner, 'wasm');
-  assert.equal(info.operations.length, 17);
+  assert.equal(info.operations.length, 18);
 });
 
 test('hostInfo() reports unknown/none before any status is observed', async () => {
@@ -110,12 +110,13 @@ test('this build implements every served operation (reads, live session, prompts
     'EditorInput.editor.getKeyword',
     'EditorInput.editor.selectAll',
     'EditorInput.editor.currentSelection',
+    'EditorInput.editor.setSelection',
   ]);
 });
 
 test('every supported descriptor row has an adapter implementation', async () => {
   // The one rule that keeps the descriptor honest: a row may only be
-  // `supported` if this adapter can actually serve it. It has sixteen rows to
+  // `supported` if this adapter can actually serve it. It has seventeen rows to
   // check today and goes red the moment another row flips without a `case` (or a
   // mutating implementation) in `bridge.ts` - which is exactly when it must be
   // caught.
@@ -568,7 +569,7 @@ test('openPluginApi assembles the client from the real contract JSON', async () 
   const session = await openPluginApi({ invoke, status: () => statusWith('native-below', 'native') });
 
   assert.deepEqual(commands, ['cad_api_status'], 'one snapshot call per session');
-  assert.equal(session.host.operations.length, 17);
+  assert.equal(session.host.operations.length, 18);
   assert.equal(session.host.carrier, 'native-below');
 
   // Pure, always-local operations work without touching the host.

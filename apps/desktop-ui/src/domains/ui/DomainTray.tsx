@@ -119,7 +119,7 @@ function InstructorBody() {
 
 function PendingBody({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
-  return <p className="concept-panel__hint">{t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
+  return <p className="concept-panel__hint">{panel.pendingText ?? t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
 }
 
 function Body({ panel }: { readonly panel: TrayPanel }) {
@@ -149,7 +149,7 @@ function Section({ panel }: { readonly panel: TrayPanel }) {
       open={open}
       onToggle={event => setOpen(event.currentTarget.open)}
     >
-      <summary className="concept-tray__summary">{t(panel.titleKey)}</summary>
+      <summary className="concept-tray__summary">{panel.title ?? t(panel.titleKey)}</summary>
       <div className="concept-tray__body"><Body panel={panel} /></div>
     </details>
   );

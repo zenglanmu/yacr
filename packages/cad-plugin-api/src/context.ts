@@ -27,6 +27,8 @@ import type { CadApiHostInfo, CadHostBridge } from './host-bridge.ts';
 import { createWire, errorFromBridgeFailure, isRecord } from './internal/capability.ts';
 import { createRuntimeNamespace } from './runtime.ts';
 import type { CommandRegistration, RuntimeNamespace } from './runtime.ts';
+import { createUiNamespace } from './ui.ts';
+import type { UiNamespace, UiRegistration } from './ui.ts';
 
 /** Everything a plugin may call. */
 export interface CadApi {
@@ -36,18 +38,31 @@ export interface CadApi {
   readonly colors: ColorLibrary;
   /** Command registration; client-local, reported to the host's hook. */
   readonly runtime: RuntimeNamespace;
+  /** Declarative menu/toolbar/tray contributions; client-local. */
+  readonly ui: UiNamespace;
 }
 
 /**
- * What the host may hand `createCadApi` so a plugin can register commands.
+ * What the host may hand `createCadApi` so a plugin can extend the host.
  *
  * `onCommandRegister` is the funnel's installation point: without it
  * `runtime.registerCommand` refuses, because the carrier has nowhere to dispatch
- * the command. `onCommandUnregister` is its inverse.
+ * the command. `onCommandUnregister` is its inverse. `onUiRegister` /
+ * `onUiUnregister` are the same pair for declarative UI contributions.
  */
 export interface CadApiOptions {
   readonly onCommandRegister?: (registration: CommandRegistration) => void;
   readonly onCommandUnregister?: (name: string) => void;
+  /**
+   * Where a `ui.register` contribution goes.
+   *
+   * Like command registration this is client-local: the host maps the declarative
+   * shape onto its own chrome. Without the hook `ui.register` refuses, because
+   * accepting it would promise a UI that never renders.
+   */
+  readonly onUiRegister?: (registration: UiRegistration) => void;
+  /** The inverse of `onUiRegister`: called with the contribution id. */
+  readonly onUiUnregister?: (id: string) => void;
   /**
    * Where `editor.writeMessage()` puts its text.
    *
@@ -303,7 +318,7 @@ function refuseContradiction(host: CadApiHostInfo): void {
  * Geometry, colors and the manifest parser are package features, not host
  * capabilities: they never cross the wire, need no descriptor row, and are always
  * available. Every host operation is gated against the host's own table and, in
- * this build, refuses by name (all 20 rows are `pending`).
+ * this build, refuses by name when the host does not serve it).
  */
 /**
  * Validate the host hooks. Absent hooks are fine (they mean "no funnel").
@@ -321,11 +336,19 @@ function readOptions(options: CadApiOptions | undefined): CadApiOptions {
   if (onCommandUnregister !== undefined && typeof onCommandUnregister !== 'function') {
     throw invalidArgument('options.onCommandUnregister');
   }
+  const onUiRegister = options.onUiRegister;
+  if (onUiRegister !== undefined && typeof onUiRegister !== 'function') {
+    throw invalidArgument('options.onUiRegister');
+  }
+  const onUiUnregister = options.onUiUnregister;
+  if (onUiUnregister !== undefined && typeof onUiUnregister !== 'function') {
+    throw invalidArgument('options.onUiUnregister');
+  }
   const onMessage = options.onMessage;
   if (onMessage !== undefined && typeof onMessage !== 'function') {
     throw invalidArgument('options.onMessage');
   }
-  return { onCommandRegister, onCommandUnregister, onMessage };
+  return { onCommandRegister, onCommandUnregister, onUiRegister, onUiUnregister, onMessage };
 }
 
 export async function createCadApi(
@@ -360,5 +383,6 @@ export async function createCadApi(
     geometry: createGeometryLibrary(),
     colors: createColorLibrary(),
     runtime: createRuntimeNamespace(hooks),
+    ui: createUiNamespace(hooks),
   };
 }

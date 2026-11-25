@@ -48,19 +48,12 @@ use cad_kernel_adapter::{SolidEdgeSelector, SolidOperationFamily, SolidOutcome};
 use solidcore_ops::{Body, ChamferSecond};
 use solidcore_record::brep::{Brep as Record, Curve, Edge};
 
-use super::{body_outcome, lift, unlift, watched};
+use super::{bbox_diagonal, body_outcome, lift, unlift, watched, PICK_FLOOR, PICK_RELATIVE};
 use crate::error::{self, LiftRefusal};
 use crate::record::{add, dot, length, mul, point, sub};
 use crate::{EDGE_NOT_FOUND, EMPTY_RESULT, LIFT_UNSUPPORTED};
 
 const FAMILY: SolidOperationFamily = SolidOperationFamily::Chamfer;
-
-/// The pick tolerance as a fraction of the body's bounding-box diagonal.
-const SELECT_RELATIVE: f64 = 1e-3;
-
-/// The pick tolerance floor, so a degenerate/zero-extent record still accepts a
-/// point exactly on an edge.
-const SELECT_FLOOR: f64 = 1e-9;
 
 /// Cut the selected edge of `brep` with a straight chamfer.
 pub(crate) fn chamfer(
@@ -80,7 +73,7 @@ pub(crate) fn chamfer(
     };
 
     let at = selector.point();
-    let tolerance = (SELECT_RELATIVE * bbox_diagonal(&record)).max(SELECT_FLOOR);
+    let tolerance = (PICK_RELATIVE * bbox_diagonal(&record)).max(PICK_FLOOR);
     let Some((edge, found)) = nearest_edge(&record, at) else {
         return Ok(not_found(
             "the lifted body has no pickable straight edge near that point (a seam, which only \
@@ -217,27 +210,6 @@ fn point_segment(at: Point3, start: Point3, end: Point3) -> f64 {
         0.0
     };
     length(sub(at, add(start, mul(along, t))))
-}
-
-/// The lifted body's bounding-box diagonal, the scale the pick tolerance uses.
-fn bbox_diagonal(record: &Record) -> f64 {
-    let mut min = [f64::INFINITY; 3];
-    let mut max = [f64::NEG_INFINITY; 3];
-    for vertex in &record.vertices {
-        for (axis, value) in vertex.point.iter().enumerate() {
-            min[axis] = min[axis].min(*value);
-            max[axis] = max[axis].max(*value);
-        }
-    }
-    let mut squared = 0.0;
-    for axis in 0..3 {
-        let extent = max[axis] - min[axis];
-        if !extent.is_finite() {
-            return 0.0;
-        }
-        squared += extent * extent;
-    }
-    squared.sqrt()
 }
 
 #[cfg(test)]

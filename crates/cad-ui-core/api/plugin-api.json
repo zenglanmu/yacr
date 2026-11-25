@@ -18,6 +18,7 @@
     { "namespace": "EditorInput", "operation": "editor.getInteger", "status": "supported" },
     { "namespace": "EditorInput", "operation": "editor.getKeyword", "status": "supported" },
     { "namespace": "EditorInput", "operation": "editor.selectAll", "status": "supported" },
-    { "namespace": "EditorInput", "operation": "editor.currentSelection", "status": "supported" }
+    { "namespace": "EditorInput", "operation": "editor.currentSelection", "status": "supported" },
+    { "namespace": "EditorInput", "operation": "editor.setSelection", "status": "supported" }
   ]
 }

@@ -276,6 +276,12 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   // solid. The single sentence names the pick and the two distance controls; it
   // must not promise an edge highlight or a preview (neither exists).
   'draw.chamferedge': ['tool.prompt.chamferedge.pick_edge'],
+  // PRESSPULL is the same one-pick shape over a selected exact solid; the
+  // sentence names the face pick and must not promise a highlight or preview.
+  'draw.presspull': ['tool.prompt.presspull.pick_face'],
+  // EXTRUDE is zero-point and pre-selection based: the sentence names the
+  // profile and the typed distance, never a pick.
+  'draw.extrude': ['tool.prompt.extrude.profile'],
   'draw.ray': [
     'tool.prompt.ray.base',
     'tool.prompt.ray.through',
@@ -520,6 +526,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // ("Dimension defined") would be false, so it names the cut that Enter
   // performs.
   'draw.chamferedge': 'tool.prompt.chamferedge.ready',
+  // PRESSPULL is complete once its one face pick lands: Enter moves the face by
+  // the typed distance, so the ready copy names that move.
+  'draw.presspull': 'tool.prompt.presspull.ready',
+  'draw.extrude': 'tool.prompt.extrude.ready',
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
   // STRETCH's complement is four picks (rectangle) or a closed window ring plus
   // two displacement picks (polygon/lasso), so once the complement is captured

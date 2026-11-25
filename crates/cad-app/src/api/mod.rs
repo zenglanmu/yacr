@@ -8,7 +8,8 @@ use crate::{
 use cad_db::{ChangeSet, DbEntity, DbObject, DrawingDatabase};
 use cad_domain::{
     CadError, CadResult, DatabaseId, DocumentId, EntityId, LayerId, ObjectId, Point3, Revision,
-    SelectionRef, SemanticGeometry, SpaceId, Transform3, ViewportId,
+    SelectionRef, SemanticGeometry, SpaceId, StyleId, TextAlignH, TextAlignV, TextLineSpacing,
+    Transform3, ViewportId,
 };
 use cad_history::{drawing_patch, drawing_patch_deleted, DrawingUndoRecord};
 use std::sync::Arc;
@@ -67,6 +68,20 @@ pub enum NewEntity {
         radius: f64,
         start_angle: f64,
         end_angle: f64,
+    },
+    /// A straight-segment polyline. `closed` joins the last point to the first;
+    /// bulges and a stroke width are not part of the plugin creation set.
+    Polyline {
+        points: Vec<Point3>,
+        closed: bool,
+    },
+    /// A single-line text run in the `Standard` style (`StyleId(0)`).
+    Text {
+        value: String,
+        origin: Point3,
+        height: f64,
+        /// Rotation in radians (the database's own unit).
+        rotation: f64,
     },
 }
 
@@ -598,6 +613,48 @@ fn validate_new_entity(entity: &NewEntity) -> CadResult<()> {
                 ));
             }
         }
+        NewEntity::Polyline { points, closed } => {
+            let minimum = if *closed { 3 } else { 2 };
+            if points.len() < minimum {
+                return Err(CadError::InvalidInput(format!(
+                    "line polyline needs at least {minimum} points"
+                )));
+            }
+            if !points.iter().all(|point| finite_point(*point)) {
+                return Err(CadError::InvalidInput(
+                    "polyline points must be finite".into(),
+                ));
+            }
+            if points.windows(2).any(|pair| pair[0] == pair[1])
+                || (*closed && points.first() == points.last())
+            {
+                return Err(CadError::InvalidInput(
+                    "polyline segments must be non-degenerate".into(),
+                ));
+            }
+        }
+        NewEntity::Text {
+            value,
+            origin,
+            height,
+            rotation,
+        } => {
+            if !finite_point(*origin) || !height.is_finite() || *height <= 0.0 {
+                return Err(CadError::InvalidInput(
+                    "text origin and positive height must be finite".into(),
+                ));
+            }
+            if !rotation.is_finite() {
+                return Err(CadError::InvalidInput(
+                    "text rotation must be finite".into(),
+                ));
+            }
+            if value.trim().is_empty() {
+                return Err(CadError::InvalidInput(
+                    "text value must not be empty".into(),
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -629,6 +686,31 @@ fn new_geometry(entity: &NewEntity) -> SemanticGeometry {
             radius: *radius,
             start: *start_angle,
             sweep: (end_angle - start_angle).rem_euclid(std::f64::consts::TAU),
+        },
+        NewEntity::Polyline { points, closed } => SemanticGeometry::Polyline {
+            points: points.clone(),
+            bulges: Vec::new(),
+            closed: *closed,
+            width: 0.0,
+        },
+        NewEntity::Text {
+            value,
+            origin,
+            height,
+            rotation,
+        } => SemanticGeometry::Text {
+            text: value.clone(),
+            position: *origin,
+            style: StyleId(0),
+            height: *height,
+            rotation: *rotation,
+            font: None,
+            h_align: TextAlignH::Left,
+            v_align: TextAlignV::Baseline,
+            wrap_width: None,
+            width_factor: 1.0,
+            line_spacing: TextLineSpacing::default(),
+            mirrored: false,
         },
     }
 }

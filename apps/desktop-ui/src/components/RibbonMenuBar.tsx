@@ -92,6 +92,8 @@ interface RowView {
   readonly kind: 'caption' | 'item' | 'panel';
   /** The catalog key of the label (item label, panel title, or caption). */
   readonly labelKey: string;
+  /** Literal text from a plugin contribution; wins over `labelKey`. */
+  readonly label?: string;
   readonly item?: RibbonItem;
   /** Rows this row opens, when it is a submenu parent. */
   readonly children: readonly RibbonMenuRow[];
@@ -128,6 +130,7 @@ function itemView(shell: ShellValue, row: RibbonMenuRow, depth: number, index: n
     id: rowId(depth, index),
     kind: 'item',
     labelKey: row.item.labelKey,
+    ...(row.item.label === undefined ? {} : { label: row.item.label }),
     item: row.item,
     children: row.children,
     // A submenu parent stays operable even when its own command is refused: the
@@ -179,6 +182,7 @@ function tabViews(shell: ShellValue, entries: readonly RibbonMenuEntry[], depth:
         id: rowId(depth, views.length),
         kind: 'panel',
         labelKey: entry.titleKey,
+        ...(entry.title === undefined ? {} : { label: entry.title }),
         children: entry.rows,
         enabled: entry.rows.length > 0,
         hasSubmenu: entry.rows.length > 0,
@@ -195,6 +199,7 @@ function tabViews(shell: ShellValue, entries: readonly RibbonMenuEntry[], depth:
         id: rowId(depth, views.length),
         kind: 'caption',
         labelKey: entry.titleKey,
+        ...(entry.title === undefined ? {} : { label: entry.title }),
         children: [],
         enabled: false,
         hasSubmenu: false,
@@ -638,7 +643,7 @@ export function RibbonMenuBar({
                 }
               }}
             >
-              {t(entry.labelKey)}
+              {entry.label ?? t(entry.labelKey)}
             </button>
           );
         })}
@@ -662,7 +667,9 @@ export function RibbonMenuBar({
       {state && activeTab ? levels.map((rows, depth) => {
         const activeIndex = state.active[depth] ?? -1;
         const parent = depth > 0 ? levels[depth - 1]?.[state.path[depth - 1]] : undefined;
-        const label = parent ? t(parent.labelKey) : t(activeTab.labelKey);
+        const label = parent
+          ? (parent.label ?? t(parent.labelKey))
+          : (activeTab.label ?? t(activeTab.labelKey));
         const anchor = state.anchors[depth] ?? state.anchors[0];
         // The level is capped to the space below its anchor, so placement always
         // opens downward; the CSS max-height stays as the no-JS fallback.
@@ -698,7 +705,7 @@ export function RibbonMenuBar({
                       role="presentation"
                       onMouseEnter={() => closeDeeper(depth)}
                     >
-                      {t(view.labelKey)}
+                      {view.label ?? t(view.labelKey)}
                     </div>
                   </Fragment>
                 );
@@ -729,7 +736,7 @@ export function RibbonMenuBar({
                     {view.item
                       ? <Icon name={view.item.icon as IconName} size={15} />
                       : <span className="ribbon-menu__glyph" aria-hidden="true" />}
-                    <span className="ribbon-menu__label">{t(view.labelKey)}</span>
+                    <span className="ribbon-menu__label">{view.label ?? t(view.labelKey)}</span>
                     {view.item?.command ? <span className="ribbon-menu__command">{view.item.command}</span> : null}
                     <span className="ribbon-menu__chevron" aria-hidden="true">
                       {view.hasSubmenu ? <Icon name="chevronRight" size={13} /> : null}

@@ -948,9 +948,13 @@ impl ExtendedCommandId {
                 | Self::Union
                 | Self::Subtract
                 | Self::Intersect
-                // ADR-0036: CHAMFEREDGE rewrites one exact body in place (one
-                // transaction / one undo step), so it is a drawing write too.
+                // ADR-0036: CHAMFEREDGE and PRESSPULL rewrite one exact body in
+                // place (one transaction / one undo step), so they are drawing
+                // writes too.
                 | Self::ChamferEdge
+                | Self::PressPull
+                // EXTRUDE inserts one new exact body from the selected profile.
+                | Self::Extrude
                 // XEDGES inserts one LINE per stored display-edge segment (one
                 // transaction / one undo step), so it is a drawing write.
                 | Self::Xedges

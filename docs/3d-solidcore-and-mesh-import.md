@@ -68,10 +68,10 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | 能力 | solidcore 入口（示例） | 当前仓库 |
 |---|---|---|
 | 基本体 | `create_box`/`create_sphere`/`create_cylinder`/`create_cone`/`create_torus`/`create_pyramid` | 已接线（C1，七族命令；曲面图元自 P2.1b 起可再 lift） |
-| 拉伸/旋转/扫掠 | `sweep` 模块、`primitive_creation` | 全部拒绝 |
+| 拉伸/旋转/扫掠 | `sweep` 模块、`primitive_creation` | **拉伸已接线**：`SolidOperation::ExtrudeProfile` → `sweep::extrude`，由 `EXTRUDE` 命令把闭合平面轮廓（LINE 闭环 / 闭合直线 LWPOLYLINE / CIRCLE）拉成新的精确实体；部分圆弧壁因中性读回限制被具名拒绝。旋转/放样/扫掠仍无 seam 操作与命令（`REVOLVE`/`LOFT`/`SWEEP`），`FOLLOWME` 仍是具名拒绝 |
 | 布尔 | `boolean_union`/`boolean_difference`/`boolean_intersection`/`boolean_merge`/`non_manifold_boolean` | C2 后台任务；平面体与**曲面体**（P2.1b）都可作为操作数 |
 | 圆角/倒角 | `fillet_edges`/`circular_fillet`/`variable_radius_fillet`/`chamfer_fillet`/`remove_fillet` | P2.0 **平面体单边直线倒角**（`chamfer_sides_ordered`）+ `CHAMFEREDGE` 命令；**圆角无**（`fillet` 仍 false） |
-| 抽壳/偏置 | `api_shell_brep_full`/`offset_brep` | 无 |
+| 抽壳/偏置 | `api_shell_brep_full`/`offset_brep`/`offset_faces` | **单面偏置已接线**（`SolidOperation::OffsetFace` → `offset_faces`，带符号距离，平面与曲面面都可移动），并由 `PRESSPULL` 命令 + 一次面拾取 + `pressPullDistance` 通道接通（2026-11-25）；抽壳仍无（`shell` false） |
 | 精确质量属性 | `brep_mass_properties`/`brep_volume`/`brep_area` | 已接线（C3a）；**曲面体自 P2.1b 起可测**（`nurbs` 能力位承载） |
 | 拓扑遍历 | `Brep::{faces,edges,vertices,loops,shells,regions}` + 公开字段 | 只有中性子集 |
 | 修复 | `heal` 模块 | 无 |
@@ -170,7 +170,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
   （P2.2）。证据只有 Linux 契约/单元（真实固定内核，无 mock）；其它载体 NOT VERIFIED。
   详见 ADR-0036 §7/§10。
 - **拒绝边界（能力是 family 级，不是逐操作数）**：`capabilities().booleans` /
-  `mass_properties` / `chamfer` / `nurbs` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
+  `mass_properties` / `chamfer` / `offset_face` / `nurbs` 为 true 只表示"这一族有实现"，每次调用仍可能对单个操作数返回
   `Unsupported`，调用方必须处理：
   - 曲面操作数**需要** `nurbs` 能力位：模型器声明 `false` ⇒ `solid.nurbs_not_supported`；
     已声明 `true` 但仍不可 lift 的曲面面（无 `(u,v)` box、无精确 pcurve）→ `solid.lift_unsupported`；

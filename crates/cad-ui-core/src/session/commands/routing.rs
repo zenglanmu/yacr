@@ -144,6 +144,17 @@ pub(crate) fn interaction_request_for(
         CommandId::Extended(cad_app::ExtendedCommandId::ChamferEdge) => {
             Some(InteractionRequest::BeginDraw(DrawToolKind::ChamferEdge))
         }
+        // PRESSPULL is the same one-pick tool shape over the selected exact
+        // solid: the pick names a face, and the signed distance is the session
+        // typed channel. The host validates modeler + selection at tool start.
+        CommandId::Extended(cad_app::ExtendedCommandId::PressPull) => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::PressPull))
+        }
+        // EXTRUDE is the zero-point pre-selection shape: the selected closed
+        // profile is the input and the distance is the session typed channel.
+        CommandId::Extended(cad_app::ExtendedCommandId::Extrude) => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::Extrude))
+        }
         CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
         CommandId::ArrayRectangular => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect)),
         CommandId::ArrayPolar => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayPolar)),

@@ -63,7 +63,8 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::BlockDefine
             // CHAMFEREDGE captures the one pixel pick hit point (the kernel's
             // nearest-edge seed).
-            | DrawToolKind::ChamferEdge => 1,
+            | DrawToolKind::ChamferEdge
+            | DrawToolKind::PressPull => 1,
             // WIPEOUT is the open-ended polygon capture: three vertices are the
             // minimum a closed ring needs.
             DrawToolKind::Wipeout => 3,
@@ -77,6 +78,7 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::Hatch
             | DrawToolKind::Divide
             | DrawToolKind::Lengthen
+            | DrawToolKind::Extrude
             | DrawToolKind::ScaleText => 0,
             _ => 2,
         };
@@ -128,6 +130,16 @@ fn required_points_and_selection_are_explicit_per_kind() {
     assert!(DrawToolKind::ChamferEdge.requires_selection());
     assert!(DrawToolKind::ChamferEdge.needs_picked_entities());
     assert!(!DrawToolKind::ChamferEdge.requires_text());
+    assert_eq!(DrawToolKind::PressPull.arity(), PointArity::Exact(1));
+    assert_eq!(DrawToolKind::PressPull.picked_step_count(), 1);
+    assert!(DrawToolKind::PressPull.requires_selection());
+    assert!(DrawToolKind::PressPull.needs_picked_entities());
+    assert!(!DrawToolKind::PressPull.requires_text());
+    assert_eq!(DrawToolKind::Extrude.arity(), PointArity::Exact(0));
+    assert_eq!(DrawToolKind::Extrude.picked_step_count(), 0);
+    assert!(DrawToolKind::Extrude.requires_selection());
+    assert!(!DrawToolKind::Extrude.needs_picked_entities());
+    assert!(!DrawToolKind::Extrude.requires_text());
 }
 
 mod arc;

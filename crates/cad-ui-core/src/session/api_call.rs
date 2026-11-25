@@ -112,6 +112,9 @@ pub const API_CALL_SYMBOL_TABLES: &str = "database.symbolTables";
 /// The reflected read of the current selection's entity ids (no parameters).
 pub const API_CALL_CURRENT_SELECTION: &str = "editor.currentSelection";
 
+/// Replace the session selection with the given object ids (submit lane).
+pub const API_CALL_SET_SELECTION: &str = "editor.setSelection";
+
 /// Stable refusal of a database read while the session holds no document.
 ///
 /// Distinct from [`CAD_WAITING`]: the snapshot exists and says there is no

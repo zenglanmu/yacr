@@ -197,6 +197,8 @@ impl SolidModeler for FakeModeler {
             booleans: false,
             mass_properties: false,
             chamfer: true,
+            offset_face: false,
+            extrude_profile: false,
             fillet: false,
             shell: false,
             nurbs: false,
@@ -532,6 +534,76 @@ fn the_chamfer_edge_kind_is_work_only_so_a_viewer_tool_start_is_refused() {
     match error {
         RequestError::Execution(CadError::PermissionDenied) => {}
         other => panic!("expected PermissionDenied before the selection check, got {other:?}"),
+    }
+    assert_eq!(core.controller.borrow().session.draw_kind(), None);
+}
+
+// ---- PRESSPULL: the same one-pick shape -----------------------------------
+//
+// PRESSPULL reuses the CHAMFEREDGE capture shape (a pixel pick as the kernel's
+// face seed over the selected exact body), so it is pinned here against the same
+// perspective fixture: the route must not fall back to the work-plane projection,
+// and a pick on another body must be refused without consuming the capture.
+
+fn start_press_pull(core: &HostCore) {
+    core.controller
+        .borrow_mut()
+        .session
+        .begin_draw(DrawToolKind::PressPull)
+        .expect("the session starts the one-pick capture");
+}
+
+#[test]
+fn press_pull_captures_the_pixel_hit_point_and_refuses_another_body() {
+    let core = core();
+    install_bodies(&core, vec![box_body(BODY_A, 0.0), box_body(BODY_B, 20.0)]);
+    perspective_view(&core);
+    select_body(&core, BODY_A, None);
+    start_press_pull(&core);
+
+    // A click on the other body is no pick for this capture: named refusal, and
+    // the capture stays armed with zero points.
+    let other = screen_of(&core, p3(25.0, 5.0, 10.0));
+    let error = click_logical(&core, other).expect_err("another body is not the target");
+    let text = match error {
+        CadError::InvalidInput(text) => text,
+        other => panic!("expected a named refusal, got {other:?}"),
+    };
+    assert!(
+        text.starts_with("presspull.pick_not_selected_body:"),
+        "{text}"
+    );
+    assert!(captured_points(&core).is_empty());
+
+    // The selected body's top face centre is captured as the hit point itself.
+    let top = p3(5.0, 5.0, 10.0);
+    click_logical(&core, screen_of(&core, top)).expect("the selected body's face is picked");
+    let points = captured_points(&core);
+    assert_eq!(points.len(), 1);
+    assert!(
+        (points[0].x - top.x).abs() < 1e-6
+            && (points[0].y - top.y).abs() < 1e-6
+            && (points[0].z - top.z).abs() < 1e-6,
+        "the seed is the pixel hit point, got {:?}",
+        points[0]
+    );
+}
+
+#[test]
+fn press_pull_start_refuses_a_carrier_without_a_modeler_by_name() {
+    let core = core();
+    install_bodies(&core, vec![box_body(BODY_A, 0.0)]);
+    select_body(&core, BODY_A, None);
+    let error = EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::BeginDraw(DrawToolKind::PressPull)),
+    )
+    .expect_err("no modeler means no face move");
+    match error {
+        RequestError::Execution(CadError::Unsupported(text)) => {
+            assert!(text.contains("solid-modeler"), "{text}")
+        }
+        other => panic!("expected the named capability refusal, got {other:?}"),
     }
     assert_eq!(core.controller.borrow().session.draw_kind(), None);
 }

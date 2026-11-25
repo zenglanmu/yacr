@@ -79,6 +79,10 @@ const P = {
   circle: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="1" /></>,
   arc: <><path d="M4 18A14 14 0 0 1 20 18" /><circle cx="4" cy="18" r="1.4" /><circle cx="20" cy="18" r="1.4" /></>,
   move: <><path d="M12 3v18M3 12h18" /><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" /></>,
+  // Push/Pull: a face lifted off its body, with the outward arrow the reference
+  // icon uses. Distinct from `move` (a four-way translation) and `offset` (a
+  // parallel curve), because this tool changes the body's volume.
+  pushPull: <><path d="M4 10 12 6l8 4-8 4z" /><path d="M4 10v7l8 4 8-4v-7" /><path d="M12 6V1.5" /><path d="M9 4l3-2.5L15 4" /></>,
   copy: <><rect x="8" y="8" width="12" height="12" rx="1" /><path d="M4 16V4h12" /></>,
   trim: <><circle cx="6" cy="7" r="2.2" /><circle cx="6" cy="17" r="2.2" /><path d="M8 8.4 20 18M8 15.6 20 6" /></>,
   extend: <><path d="M4 12h9" /><path d="M10.5 9 13.5 12l-3 3" /><path d="M20 5v14" /></>,

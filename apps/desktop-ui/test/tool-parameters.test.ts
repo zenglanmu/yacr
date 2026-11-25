@@ -40,10 +40,108 @@ const first = (status, gate = admitted, pending = null) => view(status, gate, pe
 
 const polygon = sides => ({ tool: { key: 'draw.polygon', points: 1, ready: false, params: { sides } } });
 const polyline = width => ({ tool: { key: 'draw.polyline', points: 1, ready: false, params: { polylineWidth: width } } });
+const line = (length, angle) => ({ tool: { key: 'draw.line', points: 1, ready: false, params: { lineLength: length, lineAngle: angle } } });
 const fillet = radius => ({ tool: { key: 'draw.fillet', points: 0, ready: false, params: { filletRadius: radius } } });
 const fillAngle = degrees => ({ tool: { key: 'draw.arraypolar', points: 0, ready: false, params: { arrayFillAngle: degrees } } });
 const align = flag => ({ tool: { key: 'draw.align', points: 0, ready: false, params: { alignScale: flag } } });
 const pending = (key, base, delta) => ({ key, base, delta });
+
+test('LINE projects its typed length and angle in order, with 0 as the unset sentinel', () => {
+  const views = view(line(12.5, -30));
+  assert.deepEqual(views.map(entry => entry.key), ['lineLength', 'lineAngle']);
+  assert.equal(views[0].typed, true);
+  assert.equal(views[1].typed, true);
+  assert.equal(views[0].value, 12.5);
+  assert.equal(views[1].value, -30);
+  // Both 0 sentinels are real projected values (the capture keeps the cursor's
+  // endpoint/direction), so the controls stay visible and can be typed away.
+  const unset = view(line(0, 0));
+  assert.deepEqual(unset.map(entry => entry.value), [0, 0]);
+  // A negative length is not renderable; the host refuses it too.
+  assert.deepEqual(view(line(-1, 0)).map(entry => entry.key), ['lineAngle']);
+});
+
+test('RECTANG projects its typed width and height in order, with 0 as the unset sentinel', () => {
+  const rect = (width, height) => ({ tool: { key: 'draw.rectang', points: 1, ready: false, params: { rectWidth: width, rectHeight: height } } });
+  const views = view(rect(10, 4));
+  assert.deepEqual(views.map(entry => entry.key), ['rectWidth', 'rectHeight']);
+  assert.equal(views[0].value, 10);
+  assert.equal(views[1].value, 4);
+  assert.equal(views[0].typed, true);
+  assert.equal(views[1].typed, true);
+  assert.deepEqual(view(rect(0, 0)).map(entry => entry.value), [0, 0]);
+  assert.deepEqual(view(rect(-1, 0)).map(entry => entry.key), ['rectHeight']);
+});
+
+test('CIRCLE projects its typed radius with 0 as the unset sentinel', () => {
+  const circle = radius => ({ tool: { key: 'draw.circle', points: 1, ready: false, params: { circleRadius: radius } } });
+  const row = first(circle(5));
+  assert.equal(row.key, 'circleRadius');
+  assert.equal(row.value, 5);
+  assert.equal(row.typed, true);
+  assert.equal(first(circle(0)).value, 0);
+  assert.deepEqual(view(circle(-1)), []);
+});
+
+test('ROTATE projects its typed absolute angle with 0 as the unset sentinel', () => {
+  const rotate = degrees => ({ tool: { key: 'draw.rotate', points: 1, ready: false, params: { rotateAngle: degrees } } });
+  const row = first(rotate(-30));
+  assert.equal(row.key, 'rotateAngle');
+  assert.equal(row.value, -30);
+  assert.equal(row.typed, true);
+  assert.equal(first(rotate(0)).value, 0);
+  assert.deepEqual(view(rotate(NaN)), []);
+});
+
+test('MOVE projects its typed distance with 0 as the unset sentinel', () => {
+  const move = distance => ({ tool: { key: 'draw.move', points: 1, ready: false, params: { moveDistance: distance } } });
+  const row = first(move(12.5));
+  assert.equal(row.key, 'moveDistance');
+  assert.equal(row.value, 12.5);
+  assert.equal(row.typed, true);
+  assert.equal(first(move(0)).value, 0);
+  assert.deepEqual(view(move(-1)), []);
+});
+
+test('SCALE projects its typed factor with 0 as the unset sentinel', () => {
+  const scale = factor => ({ tool: { key: 'draw.scale', points: 2, ready: false, params: { scaleFactor: factor } } });
+  const row = first(scale(2.5));
+  assert.equal(row.key, 'scaleFactor');
+  assert.equal(row.value, 2.5);
+  assert.equal(row.typed, true);
+  assert.equal(first(scale(0)).value, 0);
+  assert.deepEqual(view(scale(-1)), []);
+});
+
+test('OFFSET projects its typed distance with 0 as the unset sentinel', () => {
+  const offset = distance => ({ tool: { key: 'draw.offset', points: 1, ready: false, params: { offsetDistance: distance } } });
+  const row = first(offset(4));
+  assert.equal(row.key, 'offsetDistance');
+  assert.equal(row.value, 4);
+  assert.equal(row.typed, true);
+  assert.equal(first(offset(0)).value, 0);
+  assert.deepEqual(view(offset(-1)), []);
+});
+
+test('PRESSPULL projects its signed distance, including negative values', () => {
+  const press = distance => ({ tool: { key: 'draw.presspull', points: 1, ready: true, params: { pressPullDistance: distance } } });
+  const row = first(press(-3.5));
+  assert.equal(row.key, 'pressPullDistance');
+  assert.equal(row.value, -3.5);
+  assert.equal(row.typed, true);
+  assert.equal(first(press(0)).value, 0);
+  assert.deepEqual(view(press(2e6)), []);
+});
+
+test('EXTRUDE projects its signed distance, including negative values', () => {
+  const extrude = distance => ({ tool: { key: 'draw.extrude', points: 0, ready: true, params: { extrudeDistance: distance } } });
+  const row = first(extrude(-4));
+  assert.equal(row.key, 'extrudeDistance');
+  assert.equal(row.value, -4);
+  assert.equal(row.typed, true);
+  assert.equal(first(extrude(0)).value, 0);
+  assert.deepEqual(view(extrude(2e6)), []);
+});
 
 test('the parameter group renders only for an active tool with a projected value', () => {
   const v = first(polygon(8));
@@ -86,10 +184,10 @@ test('the per-tool map and the spec table stay consistent', () => {
   // ten parameters, and TEXT/MTEXT share the height and rotation while MTEXT alone
   // owns the attachment.
   assert.deepEqual(TOOL_PARAMETERS['draw.polygon'], { command: 'POLYGON', keys: ['polygonSides'] });
-  // PLINE owns the one uniform width it reads at creation; RECTANG does not consume
-  // the parameter in the host, so it has no row (no control the command ignores).
+  // PLINE owns the one uniform width it reads at creation; RECTANG owns its two
+  // typed extents and nothing else (a PLINE width stays a PLINE row).
   assert.deepEqual(TOOL_PARAMETERS['draw.polyline'], { command: 'PLINE', keys: ['polylineWidth'] });
-  assert.equal(TOOL_PARAMETERS['draw.rectang'], undefined);
+  assert.deepEqual(TOOL_PARAMETERS['draw.rectang'], { command: 'RECTANG', keys: ['rectWidth', 'rectHeight'] });
   assert.deepEqual(TOOL_PARAMETERS['draw.hatch'], {
     command: 'HATCH',
     keys: [
@@ -164,12 +262,15 @@ test('the per-tool map and the spec table stay consistent', () => {
   assert.deepEqual(Object.keys(TOOL_PARAMETER_SPECS).sort(), [
     'alignPairs', 'alignScale', 'arrayColumnSpacing', 'arrayColumns', 'arrayFillAngle', 'arrayItems',
     'arrayRotateItems', 'arrayRowSpacing', 'arrayRows', 'breakFirstPoint', 'chamferDistanceA',
-    'chamferDistanceB', 'dimRotation', 'divideAlignBlock', 'divideSegments', 'divideUseBlock', 'filletRadius', 'hatchAngle',
+    'chamferDistanceB', 'circleRadius', 'dimRotation', 'divideAlignBlock', 'divideSegments',
+    'divideUseBlock', 'extrudeDistance', 'filletRadius', 'hatchAngle',
     'hatchDouble', 'hatchGradientAngle', 'hatchGradientColorA', 'hatchGradientColorB',
     'hatchGradientKind', 'hatchPattern', 'hatchPatternType', 'hatchSpacing', 'hatchStyle',
-    'lengthenMode', 'lengthenValue', 'mtextAttachment', 'polygonSides', 'polylineWidth', 'scaleTextFactor',
+    'lengthenMode', 'lengthenValue', 'lineAngle', 'lineLength', 'moveDistance', 'mtextAttachment',
+    'offsetDistance', 'polygonSides', 'polylineWidth', 'pressPullDistance', 'rectHeight', 'rectWidth',
+    'rotateAngle', 'scaleFactor', 'scaleTextFactor',
     'stretchWindow', 'textHeight', 'textRotation',
-  ]);
+  ]);;
   assert.equal(TOOL_PARAMETER_SPECS.alignScale.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.arrayRotateItems.kind, 'flag');
   assert.equal(TOOL_PARAMETER_SPECS.hatchDouble.kind, 'flag');

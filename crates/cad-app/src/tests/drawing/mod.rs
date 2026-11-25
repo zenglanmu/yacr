@@ -332,6 +332,8 @@ mod draw2_donut;
 mod ellipse;
 mod explode;
 mod extrim;
+mod extrude_profile;
+mod press_pull;
 // The imported-content (picture-branch DIMENSION / spline-path MULTILEADER)
 // decomposition tests, split out of `explode` so both files stay inside the
 // code-size limit.

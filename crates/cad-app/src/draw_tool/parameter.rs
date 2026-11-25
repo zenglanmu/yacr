@@ -328,11 +328,50 @@ pub enum ToolParameter {
     /// first phase when the tool starts; all three hand the same crossing window to
     /// the same planner, so this never selects a second containment rule.
     StretchWindow,
+    /// LINE's typed length in world units. `0` means "no typed length" (the
+    /// capture keeps the cursor-defined endpoint); any positive finite value
+    /// replaces the second point's distance from the start.
+    LineLength,
+    /// LINE's typed direction in **degrees**. Consulted only while
+    /// [`Self::LineLength`] is positive; `0` means "keep the cursor direction"
+    /// (so a 0° direction cannot be forced through this channel yet).
+    LineAngle,
+    /// RECTANG's typed width in world units. `0` keeps the cursor's x extent;
+    /// a positive value fixes the width and keeps the cursor's sign.
+    RectWidth,
+    /// RECTANG's typed height in world units. `0` keeps the cursor's y extent;
+    /// a positive value fixes the height and keeps the cursor's sign.
+    RectHeight,
+    /// CIRCLE's typed radius in world units. `0` keeps the cursor-defined
+    /// radius; a positive value places the edge at that distance from the centre.
+    CircleRadius,
+    /// ROTATE's typed absolute angle in **degrees**. `0` keeps the angle the
+    /// cursor defines (so a 0° rotation cannot be forced through this channel yet).
+    RotateAngle,
+    /// MOVE's typed distance in world units. `0` keeps the cursor-defined
+    /// displacement; a positive value keeps the cursor direction and replaces the
+    /// magnitude.
+    MoveDistance,
+    /// SCALE's typed factor. `0` keeps the cursor-defined factor; a positive
+    /// value replaces it (the reference direction is the capture's second point).
+    ScaleFactor,
+    /// OFFSET's typed distance in world units. `0` keeps the session's stored
+    /// `OFFSET <distance>`/`Through` mode; a positive value makes the side point
+    /// a **side selector only** (the atomic `OffsetMode::Distance` payload).
+    OffsetDistance,
+    /// PRESSPULL's signed distance in world units: positive moves the picked face
+    /// outward, negative inward. `0` is the unset sentinel; the command refuses it
+    /// by name. Bounded by the seam's own face-move limit.
+    PressPullDistance,
+    /// EXTRUDE's signed distance in world units: positive extrudes along `+Z`,
+    /// negative along `-Z`. `0` is the unset sentinel; the command refuses it by
+    /// name. Bounded by the seam's own extrusion limit.
+    ExtrudeDistance,
 }
 
 impl ToolParameter {
     /// Every member, in a fixed order (the key round-trip uses it).
-    pub const ALL: [ToolParameter; 36] = [
+    pub const ALL: [ToolParameter; 47] = [
         ToolParameter::PolygonSides,
         ToolParameter::FilletRadius,
         ToolParameter::ChamferDistanceA,
@@ -380,13 +419,26 @@ impl ToolParameter {
         // PLINE's uniform width is appended after every pre-existing member for
         // the same index-stability reason.
         ToolParameter::PolylineWidth,
-        // STRETCH's crossing-window mode is appended last for the same
-        // index-stability reason (the frozen slots above never move).
+        // STRETCH's crossing-window mode is appended after every pre-existing
+        // member for the same index-stability reason.
         ToolParameter::StretchWindow,
+        // LINE's typed dimensions are appended last (2026-11-25) for the same
+        // index-stability reason.
+        ToolParameter::LineLength,
+        ToolParameter::LineAngle,
+        ToolParameter::RectWidth,
+        ToolParameter::RectHeight,
+        ToolParameter::CircleRadius,
+        ToolParameter::RotateAngle,
+        ToolParameter::MoveDistance,
+        ToolParameter::ScaleFactor,
+        ToolParameter::OffsetDistance,
+        ToolParameter::PressPullDistance,
+        ToolParameter::ExtrudeDistance,
     ];
 
     /// Number of members (the store's fixed width).
-    pub const COUNT: usize = 36;
+    pub const COUNT: usize = 47;
 
     /// The dense index of this member in [`Self::ALL`] (the store's slot).
     pub fn index(self) -> usize {
@@ -429,6 +481,17 @@ impl ToolParameter {
             Self::DivideAlignBlock => 33,
             Self::PolylineWidth => 34,
             Self::StretchWindow => 35,
+            Self::LineLength => 36,
+            Self::LineAngle => 37,
+            Self::RectWidth => 38,
+            Self::RectHeight => 39,
+            Self::CircleRadius => 40,
+            Self::RotateAngle => 41,
+            Self::MoveDistance => 42,
+            Self::ScaleFactor => 43,
+            Self::OffsetDistance => 44,
+            Self::PressPullDistance => 45,
+            Self::ExtrudeDistance => 46,
         }
     }
 
@@ -475,6 +538,17 @@ impl ToolParameter {
             Self::DivideAlignBlock => "divideAlignBlock",
             Self::PolylineWidth => "polylineWidth",
             Self::StretchWindow => "stretchWindow",
+            Self::LineLength => "lineLength",
+            Self::LineAngle => "lineAngle",
+            Self::RectWidth => "rectWidth",
+            Self::RectHeight => "rectHeight",
+            Self::CircleRadius => "circleRadius",
+            Self::RotateAngle => "rotateAngle",
+            Self::MoveDistance => "moveDistance",
+            Self::ScaleFactor => "scaleFactor",
+            Self::OffsetDistance => "offsetDistance",
+            Self::PressPullDistance => "pressPullDistance",
+            Self::ExtrudeDistance => "extrudeDistance",
         }
     }
 
@@ -604,155 +678,19 @@ impl ToolParameter {
             Self::DivideAlignBlock => ToolValue::Flag(false),
             Self::PolylineWidth => ToolValue::Number(0.0),
             Self::StretchWindow => ToolValue::Number(STRETCH_WINDOW_RECT),
-        }
-    }
-
-    /// Validate `value` against this parameter's kind and legal range.
-    ///
-    /// Refuses **explicitly** (never a silent clamp) with a message naming the
-    /// parameter and the accepted range, and refuses a `ToolValue` whose variant
-    /// does not match the expected kind (for example a `Flag` for
-    /// `PolygonSides`).
-    pub fn validate(self, value: ToolValue) -> CadResult<()> {
-        match (self, value) {
-            (Self::PolygonSides, ToolValue::Number(number)) => {
-                integer_in_range(self, number, 3, 1024)
-            }
-            (Self::FilletRadius, ToolValue::Number(number))
-            | (Self::ChamferDistanceA, ToolValue::Number(number))
-            | (Self::ChamferDistanceB, ToolValue::Number(number)) => {
-                finite_at_least(self, number, 0.0)
-            }
-            (Self::ArrayRows, ToolValue::Number(number))
-            | (Self::ArrayColumns, ToolValue::Number(number))
-            | (Self::ArrayItems, ToolValue::Number(number)) => integer_at_least(self, number, 1),
-            (Self::ArrayRowSpacing, ToolValue::Number(number))
-            | (Self::ArrayColumnSpacing, ToolValue::Number(number)) => finite(self, number),
-            (Self::ArrayFillAngle, ToolValue::Number(number)) => fill_angle(self, number),
-            (Self::HatchPatternType, ToolValue::Number(number)) => closed_choice(
-                self,
-                number,
-                &[
-                    HATCH_PATTERN_TYPE_SOLID,
-                    HATCH_PATTERN_TYPE_USER_DEFINED,
-                    HATCH_PATTERN_TYPE_PREDEFINED,
-                    HATCH_PATTERN_TYPE_GRADIENT,
-                ],
-                "0 (solid), 1 (user-defined), 2 (predefined) or 3 (gradient)",
-            ),
-            (Self::HatchPattern, ToolValue::Number(number)) => {
-                predefined_pattern_choice(self, number)
-            }
-            (Self::HatchSpacing, ToolValue::Number(number)) => {
-                finite_greater_than(self, number, 0.0)
-            }
-            (Self::HatchAngle, ToolValue::Number(number)) => finite(self, number),
-            (Self::HatchStyle, ToolValue::Number(number)) => closed_choice(
-                self,
-                number,
-                &[HATCH_STYLE_NORMAL, HATCH_STYLE_OUTER, HATCH_STYLE_IGNORE],
-                "0 (Normal), 1 (Outer) or 2 (Ignore)",
-            ),
-            (Self::TextHeight, ToolValue::Number(number)) => finite_greater_than(self, number, 0.0),
-            (Self::HatchGradientKind, ToolValue::Number(number)) => closed_choice(
-                self,
-                number,
-                &[HATCH_GRADIENT_LINEAR, HATCH_GRADIENT_SPHERICAL],
-                "0 (Linear) or 1 (Spherical)",
-            ),
-            (Self::HatchGradientAngle, ToolValue::Number(number)) => finite(self, number),
-            // The ACI index is an integer in `0..=255`. Index `0` is the ByBlock
-            // placeholder (no colour), so the command refuses it when it builds
-            // the stop; the channel accepts the documented ACI domain.
-            (Self::HatchGradientColorA, ToolValue::Number(number))
-            | (Self::HatchGradientColorB, ToolValue::Number(number)) => {
-                integer_in_range(self, number, 0, 255)
-            }
-            // Any finite degrees value: no implicit wrap, so a negative angle is
-            // stored as the negative radian value. NaN/∞ are refused by name.
-            (Self::TextRotation, ToolValue::Number(number)) => finite(self, number),
-            // AutoCAD's nine attachment codes: an integer in `1..=9`. `0`, `10`,
-            // a fraction and a non-finite value are refused by name — never
-            // rounded and never folded onto another cell.
-            (Self::MTextAttachment, ToolValue::Number(number)) => integer_in_range(
-                self,
-                number,
-                MTEXT_ATTACHMENT_MIN as i64,
-                MTEXT_ATTACHMENT_MAX as i64,
-            ),
-            (Self::AlignScale, ToolValue::Flag(_))
-            | (Self::ArrayRotateItems, ToolValue::Flag(_))
-            | (Self::HatchDouble, ToolValue::Flag(_)) => Ok(()),
-            // DIVIDE: an integer in `2..=1024`. `1` would place no mark and
-            // `1025` is a runaway count; both are refused by name, never clamped.
-            (Self::DivideSegments, ToolValue::Number(number)) => {
-                integer_in_range(self, number, 2, 1024)
-            }
-            // LENGTHEN mode: the four documented codes, read by name in the
-            // refusal so a raw `7` cannot be mistaken for an amount.
-            (Self::LengthenMode, ToolValue::Number(number)) => closed_choice(
-                self,
-                number,
-                &[
-                    LENGTHEN_MODE_DELTA,
-                    LENGTHEN_MODE_PERCENT,
-                    LENGTHEN_MODE_TOTAL,
-                    LENGTHEN_MODE_DYNAMIC,
-                ],
-                "0 (Delta), 1 (Percent), 2 (Total) or 3 (Dynamic)",
-            ),
-            // LENGTHEN amount: finite and **non-zero**. A zero change is refused
-            // rather than clamped into a no-op; Delta may be negative (shorten),
-            // while the command additionally requires `> 0` for Percent/Total.
-            (Self::LengthenValue, ToolValue::Number(number)) => finite_non_zero(self, number),
-            // SCALETEXT factor: finite and **strictly positive**. `1.0` is a valid
-            // value at the channel (the command refuses it as `scaletext.unchanged`
-            // without a transaction); `0`, a negative value and NaN are refused
-            // here, never clamped.
-            (Self::ScaleTextFactor, ToolValue::Number(number)) => {
-                finite_greater_than(self, number, 0.0)
-            }
-            // PLINE width: finite and non-negative. Zero is the hairline default
-            // and a positive value is a real stroke; a negative or non-finite
-            // width is refused here, never clamped.
-            (Self::PolylineWidth, ToolValue::Number(number)) => finite_at_least(self, number, 0.0),
-            // STRETCH window mode: the three documented shapes, read by name in
-            // the refusal. `3`, a fraction and a negative code are refused, never
-            // clamped onto a neighbouring shape.
-            (Self::StretchWindow, ToolValue::Number(number)) => closed_choice(
-                self,
-                number,
-                &[
-                    STRETCH_WINDOW_RECT,
-                    STRETCH_WINDOW_POLYGON,
-                    STRETCH_WINDOW_LASSO,
-                ],
-                "0 (rectangle), 1 (polygon) or 2 (lasso)",
-            ),
-            // DIMROTATED's angle: any **finite** degrees value, no implicit wrap
-            // and no normalisation (a negative angle is a legal rotation the other
-            // way). NaN/±∞ are refused by name.
-            (Self::DimRotation, ToolValue::Number(number)) => finite(self, number),
-            // ALIGN pair count: the three documented shapes, read by name in the
-            // refusal. `0`, `4` and a fraction are refused, never clamped.
-            (Self::AlignPairs, ToolValue::Number(number)) => closed_choice(
-                self,
-                number,
-                &[1.0, 2.0, 3.0],
-                "1 (one pair), 2 (two pairs) or 3 (three pairs)",
-            ),
-            // BREAK `F` / DIVIDE block: booleans only.
-            (Self::BreakFirstPoint, ToolValue::Flag(_))
-            | (Self::DivideUseBlock, ToolValue::Flag(_))
-            | (Self::DivideAlignBlock, ToolValue::Flag(_)) => Ok(()),
-            // Any other pairing is a kind mismatch: a `Flag` for a numeric
-            // parameter, or a `Number` for a flag parameter.
-            _ => Err(CadError::InvalidInput(format!(
-                "tool parameter '{}' takes a {}, got a {}",
-                self.key(),
-                self.kind().key(),
-                value.kind().key()
-            ))),
+            // Zero is the documented "unset" sentinel for both LINE rows: the
+            // capture then keeps the cursor's own endpoint/direction.
+            Self::LineLength => ToolValue::Number(0.0),
+            Self::LineAngle => ToolValue::Number(0.0),
+            Self::RectWidth => ToolValue::Number(0.0),
+            Self::RectHeight => ToolValue::Number(0.0),
+            Self::CircleRadius => ToolValue::Number(0.0),
+            Self::RotateAngle => ToolValue::Number(0.0),
+            Self::MoveDistance => ToolValue::Number(0.0),
+            Self::ScaleFactor => ToolValue::Number(0.0),
+            Self::OffsetDistance => ToolValue::Number(0.0),
+            Self::PressPullDistance => ToolValue::Number(0.0),
+            Self::ExtrudeDistance => ToolValue::Number(0.0),
         }
     }
 }
@@ -930,6 +868,8 @@ impl Default for ToolParameterStore {
         Self::defaults()
     }
 }
+
+mod validate;
 
 #[cfg(test)]
 mod tests;

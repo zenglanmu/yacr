@@ -506,3 +506,116 @@ fn traced_confirm_history_rejection_preserves_capture_database_allocator_and_red
         .unwrap()
         .cancel_pending_drawing();
 }
+
+#[test]
+fn polyline_and_text_inserts_create_real_geometry() {
+    let mut core = core();
+    let outcome = commit(
+        &mut core,
+        vec![
+            EntityEdit::Insert {
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                entity: NewEntity::Polyline {
+                    points: vec![point(0.0, 0.0), point(4.0, 0.0), point(4.0, 3.0)],
+                    closed: true,
+                },
+            },
+            EntityEdit::Insert {
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                entity: NewEntity::Text {
+                    value: "Roof".into(),
+                    origin: point(1.0, 2.0),
+                    height: 2.5,
+                    rotation: 0.0,
+                },
+            },
+        ],
+    )
+    .unwrap();
+    assert_eq!(outcome.created.len(), 2);
+
+    let drawing = core.drawing().unwrap();
+    let polyline = drawing
+        .entity(EntityId(outcome.created[0].0))
+        .expect("the polyline was created");
+    match &polyline.geometry {
+        SemanticGeometry::Polyline { points, closed, .. } => {
+            assert_eq!(points.len(), 3);
+            assert!(*closed);
+        }
+        other => panic!("expected a polyline, got {other:?}"),
+    }
+    assert_eq!(polyline.object.type_key, "AcDbPolyline");
+
+    let text = drawing
+        .entity(EntityId(outcome.created[1].0))
+        .expect("the text was created");
+    match &text.geometry {
+        SemanticGeometry::Text {
+            text,
+            position,
+            height,
+            rotation,
+            ..
+        } => {
+            assert_eq!(text, "Roof");
+            assert_eq!(*position, point(1.0, 2.0));
+            assert_eq!(*height, 2.5);
+            assert_eq!(*rotation, 0.0);
+        }
+        other => panic!("expected text, got {other:?}"),
+    }
+    assert_eq!(text.object.type_key, "AcDbText");
+}
+
+#[test]
+fn degenerate_polyline_and_text_inserts_are_refused_before_commit() {
+    let mut core = core();
+    let revision = core.drawing().unwrap().revision();
+
+    let refused = [
+        NewEntity::Polyline {
+            points: vec![point(0.0, 0.0)],
+            closed: false,
+        },
+        NewEntity::Polyline {
+            points: vec![point(0.0, 0.0), point(0.0, 0.0)],
+            closed: false,
+        },
+        NewEntity::Polyline {
+            points: vec![point(0.0, 0.0), point(1.0, 0.0)],
+            closed: true,
+        },
+        NewEntity::Text {
+            value: "   ".into(),
+            origin: point(0.0, 0.0),
+            height: 2.5,
+            rotation: 0.0,
+        },
+        NewEntity::Text {
+            value: "Roof".into(),
+            origin: point(0.0, 0.0),
+            height: 0.0,
+            rotation: 0.0,
+        },
+    ];
+    for entity in refused {
+        let error = commit(
+            &mut core,
+            vec![EntityEdit::Insert {
+                layer: LayerId(0),
+                space: SpaceId::Model,
+                entity,
+            }],
+        )
+        .expect_err("the insert must be refused");
+        assert!(matches!(error, CadError::InvalidInput(_)), "got {error:?}");
+        assert_eq!(
+            core.drawing().unwrap().revision(),
+            revision,
+            "a refused insert never advances the revision"
+        );
+    }
+}

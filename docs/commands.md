@@ -197,6 +197,19 @@ answer is never returned here - the caller polls `cad_api_poll` for its
                                "parameters": { "start": [0,0,0], "end": [10,0,0] } } ] } }
 ```
 
+A selection replacement uses the same lane and the same poll:
+
+```json
+{ "requestId": "apir-2-1c9d", "namespace": "EditorInput",
+  "operation": "editor.setSelection",
+  "parameters": { "objectIds": ["42", "43"] } }
+```
+
+An empty list clears the selection; the answer is `{ "selected": <count> }`. An
+unknown id is `cad_api.unknown_object: <id>`, a foreign-space id is
+`api.invalid_argument: objectIds.space: <id>`, and neither applies a partial
+selection.
+
 Refusals are stable: `cad_api.invalid_request: requestId`, `cad_api.queue_full`,
 `cad_api.duplicate_request`, and the shared `unsupported-runtime` markers. The
 request id grammar is `[A-Za-z0-9._-]{1,64}`; the queue holds 16 open requests.
@@ -262,7 +275,7 @@ resource.
 ```
 
 The full row list is `crates/cad-ui-core/api/plugin-api.json` — the one authority
-this command parses; do not transcribe it into a client. It has **17 rows: 16
+this command parses; do not transcribe it into a client. It has **18 rows: 17
 `supported` + 1 `pending`** (`ApplicationServices.document.lock`). A row exists
 only for an operation the host answers over the wire; the pure value helpers
 (`Geometry`, `Colors`) and the manifest parser are package features in
@@ -281,7 +294,7 @@ A `supported` row has no `reason` key at all (not `null`), and a `pending` or
 `unsupported` row always carries one — a capability is never advertised as an
 empty success.
 
-**In this build 16 of the 17 rows are `supported`** — the reads are served by
+**In this build 17 of the 18 rows are `supported`** — the reads are served by
 `cad_api_call`, the writes and interactive prompts by `cad_api_submit` /
 `cad_api_poll` (above). The single remaining `pending` row is
 `ApplicationServices.document.lock`: a client refuses it by name (`api.pending:

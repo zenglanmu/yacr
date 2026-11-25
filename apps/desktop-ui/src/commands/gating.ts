@@ -347,7 +347,6 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'WEDGE',
   'PYRAMID',
   'POLYSOLID',
-  'EXTRUDE',
   'REVOLVE',
   'SWEEP',
   'LOFT',
@@ -356,7 +355,6 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'SUBTRACT',
   'SLICE',
   'THICKEN',
-  'PRESSPULL',
   'IMPRINT',
   'OFFSETEDGE',
   'FILLETEDGE',
@@ -782,6 +780,15 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // sentence is the command's own hint so the disabled row and the refusal word
   // the rule once.
   CHAMFEREDGE: Object.freeze({ count: 1, reasonKey: 'draw.kind.chamferedge.hint' }),
+  // PRESSPULL is the same one-body shape: one selected exact solid whose picked
+  // face moves. The host refuses an empty/multi-body selection, a non-body, a
+  // non-exact body, a paper-space body, an instance path (`presspull.*`), an
+  // unset distance (`presspull.distance_invalid`) and a face the kernel cannot
+  // resolve (`solid.face_not_found`); the hint words the requirement.
+  PRESSPULL: Object.freeze({ count: 1, reasonKey: 'draw.kind.presspull.hint' }),
+  // EXTRUDE reads the selected closed profile (one row or a chain), so a
+  // selection is the real minimum; the hint words the profile rule.
+  EXTRUDE: Object.freeze({ count: 1, reasonKey: 'draw.kind.extrude.hint' }),
   // MEASUREGEOM itself takes no selection up front: its tool options capture
   // their own points and only RADIUS reads the selection, so pre-gating the
   // command would disable the tool entries with an unrelated sentence. The host

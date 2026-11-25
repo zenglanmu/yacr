@@ -10,6 +10,7 @@
 // An item with none of the three is labelled but disabled, which is the honest
 // state for a command the host does not wire yet.
 import type { CadStatusFlagKey } from './ribbon-active.ts';
+import type { Translator } from '../i18n.ts';
 
 import { PALETTE_ACTIONS, PALETTE_COMMANDS } from './actions.ts';
 
@@ -19,6 +20,15 @@ export { PALETTE_ACTIONS, PALETTE_COMMANDS, SHEET_PALETTE_ACTIONS, SHELL_ACTIONS
 interface RibbonItemBase {
   readonly id: string;
   readonly labelKey: string;
+  /**
+   * Literal display text supplied by a plugin contribution.
+   *
+   * Host-owned items use the catalog (`labelKey`); a plugin cannot add rows to
+   * that catalog, so it hands over finished text instead. When present this wins
+   * over the catalog lookup, and `labelKey` stays a stable synthetic identifier
+   * (never shown). See `docs/domain-ui-slots.md`.
+   */
+  readonly label?: string;
   readonly icon: string;
   readonly large?: boolean;
   /**
@@ -45,6 +55,11 @@ interface RibbonItemBase {
    * capability instead of the generic refusal. A live item ignores it.
    */
   readonly pendingKey?: string;
+  /**
+   * Literal refusal sentence for a plugin-supplied pending item. Wins over
+   * `pendingKey`'s catalog lookup exactly like `label` wins over `labelKey`.
+   */
+  readonly pendingText?: string;
 }
 
 /** One item's dispatch token: exactly one of the three families. */
@@ -99,6 +114,8 @@ export type RibbonItem = RibbonCommandItem | RibbonStandardViewItem | RibbonActi
 export interface RibbonPanel {
   readonly id: string;
   readonly titleKey: string;
+  /** Literal title from a plugin contribution; wins over `titleKey`. */
+  readonly title?: string;
   readonly items: readonly RibbonItem[];
   /** The panel's dialog-launcher arrow exists (disabled when it has no target). */
   readonly launcher?: boolean;
@@ -120,8 +137,39 @@ export interface RibbonPanel {
 export interface RibbonTab {
   readonly id: string;
   readonly labelKey: string;
+  /** Literal trigger label from a plugin contribution; wins over `labelKey`. */
+  readonly label?: string;
   readonly accent?: boolean;
   readonly panels: readonly RibbonPanel[];
+}
+
+/**
+ * The display text of one item.
+ *
+ * A plugin contribution supplies literal text because it cannot add catalog
+ * rows; every host-owned item keeps resolving through the catalog. The synthetic
+ * `labelKey` a plugin ships is never displayed.
+ */
+export function itemLabel(t: Translator, item: { readonly label?: string; readonly labelKey: string }): string {
+  return item.label ?? t(item.labelKey);
+}
+
+/** The display title of one panel (see [`itemLabel`]). */
+export function panelTitle(t: Translator, panel: { readonly title?: string; readonly titleKey: string }): string {
+  return panel.title ?? t(panel.titleKey);
+}
+
+/** The display label of one tab (see [`itemLabel`]). */
+export function tabLabel(t: Translator, tab: { readonly label?: string; readonly labelKey: string }): string {
+  return tab.label ?? t(tab.labelKey);
+}
+
+/** The refusal sentence of a pending item (see [`itemLabel`]). */
+export function pendingLabel(
+  t: Translator,
+  item: { readonly pendingText?: string; readonly pendingKey?: string },
+): string {
+  return item.pendingText ?? t(item.pendingKey ?? '');
 }
 
 /**

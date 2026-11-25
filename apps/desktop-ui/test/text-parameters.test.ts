@@ -315,9 +315,10 @@ test('no control is invented for the MTEXT features that are not implemented', (
   // fourth row (spacing, columns, background, direction) into the map.
   assert.deepEqual(TOOL_PARAMETERS['draw.mtext'].keys, ['textHeight', 'textRotation', 'mtextAttachment']);
   assert.deepEqual(TOOL_PARAMETERS['draw.text'].keys, ['textHeight', 'textRotation']);
-  // 36 since STRETCH's crossing-window capture mode joined the table; MTEXT still
+  // 47 since LINE's, RECTANG's, CIRCLE's, ROTATE's, MOVE's, SCALE's, OFFSET's,
+  // PRESSPULL's and EXTRUDE's typed dimensions joined the table; MTEXT still
   // owns no row beyond its three.
-  assert.equal(Object.keys(TOOL_PARAMETER_SPECS).length, 36);
+  assert.equal(Object.keys(TOOL_PARAMETER_SPECS).length, 47);
   // No spec names an unimplemented MTEXT feature.
   for (const key of Object.keys(TOOL_PARAMETER_SPECS)) {
     assert.doesNotMatch(

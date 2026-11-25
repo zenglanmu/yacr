@@ -9,11 +9,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { API_OPERATIONS, CadApiError, createCadApi } from '../src/index.ts';
+import { API_OPERATIONS, CadApiError, createCadApi, objectId } from '../src/index.ts';
 import type {
   CadApiHostInfo,
   CadApiRequest,
   CadHostBridge,
+  ObjectId,
   PromptResult,
 } from '../src/index.ts';
 import { createEditor } from '../src/editor-input.ts';
@@ -243,4 +244,40 @@ test('writeMessage is client-local: sink or refusal, never a wire call', async (
   assert.deepEqual(messages, ['hello']);
   assert.equal(host.calls.length, 0);
   assert.equal(host.mutations.length, 0, 'writeMessage never touches the wire');
+});
+
+test('setSelection travels the mutating lane with an exact objectIds body', async () => {
+  const fakeBridge = fake(() => ({ selected: 2 }));
+  const api = await createCadApi(fakeBridge.bridge);
+  const selected = await api.editor.setSelection([objectId('12'), objectId('13')]);
+  assert.equal(selected, 2);
+  assert.deepEqual(fakeBridge.mutations, [{
+    namespace: 'EditorInput',
+    operation: 'editor.setSelection',
+    parameters: { objectIds: ['12', '13'] },
+  }]);
+  assert.equal(fakeBridge.calls.length, 0, 'setSelection is not a read');
+
+  // An empty list is the real clear, and it still crosses the wire.
+  const clear = fake(() => ({ selected: 0 }));
+  const clearing = await createCadApi(clear.bridge);
+  assert.equal(await clearing.editor.setSelection([]), 0);
+  assert.deepEqual(clear.mutations[0]?.parameters, { objectIds: [] });
+});
+
+test('setSelection refuses a malformed id list and a malformed answer', async () => {
+  const malformed = fake(() => ({ selected: '2' }));
+  const api = await createCadApi(malformed.bridge);
+  await expectRejectCode(
+    () => api.editor.setSelection([objectId('12')]),
+    'api.invalid_argument: bridge.answer.selected',
+  );
+  await expectRejectCode(
+    () => api.editor.setSelection([42] as unknown as readonly ObjectId[]),
+    'api.invalid_argument: objectIds',
+  );
+  await expectRejectCode(
+    () => api.editor.setSelection('12' as unknown as readonly ObjectId[]),
+    'api.invalid_argument: objectIds',
+  );
 });

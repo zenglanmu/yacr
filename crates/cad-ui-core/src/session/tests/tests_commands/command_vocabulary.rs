@@ -682,6 +682,34 @@ fn chamfer_edge_routes_to_its_one_pick_tool_and_the_host_refuses_without_a_model
 }
 
 #[test]
+fn press_pull_routes_to_its_one_pick_tool_and_the_host_refuses_without_a_modeler() {
+    // PRESSPULL graduated in 2026-11-25: it is the same one-pick shape as
+    // CHAMFEREDGE, routed through `BeginDraw(PressPull)`. This synthetic session
+    // has no solid modeler, so the host's tool-start gate answers the stable
+    // capability refusal before any capture is armed.
+    assert_eq!(
+        normalize_command("PRESSPULL"),
+        Some(CommandId::Extended(ExtendedCommandId::PressPull))
+    );
+    assert!(admissible_names().contains(&"PRESSPULL"));
+    assert!(CommandId::Extended(ExtendedCommandId::PressPull).requires_work_mode());
+
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let error = session.command("PRESSPULL").unwrap_err();
+    assert!(
+        error.contains("unsupported-runtime: solid-modeler"),
+        "the router started the tool, whose start gate refused by name: {error}"
+    );
+    assert_eq!(
+        session.snapshot(None, None, 0).tool,
+        None,
+        "a refused start arms no capture"
+    );
+}
+
+#[test]
 fn the_layer_table_selectors_and_the_newlayer_synonym_are_admitted() {
     // The three structural layer commands are canonical selectors with a real
     // `CommandId`, and all three are Work-only like every other database write.

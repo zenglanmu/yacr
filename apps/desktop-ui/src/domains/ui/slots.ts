@@ -44,9 +44,13 @@ export type TrayPanelKind =
 export interface TrayPanel {
   readonly id: string;
   readonly titleKey: string;
+  /** Literal title from a plugin contribution; wins over `titleKey`. */
+  readonly title?: string;
   readonly kind: TrayPanelKind;
   /** For `kind: 'pending'`: the stable catalog sentence naming what is missing. */
   readonly pendingKey?: string;
+  /** A plugin-supplied literal version of that sentence. */
+  readonly pendingText?: string;
 }
 
 /** One domain's UI contribution. Every slot is optional. */

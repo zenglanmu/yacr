@@ -196,6 +196,17 @@ export interface Editor {
    * empty set. Both answers reach the caller unchanged.
    */
   currentSelection(): Promise<SelectionSet>;
+  /**
+   * Replace the user's selection with `objectIds` (submit lane).
+   *
+   * An empty array clears the selection. The host validates every id against the
+   * open drawing and the active space before applying anything: an unknown id is
+   * `cad_api.unknown_object: <id>`, a foreign-space id is
+   * `api.invalid_argument: objectIds.space: <id>`, and nothing is partially
+   * selected. Resolves with the number of ids the host accepted (one value per
+   * call, never a fabricated selection).
+   */
+  setSelection(objectIds: readonly ObjectId[]): Promise<number>;
 }
 
 type Answer = Readonly<Record<string, unknown>>;
@@ -388,6 +399,22 @@ export function createEditor(wire: CadApiWire, options: EditorOptions = {}): Edi
     async currentSelection(): Promise<SelectionSet> {
       const answer = await wire.call('EditorInput', 'editor.currentSelection', {});
       return selectionSet(readObjectIds(requireAnswerObject(answer, 'bridge.answer')));
+    },
+    async setSelection(objectIds: readonly ObjectId[]): Promise<number> {
+      if (!Array.isArray(objectIds)) throw invalidArgument('objectIds');
+      const ids = objectIds.map((id) => {
+        if (typeof id !== 'string' || id.length === 0) throw invalidArgument('objectIds');
+        return id;
+      });
+      const answer = await wire.submit('EditorInput', 'editor.setSelection', {
+        objectIds: ids,
+      });
+      const record = requireAnswerObject(answer, 'bridge.answer');
+      const selected = record['selected'];
+      if (typeof selected !== 'number' || !Number.isSafeInteger(selected) || selected < 0) {
+        throw invalidArgument('bridge.answer.selected');
+      }
+      return selected;
     },
   };
 }

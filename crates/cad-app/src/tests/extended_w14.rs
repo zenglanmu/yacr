@@ -11,20 +11,24 @@
 //! background boolean job (contracts in `tests/drawing/solids_bool.rs` and
 //! `host::tests::solids`) and is a Work-only drawing write.
 //!
+//! PRESSPULL (2026-11-25) graduated to a one-pick face edit and EXTRUDE to a
+//! zero-point profile extrusion over the selected closed loop; both are Work-only
+//! drawing writes, not refusals.
+//!
+//! PRESSPULL graduated in 2026-11-25 to a one-pick face edit over a selected
+//! exact solid (`tests/drawing/press_pull.rs`): it is a Work-only drawing write,
+//! not a refusal.
+//!
 //! Every **remaining** name is admitted by the vocabulary and refused with
 //! `CadError::Unsupported` carrying a stable reason; nothing is written, no
 //! revision is bumped and no history entry appears. All are Viewer-legal.
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 14] = [
+const REFUSALS: [(ExtendedCommandId, &str); 12] = [
     (
         ExtendedCommandId::PolySolid,
         "polysolid.unsupported: 3D solid primitives are not implemented",
-    ),
-    (
-        ExtendedCommandId::Extrude,
-        "extrude.unsupported: 3D extrusion is not implemented",
     ),
     (
         ExtendedCommandId::Revolve,
@@ -45,10 +49,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 14] = [
     (
         ExtendedCommandId::Thicken,
         "thicken.unsupported: no surface-to-solid model",
-    ),
-    (
-        ExtendedCommandId::PressPull,
-        "presspull.unsupported: no press/pull model",
     ),
     (
         ExtendedCommandId::Imprint,

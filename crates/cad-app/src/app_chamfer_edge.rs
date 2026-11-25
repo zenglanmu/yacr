@@ -56,11 +56,36 @@ use cad_kernel_adapter::{
 /// path and no sub-element), which is what the capture stores and the payload
 /// carries.
 #[derive(Debug, Clone)]
-pub struct ChamferEdgeTarget {
+pub struct SolidEditTarget {
     pub body: SelectionRef,
     pub entity: DbEntity,
     pub brep: BrepData,
 }
+
+/// The original name of [`SolidEditTarget`], kept for `CHAMFEREDGE`'s callers.
+pub type ChamferEdgeTarget = SolidEditTarget;
+
+/// The command-specific words a solid face edit's refusals are written with.
+///
+/// The target rules are identical for `CHAMFEREDGE` and `PRESSPULL` (one
+/// addressable exact solid body, model space, a face click collapses to its
+/// body); only the stable code prefix and the command named in the sentence
+/// differ.
+#[derive(Clone, Copy)]
+struct FaceEditWords {
+    code: &'static str,
+    command: &'static str,
+}
+
+const CHAMFER_WORDS: FaceEditWords = FaceEditWords {
+    code: "chamferedge",
+    command: "CHAMFEREDGE",
+};
+
+const PRESS_PULL_WORDS: FaceEditWords = FaceEditWords {
+    code: "presspull",
+    command: "PRESSPULL",
+};
 
 /// Resolve the one body `CHAMFEREDGE` operates on.
 ///
@@ -88,6 +113,25 @@ pub fn chamfer_edge_target(
     document: DocumentId,
     references: &[SelectionRef],
 ) -> CadResult<ChamferEdgeTarget> {
+    solid_face_edit_target(app, document, references, CHAMFER_WORDS)
+}
+
+/// Resolve the one body `PRESSPULL` moves a face of (same rules and collapse as
+/// [`chamfer_edge_target`], with `presspull.*` refusals).
+pub fn press_pull_target(
+    app: &Application,
+    document: DocumentId,
+    references: &[SelectionRef],
+) -> CadResult<SolidEditTarget> {
+    solid_face_edit_target(app, document, references, PRESS_PULL_WORDS)
+}
+
+fn solid_face_edit_target(
+    app: &Application,
+    document: DocumentId,
+    references: &[SelectionRef],
+    words: FaceEditWords,
+) -> CadResult<SolidEditTarget> {
     let drawing = app
         .workspace
         .documents
@@ -100,7 +144,7 @@ pub fn chamfer_edge_target(
     for reference in references {
         if reference.document != document {
             return Err(invalid(
-                "chamferedge.selection_changed",
+                &format!("{}.selection_changed", words.code),
                 format!(
                     "the selected ref for entity {} belongs to another document",
                     reference.entity.0
@@ -109,7 +153,7 @@ pub fn chamfer_edge_target(
         }
         if !reference.instance.0.is_empty() {
             return Err(invalid(
-                "chamferedge.not_addressable",
+                &format!("{}.not_addressable", words.code),
                 format!(
                     "entity {} is referenced through a block instance, which has no addressable \
                      body identity",
@@ -119,7 +163,7 @@ pub fn chamfer_edge_target(
         }
         let entity = drawing.entity(reference.entity).ok_or_else(|| {
             invalid(
-                "chamferedge.selection_changed",
+                &format!("{}.selection_changed", words.code),
                 format!(
                     "entity {} does not exist in this drawing any more",
                     reference.entity.0
@@ -133,15 +177,15 @@ pub fn chamfer_edge_target(
         } else if reference.sub_element.is_some() {
             // A sub-element of a LINE/CIRCLE/… has no body behind it.
             return Err(invalid(
-                "chamferedge.not_addressable",
+                &format!("{}.not_addressable", words.code),
                 format!(
-                    "entity {} is not a 3D body, so its sub-element names no edge to chamfer",
+                    "entity {} is not a 3D body, so its sub-element names nothing this command can edit",
                     reference.entity.0
                 ),
             ));
         } else {
             return Err(invalid(
-                "chamferedge.not_a_solid",
+                &format!("{}.not_a_solid", words.code),
                 format!(
                     "entity {} is {}, not an exact 3D solid body",
                     reference.entity.0,
@@ -153,15 +197,19 @@ pub fn chamfer_edge_target(
 
     let Some(entity) = bodies.first().copied() else {
         return Err(invalid(
-            "chamferedge.selection_required",
-            "CHAMFEREDGE cuts an edge of the selected exact solid body; select one first",
+            &format!("{}.selection_required", words.code),
+            format!(
+                "{} edits the selected exact solid body; select one first",
+                words.command
+            ),
         ));
     };
     if bodies.len() > 1 {
         return Err(invalid(
-            "chamferedge.selection_multiple",
+            &format!("{}.selection_multiple", words.code),
             format!(
-                "CHAMFEREDGE cuts one body at a time, but {} distinct bodies are selected",
+                "{} edits one body at a time, but {} distinct bodies are selected",
+                words.command,
                 bodies.len()
             ),
         ));
@@ -169,11 +217,12 @@ pub fn chamfer_edge_target(
 
     if entity.object.type_key != crate::app_drawing::solids::SOLID_TYPE_KEY {
         return Err(invalid(
-            "chamferedge.not_a_solid",
+            &format!("{}.not_a_solid", words.code),
             format!(
-                "entity {} is a {} row; CHAMFEREDGE needs an {} row",
+                "entity {} is a {} row; {} needs an {} row",
                 entity.id.0,
                 entity.object.type_key,
+                words.command,
                 crate::app_drawing::solids::SOLID_TYPE_KEY
             ),
         ));
@@ -181,13 +230,13 @@ pub fn chamfer_edge_target(
     let SemanticGeometry::Body3d(body) = &entity.geometry else {
         // Unreachable: the loop above only collects `Body3d` rows.
         return Err(CadError::Invariant(format!(
-            "chamferedge.body_missing_route: entity {} is not a 3D body",
-            entity.id.0
+            "{}.body_missing_route: entity {} is not a 3D body",
+            words.code, entity.id.0
         )));
     };
     if body.kind != BodyKind::Solid {
         return Err(invalid(
-            "chamferedge.not_a_solid",
+            &format!("{}.not_a_solid", words.code),
             format!(
                 "entity {} is a {:?} body, not a closed solid",
                 entity.id.0, body.kind
@@ -196,7 +245,7 @@ pub fn chamfer_edge_target(
     }
     let BodyExact::Exact(brep) = &body.exact else {
         return Err(invalid(
-            "chamferedge.not_exact",
+            &format!("{}.not_exact", words.code),
             format!(
                 "entity {} carries no exact B-rep, so the kernel has nothing to lift",
                 entity.id.0
@@ -205,15 +254,15 @@ pub fn chamfer_edge_target(
     };
     if entity.space != SpaceId::Model {
         return Err(invalid(
-            "chamferedge.not_model_space",
+            &format!("{}.not_model_space", words.code),
             format!(
-                "entity {} is not in model space; CHAMFEREDGE never crosses model/paper space",
-                entity.id.0
+                "entity {} is not in model space; {} never crosses model/paper space",
+                entity.id.0, words.command
             ),
         ));
     }
 
-    Ok(ChamferEdgeTarget {
+    Ok(SolidEditTarget {
         body: SelectionRef {
             document,
             entity: entity.id,

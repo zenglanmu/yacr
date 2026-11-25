@@ -58,6 +58,8 @@ fn declared_capabilities() -> ModelerCapabilities {
         booleans: true,
         mass_properties: true,
         chamfer: true,
+        offset_face: true,
+        extrude_profile: true,
         fillet: false,
         shell: false,
         nurbs: true,
@@ -91,6 +93,10 @@ impl SolidModeler for SolidCoreModeler {
                 "boolean.subtract".into(),
                 "boolean.intersect".into(),
                 "chamfer.sides".into(),
+                // The signed one-face move (Push/Pull's atomic operation).
+                "offset.face".into(),
+                // One closed planar profile extruded into a capped solid.
+                "extrude.profile".into(),
                 "mass_properties".into(),
                 "transform.similarity".into(),
                 // The curved-lift capability the `nurbs` flag stands for: a
@@ -134,6 +140,18 @@ impl SolidModeler for SolidCoreModeler {
                     distance,
                     second,
                 } => ops::chamfer::chamfer(brep, *selector, *distance, *second, cancelled)?,
+                SolidOperation::OffsetFace {
+                    brep,
+                    selector,
+                    distance,
+                } => ops::offset_face::offset_face(brep, *selector, *distance, cancelled)?,
+                SolidOperation::ExtrudeProfile {
+                    profile,
+                    direction,
+                    distance,
+                } => ops::extrude_profile::extrude_profile(
+                    profile, *direction, *distance, cancelled,
+                )?,
                 SolidOperation::Transform { brep, transform } => {
                     ops::transform::transform(brep, transform)?
                 }

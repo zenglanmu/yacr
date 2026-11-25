@@ -56,6 +56,8 @@ export async function openPluginApi(deps: PluginApiDeps): Promise<PluginApiSessi
   const api = await createCadApi(memoized, {
     onCommandRegister: deps.onCommandRegister,
     onCommandUnregister: deps.onCommandUnregister,
+    onUiRegister: deps.onUiRegister,
+    onUiUnregister: deps.onUiUnregister,
     // `writeMessage` is client-local: the WebView store is its default sink, so a
     // plugin message lands somewhere instead of being dropped.
     onMessage: deps.onMessage ?? appendPluginMessage,

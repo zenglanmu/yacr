@@ -16,8 +16,8 @@
 | 右导航栏切换器 + `<html data-domain>` 主题切换 | 实现 | 组件 + CSS token 契约；浏览器/真机视觉效果 **NOT RUN** |
 | `cad2d` 参考结构 | 实现：文件/常用/插入/注释/参数化/视图/管理/输出/附加模块；Home/Insert/Annotate/View/Manage/Output 按参考面板顺序；已实现命令已接线（View→视口/坐标、Insert→内容、Annotate→注释缩放），无实现的面板仍显式 pending | `test/autocad-structure.test.ts` + `test/fixtures/autocad-2024-drafting.json`；视觉 **NOT RUN** |
 | `concept` 参考结构 | 实现（阶段 3）：顶部菜单栏（File/Edit/View/Camera/Draw/Tools/Window/Extensions/Help）、左侧 Large Tool Set、右侧默认托盘；真实命令走统一入口，未实现工具显式 pending 并给出稳定理由 | `test/concept-domain.test.ts` + `test/fixtures/sketchup-2024-concept.json`；视觉/真机 **NOT RUN** |
-| `concept` 操作逻辑 | 实现：Space=Select（取消活动工具）、官方单键 L/R/C/A/M/Q/S/F/T/O/H/Z/E/P/B/G、Shift+Z=FIT；状态栏 Measurements 复用宿主真实 `tool.params`，无参数的工具显示真实步骤提示而不是假输入框。推拉、跟随、剖面、相机、材质、场景、推断/吸附锁定等宿主未实现的能力仍是具名拒绝/显式 pending | `concept-domain.test.ts` + `docs/shortcuts.md` §3；宿主运行 **NOT VERIFIED** |
-| 域/插件 UI 插槽 | 实现（客户端）：`domains/ui/` 的 `menu`/`toolbar`/`tray` 槽、域注册与插件增量 patch（菜单/工具组/托盘可扩展，命令仍过共享准入）。`cad-plugin-api` 的 `ui.register` 公共命名空间 **尚未发布**，当前插件通过 `plugins/ui.ts` 直接注册 | `concept-domain.test.ts`；插件包契约 **NOT RUN** |
+| `concept` 操作逻辑 | 实现：Space=Select（取消活动工具）、官方单键 L/R/C/A/M/Q/S/F/T/O/H/Z/E/P/B/G、Shift+Z=FIT；状态栏 Measurements 复用宿主真实 `tool.params`，LINE 已支持输入长度/角度，RECTANG 宽/高，CIRCLE 半径，ROTATE 角度，MOVE 距离，SCALE 比例（0 为未设置，LINE 角度仅在长度为正时生效），其余无参数的工具显示真实步骤提示而不是假输入框。推拉、跟随、剖面、相机、材质、场景、推断/吸附锁定等宿主未实现的能力仍是具名拒绝/显式 pending | `concept-domain.test.ts` + `tests_typed_dimensions` + `docs/shortcuts.md` §3；宿主运行 **NOT VERIFIED** |
+| 域/插件 UI 插槽 | 实现（客户端）：`domains/ui/` 的 `menu`/`toolbar`/`tray` 槽、域注册与插件增量 patch（菜单/工具组/托盘可扩展，命令仍过共享准入）。公开插件面 `@yacr/plugin-api` 的 `api.ui.register` 已发布：声明式贡献、字面标签、`deactivate` 自动卸载、client-local 无描述符行 | `concept-domain.test.ts` + `plugin-api/ui.test.ts` + 插件包 `test/ui.test.ts`；视觉 **NOT RUN** |
 | BIM/SolidWorks | 显式占位：**回退到 `cad2d` 界面**（功能区+命令行），顶部提示条命名请求的域；文档域值与数据不变 | `domains.ts` profile 标记 + `renderedDomain` / `DomainSurface` 契约 |
 | 每域主题持久化 `ui.theme.<domain>` | **未实现**（阶段 2） | — |
 | `DOMAIN` 命令 / 文档属性入口 | 实现：裸 `DOMAIN` 打开切换器；`DOMAIN <id>` 有文档时写 `cad_set_application_domain`，无文档时只预览；参考名只做输入别名；未知 token 按 `domain.unknown` 具名拒绝 | `domains.test.ts` + `commands.test.ts`；文件信息面板显示只读域行 |
@@ -46,15 +46,19 @@
 - **结构来源**：官方 Help 的菜单/工具栏/托盘/默认单键表转录为
   `test/fixtures/sketchup-2024-concept.json`；图标全部自绘，不复制 SketchUp 资源、截图或手册正文。
 - **插槽与插件**：`domains/ui/` 定义 `menu`/`toolbar`/`tray` 三个数据槽；
-  `registerDomainUi` 注册域布局，`registerPluginUi` 以 `domain: '*'` 或具体域增量扩展；
-  `plugins/ui.ts` 是当前插件接入面。`cad-plugin-api` 的 `ui.register` 公共命名空间**尚未**发布，
-  不得在能力表里写成 supported。
+  `registerDomainUi` 注册域布局，`registerPluginUi` 以 `domain: '*'` 或具体域增量扩展。
+  公开插件面是 `@yacr/plugin-api` 的 `api.ui.register`（声明式贡献、字面标签、
+  `deactivate` 自动卸载）；它是 **client-local**，没有描述符行，能力表不得写成 supported。
+  `plugins/ui.ts` 只保留宿主侧注册入口。
 - **操作逻辑**：Space=Select、官方单键表、Shift+Z=FIT；输入框/弹窗/文本步/夹点拖拽期间让出键盘。
   Measurements 只渲染宿主真实投影的 `tool.params`；没有参数时显示真实步骤提示，**不伪造**长度/角度
   输入。
-- **宿主未实现、仍显式拒绝**：`PRESSPULL`/`EXTRUDE`/`SWEEP`/`SECTIONPLANE`/`CAMERA`/
-  `MATERIALS` 等保持稳定拒绝；SketchUp 的推断锁定、推拉语义、场景/阴影/雾/照片匹配没有实现，
-  不以按钮或空成功冒充。`concept` 的紧凑布局把同一批工具组折进现有抽屉
+- **宿主未实现、仍显式拒绝**：`SWEEP`/`SECTIONPLANE`/`CAMERA`/`MATERIALS` 等保持稳定拒绝；
+  `EXTRUDE` 自 2026-11-25 起把所选闭合平面轮廓拉成新精确实体（LINE 闭环 / 闭合直线
+  LWPOLYLINE / CIRCLE，+Z 或 -Z），`PRESSPULL` 自同日移动已有实体的面；二者都**不会**把
+  任意 2D 线框自动识别成面。（选中一个精确实体、拾取一个面、在
+  Measurements 输入带符号距离），但它**只移动已有实体的面**，不会把 2D 闭合轮廓拉成新实体。
+  SketchUp 的推断锁定、场景/阴影/雾/照片匹配、`FOLLOWME` 仍没有实现，不以按钮或空成功冒充。`concept` 的紧凑布局把同一批工具组折进现有抽屉
   （`MobileRibbonDrawer`），没有菜单栏/托盘的第二套实现；移动端视觉与真机 **NOT VERIFIED**。
 
 ## 后续阶段
@@ -64,10 +68,11 @@
 - 移动端 concept 抽屉目前只折入工具组；后续再把 `menu` 槽（文件/编辑/相机等）作为抽屉头部入口，
   不新增第二套 UI。
 - `ui.theme.<domain>` 每域主题设置；渲染器画布背景按域预设（当前 `theme` 仍只管 dark/light）。
-- `cad-plugin-api` 增加 `ui.register`（需要描述符 JSON、宿主能力表、WebView adapter 与契约测试），
-  之后 `plugins/ui.ts` 改为该命名空间的薄适配。
-- 宿主侧补齐 `LINE`/`RECTANG`/`CIRCLE`/`MOVE`/`ROTATE`/`SCALE`/`OFFSET` 的长度/角度/比例参数，
-  Measurements 才能对每个工具接受自由数值；推断/吸附锁定与推拉/跟随是更大的内核工作。
+- `ui.register` 已发布（client-local，无描述符行）。后续：插件自定义托盘 body（当前只有
+  `pending`）、插件自带的 locale 切换（当前注册时固定字面文本）、以及移动端 concept 抽屉读取
+  `uiLayoutFor` 而不是直接读 `CONCEPT_TOOLBAR`。
+- `LINE`/`RECTANG`/`CIRCLE`/`MOVE`/`ROTATE`/`SCALE`/`OFFSET` 的长度/角度/比例/距离参数已接线；
+  推断/吸附锁定与推拉/跟随是更大的内核工作，需要先做内核 spike。
 - 其余参考面板（参数化、数据/链接、CAD 标准、动作录制器、自定义、发送、第三方应用）
   仍无对应命令实现，继续显式 pending；后续按 rewrite 指令逐条落地后再接线。
 

@@ -252,8 +252,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   `src/domains/`（纯数据 + store + `domains/ui/` 数据槽）。`cad2d` 与 `concept` 已接线；
   `concept` 是菜单栏+左工具栏+右托盘，`cad2d` 是 ribbon+命令行。`bim`/`mechanical` 及未知 token
   **回退到 `cad2d` 界面**（`renderedDomain()`），画面顶部提示条命名请求的域，文档域值与数据不变；
-  不得把参考软件的原生工具摆成可点假按钮。插件通过 `registerPluginUi` 增量扩展 menu/toolbar/tray，
-  命令仍过共享准入。有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性
+  不得把参考软件的原生工具摆成可点假按钮。插件公开面是 `@yacr/plugin-api` 的
+  `api.ui.register`（声明式贡献 + 字面标签 + `deactivate` 自动卸载，client-local 无描述符行），
+  宿主侧落到 `registerPluginUi` 同一合并路径，命令仍过共享准入。有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性
   仍由文档能力决定，profile 只决定摆放与主题（`html[data-domain]` 取 `renderedDomain`）。
   `DOMAIN` 是 **chrome-local**：裸命令开切换器、`DOMAIN <id>` 写文档或预览（无 router 命令）；
   `cad2d` 的参考面板只接线已实现命令（视口/坐标/内容/注释缩放），无实现的参考面板保持 `pending`。

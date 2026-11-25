@@ -23,6 +23,7 @@ mod api_call;
 mod api_commit;
 mod api_object;
 mod api_prompt;
+mod api_selection;
 mod api_submit;
 mod application_domain;
 mod attribute_arguments;
@@ -101,11 +102,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::sync::Arc;
 // Names referenced only by intra-doc links in this module.
-#[allow(unused_imports)]
-use cad_app::interaction::{InteractionRequest, SelectionMode};
-#[allow(unused_imports)]
-use cad_app::CommandId;
-
 use self::diagnostics::{
     cad_error_text, camera_status, request_error_text, resource_diagnostic_text,
     resource_keys_error, status_error,
@@ -113,6 +109,10 @@ use self::diagnostics::{
 #[allow(unused_imports)]
 use self::input::{cancel_target, plan_input, CancelTarget, PointerPress};
 use self::status::{assemble_status, cad_tool, document_capabilities};
+#[allow(unused_imports)]
+use cad_app::interaction::{InteractionRequest, SelectionMode};
+#[allow(unused_imports)]
+use cad_app::CommandId;
 
 pub use self::admission::{
     admit_layer_write, admit_orbit, admit_selected_property, admit_selected_text, admit_setting,

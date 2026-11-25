@@ -82,6 +82,8 @@ impl DrawToolKind {
             // BOUNDARY: one internal point, shared discovery, new polylines.
             Self::Boundary => CommandId::Boundary,
             Self::ChamferEdge => CommandId::Extended(ExtendedCommandId::ChamferEdge),
+            Self::PressPull => CommandId::Extended(ExtendedCommandId::PressPull),
+            Self::Extrude => CommandId::Extended(ExtendedCommandId::Extrude),
             Self::Text => CommandId::CreateText,
             // INSERT is point-then-name; the reference is created from existing
             // block metadata, never by writing the block table.

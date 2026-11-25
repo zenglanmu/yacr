@@ -924,16 +924,14 @@ pub enum CommandPayload {
     /// `SemanticGeometry::Table` grid (Work-only); contract in `app_drawing::table_edit`.
     TableCreate(Box<TableCreateCommand>),
     /// `TABLEDIT <row> <col> [text...]`: replace one 1-based cell's text on the
-    /// single selected table (Work-only). Contract:
-    /// [`crate::app_drawing::table_edit`].
+    /// single selected table (Work-only). Contract: [`crate::app_drawing::table_edit`].
     TableEdit(Box<TableEditCommand>),
     /// `TABLEDIT MERGE|UNMERGE`, `MATCHCELL` and `TABLESTYLE`: the
     /// post-creation table edits (Work-only). Contract:
     /// [`crate::app_drawing::table_ops`].
     Table(Box<crate::app_drawing::table_payload::TablePayload>),
     /// `SHAPE <name-or-code> <x> <y> [size] [rotation_deg]`: one real
-    /// `SemanticGeometry::Shape` glyph (Work-only). The extent is the shape's
-    /// code into the resolved SHX shape font; contract:
+    /// `SemanticGeometry::Shape` glyph (Work-only). Contract:
     /// [`crate::app_drawing::shape`].
     Shape(Box<ShapeCommand>),
     /// `MINSERT <block> <rows> <columns> <row_spacing> <column_spacing> <x> <y>`:
@@ -946,17 +944,14 @@ pub enum CommandPayload {
     /// centre-mark arm / centreline extension+gap options. Contract:
     /// [`crate::app_extended_edit4`].
     Center(CenterEditPayload),
-    /// `XCLIP RECT|POLY|ON|OFF|DELETE|INVERT|?`: the selected INSERT's
-    /// display-only block clip boundary, stored in block-local space (Work-only);
-    /// contract in [`crate::app_drawing::xclip_edit`].
+    /// `XCLIP RECT|POLY|ON|OFF|DELETE|INVERT|?`: the selected INSERT's display-only
+    /// block clip boundary in block-local space (Work-only).
     XClip(Box<XClipCommand>),
     /// `CLIP RECT|POLY|ON|OFF|DELETE`: the same clip models `IMAGECLIP` and
-    /// `XCLIP` write, chosen by the single selected target's kind (Work-only);
-    /// contract in [`crate::app_drawing::clip_edit`].
+    /// `XCLIP` write (Work-only). Contract: [`crate::app_drawing::clip_edit`].
     Clip(Box<ClipCommand>),
     /// `MLEDIT` / `-MLEDIT <option> …`: the two-LINE subset of multiline editing
-    /// (Work-only). The current selection is the object input: exactly two
-    /// `LINE`s. Contract: [`crate::app_drawing::mledit`].
+    /// (Work-only; the selection is the input). Contract: [`crate::app_drawing::mledit`].
     MlEdit(Box<MlEditCommand>),
     /// `MLEADERALIGN <LEFT|RIGHT|CENTER> [spacing]`: align / space the selected
     /// MULTILEADERs (Work-only). The current selection is the object input.
@@ -983,16 +978,23 @@ pub enum CommandPayload {
     /// `cad-ui-core` (`session::scale_arguments`), so a typed line and a direct
     /// IPC caller reach the same handler. Contract: [`crate::app_extended_scale_list`].
     ScaleList(crate::app_extended_scale_list::ScaleListCommand),
-    /// `REFCLOSE SAVE|DISCARD`: save the working set back into the block definition
-    /// or discard the extracted clones (Work-only). A bare `REFCLOSE` is
-    /// `CommandPayload::None` and refused by name (`refclose.needs_option`).
-    /// Contract: [`crate::app_refedit`].
+    /// `REFCLOSE SAVE|DISCARD` (Work-only; a bare `REFCLOSE` is `None` and
+    /// refused by name). Contract: [`crate::app_refedit`].
     RefClose(RefCloseOption),
-    /// `CHAMFEREDGE`: selected exact body + the pixel pick seed (ADR-0036 P2.0).
+    /// The solid-edit payloads: exact body + pick seed (`CHAMFEREDGE`/`PRESSPULL`).
     ChamferSolidEdge {
         body: SelectionRef,
         seed: Point3,
     },
+    /// `PRESSPULL`: selected exact body + the pixel pick's face hit point; the
+    /// kernel resolves the nearest trimmed face and the signed distance is the
+    /// session channel.
+    PressPullFace {
+        body: SelectionRef,
+        seed: Point3,
+    },
+    /// `EXTRUDE`: the selected closed profile rows (the distance is the channel).
+    ExtrudeProfile(Vec<SelectionRef>),
     /// 3D primitive option construction; see [`SolidPrimitiveCommand`].
     Solid(SolidPrimitiveCommand),
 }

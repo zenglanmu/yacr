@@ -61,7 +61,8 @@ impl ModelerPrimitives {
 
 /// The full capability declaration of a modeler.
 ///
-/// `chamfer` is the P2.0 straight-chamfer capability; `nurbs` is P2.1b's curved
+/// `chamfer` is the P2.0 straight-chamfer capability; `offset_face` is the
+/// signed one-face move (Push/Pull's atomic operation); `nurbs` is P2.1b's curved
 /// B-rep capability: it says the modeler can lift a body with a **non-planar**
 /// face back into its kernel (a labelled cylinder, cone, sphere or torus with
 /// its exact NURBS form and pcurves, or a form surface). `fillet` and `shell`
@@ -76,6 +77,12 @@ pub struct ModelerCapabilities {
     pub booleans: bool,
     pub mass_properties: bool,
     pub chamfer: bool,
+    /// [`SolidOperation::OffsetFace`](super::SolidOperation::OffsetFace): one
+    /// face moved along its outward normal by a signed distance.
+    pub offset_face: bool,
+    /// [`SolidOperation::ExtrudeProfile`](super::SolidOperation::ExtrudeProfile):
+    /// one closed planar profile extruded into a capped solid.
+    pub extrude_profile: bool,
     pub fillet: bool,
     pub shell: bool,
     pub nurbs: bool,
@@ -112,6 +119,8 @@ impl ModelerCapabilities {
             SolidOperation::Primitive { spec } => self.primitives.supports(spec.kind()),
             SolidOperation::Boolean { .. } => self.booleans,
             SolidOperation::Chamfer { .. } => self.chamfer,
+            SolidOperation::OffsetFace { .. } => self.offset_face,
+            SolidOperation::ExtrudeProfile { .. } => self.extrude_profile,
             SolidOperation::Transform { .. } => true,
             SolidOperation::MassProperties { .. } => self.mass_properties,
         }
@@ -171,10 +180,12 @@ pub fn requires_nurbs(operation: &SolidOperation<'_>) -> bool {
             .any(|face| !matches!(face.surface, cad_domain::BrepSurface::Plane { .. }))
     }
     match operation {
-        SolidOperation::Primitive { .. } | SolidOperation::Transform { .. } => false,
+        SolidOperation::Primitive { .. }
+        | SolidOperation::Transform { .. }
+        | SolidOperation::ExtrudeProfile { .. } => false,
         SolidOperation::Boolean { left, right, .. } => curved(left) || curved(right),
-        SolidOperation::Chamfer { brep, .. } | SolidOperation::MassProperties { brep, .. } => {
-            curved(brep)
-        }
+        SolidOperation::Chamfer { brep, .. }
+        | SolidOperation::OffsetFace { brep, .. }
+        | SolidOperation::MassProperties { brep, .. } => curved(brep),
     }
 }

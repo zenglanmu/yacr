@@ -1,8 +1,8 @@
 # TypeScript 二次开发 API（`@yacr/plugin-api`）
 
-> 状态：**可用（2026-11-13）**。17 行宿主操作中 **16 行 `supported`**：文档身份/列表、revision、
-> 符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交，以及全部七个交互提示与
-> `selectAll`。插件可以运行、注册命令、在事务里创建/移动/删除实体，并等待用户输入。仍 `pending`
+> 状态：**可用（2026-11-13）**。18 行宿主操作中 **17 行 `supported`**：文档身份/列表、revision、
+> 符号表、当前选择、handle→ObjectId、按 id 读实体、事务提交，以及全部七个交互提示、
+> `selectAll` 与 `setSelection`。插件可以运行、注册命令、在事务里创建/移动/删除实体，并等待用户输入。仍 `pending`
 > 的只有 `document.lock`。
 > 包内特性（Geometry/Colors 值构造、manifest 解析、命令注册）不走 wire，不在描述符里。设计依据见
 > [ADR 0034](adr/0034-typescript-plugin-api.md)。

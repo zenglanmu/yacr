@@ -14,12 +14,12 @@
 // wire, so they have no row and are available unconditionally. Advertising them
 // in the descriptor would claim host state that does not exist.
 //
-// Sixteen rows are `supported` in this build: the reflected reads
+// Seventeen rows are `supported` in this build: the reflected reads
 // (`documentManager.mdiActiveDocument`, `documentManager.documents`, the database
 // revision and symbol-table projections, the editor's current selection) over
 // `cad_api_call`; the live-session operations (`database.getObjectId`,
 // `transaction.getObject`, `transaction.commit`) and the editor prompts (plus the
-// immediate `selectAll`) over the mutating `cad_api_submit` lane. One row is
+// immediate `selectAll` and `setSelection`) over the mutating `cad_api_submit` lane. One row is
 // `pending` (`document.lock`): the table is an honest reservation list, not an
 // availability list. It is deliberately complete rather than aspirational — an
 // operation that exists here but is `pending` is refused by name, an operation the
@@ -79,7 +79,7 @@ export const API_NAMESPACES: readonly CadApiNamespace[] = [
 ];
 
 /**
- * The v1 capability table: 17 host operations, one `pending` and 16 `supported`.
+ * The v1 capability table: 18 host operations, one `pending` and 17 `supported`.
  *
  * Do not flip a row to `supported` here without the host side landing first (and
  * a `case` in the WebView adapter) — the contract test will catch the JSON drift,
@@ -190,6 +190,12 @@ export const API_OPERATIONS: readonly CadApiOperation[] = [
   {
     namespace: 'EditorInput',
     operation: 'editor.currentSelection',
+    status: 'supported',
+  },
+  // Replaces the live selection with a plugin-computed id set (submit lane).
+  {
+    namespace: 'EditorInput',
+    operation: 'editor.setSelection',
     status: 'supported',
   },
 ];

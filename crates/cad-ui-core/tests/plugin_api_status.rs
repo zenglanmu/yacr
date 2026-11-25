@@ -87,9 +87,9 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
         }
     }
     assert!(pending > 0, "document/editor operations are pending here");
-    // Sixteen operations are served in this build: the reflected reads over
-    // `cad_api_call`; the live-session operations and the editor prompts over
-    // `cad_api_submit`. A row flipping to `supported` without a host
+    // Seventeen operations are served in this build: the reflected reads over
+    // `cad_api_call`; the live-session operations, the editor prompts and
+    // `setSelection` over `cad_api_submit`. A row flipping to `supported` without a host
     // implementation and an adapter `case` is a bug, so the set is pinned by name,
     // in descriptor order, rather than by count.
     assert_eq!(
@@ -111,6 +111,7 @@ fn pending_rows_carry_a_reason_and_supported_rows_omit_it() {
             "EditorInput.editor.getKeyword".to_string(),
             "EditorInput.editor.selectAll".to_string(),
             "EditorInput.editor.currentSelection".to_string(),
+            "EditorInput.editor.setSelection".to_string(),
         ],
         "this build serves exactly the reflected reads, the live-session operations and the prompts"
     );

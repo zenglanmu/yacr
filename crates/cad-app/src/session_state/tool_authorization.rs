@@ -18,6 +18,27 @@ use super::*;
 pub(crate) fn authorizing_commands(parameter: ToolParameter) -> &'static [CommandId] {
     match parameter {
         ToolParameter::PolygonSides => &[CommandId::CreatePolygon],
+        // LINE's typed dimensions are read by the LINE create command, so a
+        // Viewer-mode set is refused exactly like the other create parameters.
+        ToolParameter::LineLength | ToolParameter::LineAngle => &[CommandId::CreateLine],
+        // RECTANG's typed extents are read by the rectangle create command.
+        ToolParameter::RectWidth | ToolParameter::RectHeight => &[CommandId::CreateRectangle],
+        // CIRCLE's typed radius is read by the centre/edge create command.
+        ToolParameter::CircleRadius => &[CommandId::CreateCircle],
+        // ROTATE's typed angle is read by the rotate edit command.
+        ToolParameter::RotateAngle => &[CommandId::RotateEntities],
+        // MOVE's typed distance is read by the move edit command.
+        ToolParameter::MoveDistance => &[CommandId::MoveEntities],
+        // SCALE's typed factor is read by the scale edit command.
+        ToolParameter::ScaleFactor => &[CommandId::ScaleEntities],
+        // OFFSET's typed distance is read by the offset edit command.
+        ToolParameter::OffsetDistance => &[CommandId::OffsetEntity],
+        // PRESSPULL's signed distance is read by the face-move command.
+        ToolParameter::PressPullDistance => {
+            &[CommandId::Extended(crate::ExtendedCommandId::PressPull)]
+        }
+        // EXTRUDE's signed distance is read by the profile-extrusion command.
+        ToolParameter::ExtrudeDistance => &[CommandId::Extended(crate::ExtendedCommandId::Extrude)],
         ToolParameter::FilletRadius => &[CommandId::FilletLines],
         ToolParameter::ChamferDistanceA | ToolParameter::ChamferDistanceB => &[
             CommandId::ChamferLines,

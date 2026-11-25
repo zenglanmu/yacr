@@ -469,6 +469,13 @@ impl Application {
             // solid in place (one transaction / one undo step). The host builds
             // the body+seed payload from the one-pick capture.
             ExtendedCommandId::ChamferEdge => self.chamfer_solid_edge(session, command)?,
+            // PRESSPULL moves one face of the selected exact solid in place
+            // (same capture shape and in-place rewrite as CHAMFEREDGE; the
+            // signed distance is the session typed channel).
+            ExtendedCommandId::PressPull => self.press_pull_face(session, command)?,
+            // EXTRUDE turns the selected closed planar profile into one new exact
+            // solid (the "draw a shape, pull it up" command).
+            ExtendedCommandId::Extrude => self.extrude_selected_profile(session, command)?,
             // `XEDGES` extracts the selected bodies' stored display edges as
             // LINE rows (one transaction / one undo step; the body stays).
             ExtendedCommandId::Xedges => self.extract_body_edges(session, command)?,
@@ -479,13 +486,11 @@ impl Application {
             ExtendedCommandId::ThreeDPan => self.pan(session, command)?,
             // Wave 14: stable named refusals.
             ExtendedCommandId::PolySolid
-            | ExtendedCommandId::Extrude
             | ExtendedCommandId::Revolve
             | ExtendedCommandId::Sweep
             | ExtendedCommandId::Loft
             | ExtendedCommandId::Slice
             | ExtendedCommandId::Thicken
-            | ExtendedCommandId::PressPull
             | ExtendedCommandId::Imprint
             | ExtendedCommandId::OffsetEdge
             | ExtendedCommandId::FilletEdge

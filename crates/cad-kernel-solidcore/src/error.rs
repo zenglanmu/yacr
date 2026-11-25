@@ -104,6 +104,25 @@ pub const CHAMFER_FAILED: &str = "solid.chamfer_failed";
 /// fuzzy pick would cut geometry the caller did not name.
 pub const EDGE_NOT_FOUND: &str = "solid.edge_not_found";
 
+/// No **trimmed** face of the lifted body lies within the selector's resolution
+/// tolerance of the point (`max(1e-9, 1e-3 · bounding-box diagonal)`), so
+/// nothing was picked.
+///
+/// A point that is on a face's *surface* but outside its trim is not on that
+/// face, so this is also the answer when the pick falls in a hole or beside a
+/// neighbouring face.
+pub const FACE_NOT_FOUND: &str = "solid.face_not_found";
+
+/// The kernel refused the one-face move itself: no room inside the body, a
+/// collapsing offset, folds or no effect. Reported as `Unsupported` (never as a
+/// plausible body): this build cannot move that face by that distance exactly.
+pub const OFFSET_FACE_FAILED: &str = "solid.offset_face_failed";
+
+/// The kernel refused the requested profile extrusion: an open or self-crossing
+/// profile, a loop it cannot close, a cap it cannot build. Reported as
+/// `Unsupported` (never as an approximate body).
+pub const EXTRUDE_PROFILE_FAILED: &str = "solid.extrude_profile_failed";
+
 /// The kernel ran but produced no usable product: a non-closed solid, a refused
 /// input, a non-finite mass property. Never a success, never an empty body.
 pub const KERNEL_FAILED: &str = "solid.kernel_failed";
@@ -218,6 +237,91 @@ pub(crate) fn from_ops(error: Error, operation: SolidOperationFamily) -> CadResu
         Error::Internal(_) => Ok(failed(
             KERNEL_PANIC,
             "the kernel panicked during this call; the session replaced it, please retry",
+        )),
+        other => Ok(failed(KERNEL_FAILED, other.to_string())),
+    }
+}
+
+/// Map an upstream profile-extrusion error onto the seam contract.
+///
+/// A **geometric** refusal (a profile the kernel cannot close, an argument it
+/// rejects, a degenerate or non-solid result) is `Unsupported` with
+/// [`EXTRUDE_PROFILE_FAILED`]; cancellation has no product, and a kernel-panic
+/// or status failure stays `Failed`.
+pub(crate) fn from_extrude_profile(error: Error) -> CadResult<SolidOutcome> {
+    match error {
+        Error::Cancelled => Err(CadError::Cancelled),
+        Error::Internal(_) => Ok(failed(
+            KERNEL_PANIC,
+            "the kernel panicked during this call; the session replaced it, please retry",
+        )),
+        Error::Unsupported(what) | Error::Unported(what) => Ok(unsupported(
+            LiftRefusal {
+                code: codes::SOLID_UNSUPPORTED,
+                detail: format!("solidcore does not build this yet: {what}"),
+            },
+            SolidOperationFamily::ExtrudeProfile,
+        )),
+        Error::UnsureRegion { region } => Ok(failed(
+            UNSURE_REGION,
+            format!("the kernel is unsure whether region {region} is material"),
+        )),
+        error @ (Error::Profile(_)
+        | Error::Argument
+        | Error::NotSolid
+        | Error::NotExact
+        | Error::Degenerate
+        | Error::Empty) => Ok(unsupported(
+            LiftRefusal {
+                code: EXTRUDE_PROFILE_FAILED,
+                detail: format!("the profile cannot be extruded exactly: {error}"),
+            },
+            SolidOperationFamily::ExtrudeProfile,
+        )),
+        other => Ok(failed(KERNEL_FAILED, other.to_string())),
+    }
+}
+
+/// Map an upstream one-face-offset error onto the seam contract.
+///
+/// Same split as [`from_chamfer`]: a **geometric** refusal (no room, walls that
+/// touch, folds, no effect, a certified offset past tolerance, a degenerate
+/// normal) is `Unsupported` with [`OFFSET_FACE_FAILED`], because this build
+/// cannot move the face exactly; a kernel-integrity failure stays `Failed` with
+/// [`KERNEL_FAILED`] and is never reported as a missing capability.
+pub(crate) fn from_offset_face(error: Error) -> CadResult<SolidOutcome> {
+    match error {
+        Error::Cancelled => Err(CadError::Cancelled),
+        Error::Internal(_) => Ok(failed(
+            KERNEL_PANIC,
+            "the kernel panicked during this call; the session replaced it, please retry",
+        )),
+        Error::Empty => Ok(failed(EMPTY_RESULT, "the face offset produced no body")),
+        Error::UnsureRegion { region } => Ok(failed(
+            UNSURE_REGION,
+            format!("the kernel is unsure whether region {region} is material"),
+        )),
+        Error::Unsupported(what) | Error::Unported(what) => Ok(unsupported(
+            LiftRefusal {
+                code: codes::SOLID_UNSUPPORTED,
+                detail: format!("solidcore does not build this yet: {what}"),
+            },
+            SolidOperationFamily::OffsetFace,
+        )),
+        // Geometric refusals of this face move.
+        error @ (Error::NoRoom
+        | Error::WallsTouch
+        | Error::NoEffect
+        | Error::WallFolds { .. }
+        | Error::OffsetRefused { .. }
+        | Error::OffsetPastTolerance { .. }
+        | Error::NotExact
+        | Error::Degenerate) => Ok(unsupported(
+            LiftRefusal {
+                code: OFFSET_FACE_FAILED,
+                detail: error.to_string(),
+            },
+            SolidOperationFamily::OffsetFace,
         )),
         other => Ok(failed(KERNEL_FAILED, other.to_string())),
     }

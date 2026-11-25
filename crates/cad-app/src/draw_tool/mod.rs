@@ -315,6 +315,11 @@ impl DrawTool {
         if self.kind == DrawToolKind::Hatch {
             return Ok(DrawIntent::Hatch);
         }
+        // EXTRUDE is the same zero-point pre-selection shape: the selected closed
+        // profile is the input and the distance is the typed channel.
+        if self.kind == DrawToolKind::Extrude {
+            return Ok(DrawIntent::Extrude);
+        }
         // DIVIDE is the zero-point pre-selection shape by default. Its block
         // option adds a **terminal block name** (the `text_required_now` gate
         // above refuses a missing name) and the command inserts INSERTs at the
@@ -648,9 +653,18 @@ impl DrawTool {
                 body: self.picks[0].clone(),
                 seed: a,
             },
+            // PRESSPULL: the same body+seed shape; the kernel resolves the face
+            // from the seed and the signed distance is the session typed channel.
+            DrawToolKind::PressPull => DrawIntent::PressPull {
+                body: self.picks[0].clone(),
+                seed: a,
+            },
             // ARRAYRECT: handled by the early return above (zero captured points).
             // The arm is unreachable here but keeps the match exhaustive over kinds.
             DrawToolKind::ArrayRect => DrawIntent::ArrayRect,
+            // EXTRUDE: the early return above supplies the zero-point intent; this
+            // arm keeps the match exhaustive.
+            DrawToolKind::Extrude => DrawIntent::Extrude,
             // ARRAYPOLAR: the single captured point is the array centre; the item
             // count, fill angle and rotate-items flag are the session typed channel,
             // read by the command layer.

@@ -29,6 +29,22 @@ impl DrawPreview {
                 "chamferedge: edge picked, press Enter to chamfer".to_string()
             };
         }
+        // PRESSPULL: same one-pick shape over the selected body; the signed
+        // distance is the session typed channel, so the copy names no value.
+        if self.kind == DrawToolKind::Extrude {
+            return if self.picks.is_empty() {
+                "extrude: select a closed profile, set the distance, press Enter".to_string()
+            } else {
+                "extrude: profile ready, press Enter".to_string()
+            };
+        }
+        if self.kind == DrawToolKind::PressPull {
+            return if self.picks.is_empty() {
+                "presspull: pick a face on the selected body".to_string()
+            } else {
+                "presspull: face picked, press Enter to move it".to_string()
+            };
+        }
         if self.kind.requires_text() {
             // TEXT/TEXTEDIT (ADR 0019 decision A, ADR 0020 amendment A):
             // locale-neutral ASCII only — the catalog (`tool.prompt.text.*`,

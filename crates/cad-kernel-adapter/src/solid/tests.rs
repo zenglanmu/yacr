@@ -8,6 +8,8 @@ use cad_domain::{
     Point3, TaskStamp, Transform3,
 };
 
+mod extrude_profile;
+
 use super::*;
 use crate::codes;
 
@@ -441,6 +443,56 @@ fn request_validation_rejects_invalid_transforms() {
 // ---- Capability probing ----
 
 #[test]
+fn offset_face_validation_accepts_either_sign_and_rejects_zero() {
+    let brep = cube_brep();
+    let selector = SolidFaceSelector::NearestToPoint(p(0.0, 0.0, 1.0));
+
+    // Both signs are meaningful (pull/push); zero and non-finite values are not.
+    for distance in [1.0, -1.0, MAX_OFFSET_FACE_DISTANCE] {
+        let req = request(SolidOperation::OffsetFace {
+            brep: &brep,
+            selector,
+            distance,
+        });
+        req.validate()
+            .unwrap_or_else(|error| panic!("{distance} refused: {error}"));
+    }
+    for distance in [0.0, f64::NAN, f64::INFINITY, MAX_OFFSET_FACE_DISTANCE + 1.0] {
+        let req = request(SolidOperation::OffsetFace {
+            brep: &brep,
+            selector,
+            distance,
+        });
+        let error = req
+            .validate()
+            .expect_err("a zero/non-finite/oversized distance must be rejected");
+        assert_eq!(error.code, codes::SOLID_INVALID_DIMENSION, "{error}");
+    }
+
+    // A non-finite selector point is bad input, not an unsupported operation.
+    let req = request(SolidOperation::OffsetFace {
+        brep: &brep,
+        selector: SolidFaceSelector::NearestToPoint(p(f64::NAN, 0.0, 0.0)),
+        distance: 1.0,
+    });
+    let error = req
+        .validate()
+        .expect_err("a non-finite selector point must be rejected");
+    assert_eq!(error.code, codes::SOLID_INVALID_POINT, "{error}");
+
+    // An empty operand is rejected before any selector work.
+    let empty = BrepData::default();
+    let error = request(SolidOperation::OffsetFace {
+        brep: &empty,
+        selector,
+        distance: 1.0,
+    })
+    .validate()
+    .expect_err("an empty operand must be rejected");
+    assert_eq!(error.code, codes::SOLID_EMPTY_OPERAND, "{error}");
+}
+
+#[test]
 fn capability_probe_reports_per_family_flags() {
     let brep = cube_brep();
     let transform = Transform3::identity();
@@ -467,12 +519,34 @@ fn capability_probe_reports_per_family_flags() {
         distance: 0.1,
         second: None,
     };
+    let offset_face_op = SolidOperation::OffsetFace {
+        brep: &brep,
+        selector: SolidFaceSelector::NearestToPoint(p(0.0, 0.0, 1.0)),
+        distance: 1.0,
+    };
+    let profile = [
+        cad_domain::BrepCurve::Line {
+            start: p(0.0, 0.0, 0.0),
+            end: p(1.0, 0.0, 0.0),
+        },
+        cad_domain::BrepCurve::Line {
+            start: p(1.0, 0.0, 0.0),
+            end: p(0.0, 0.0, 0.0),
+        },
+    ];
+    let extrude_profile_op = SolidOperation::ExtrudeProfile {
+        profile: &profile,
+        direction: p(0.0, 0.0, 1.0),
+        distance: 1.0,
+    };
 
     let mut caps = ModelerCapabilities::default();
     assert!(!caps.supports(&box_op));
     assert!(!caps.supports(&cylinder_op));
     assert!(!caps.supports(&boolean_op));
     assert!(!caps.supports(&chamfer_op));
+    assert!(!caps.supports(&offset_face_op));
+    assert!(!caps.supports(&extrude_profile_op));
     assert!(!caps.supports(&mass_op));
     // A similarity transform is the seam's baseline, not a declared capability.
     assert!(caps.supports(&transform_op));
@@ -495,6 +569,14 @@ fn capability_probe_reports_per_family_flags() {
     assert!(!caps.supports(&chamfer_op));
     caps.chamfer = true;
     assert!(caps.supports(&chamfer_op));
+    // The one-face move is its own flag, not implied by the chamfer.
+    assert!(!caps.supports(&offset_face_op));
+    caps.offset_face = true;
+    assert!(caps.supports(&offset_face_op));
+    // Profile extrusion is its own flag too.
+    assert!(!caps.supports(&extrude_profile_op));
+    caps.extrude_profile = true;
+    assert!(caps.supports(&extrude_profile_op));
     // ... and the flag does not imply the P2 families that are still absent.
     assert!(!caps.fillet && !caps.shell && !caps.nurbs);
 
@@ -502,6 +584,8 @@ fn capability_probe_reports_per_family_flags() {
     assert_eq!(box_op.family().as_str(), "primitive");
     assert_eq!(boolean_op.family(), SolidOperationFamily::Boolean);
     assert_eq!(chamfer_op.family().as_str(), "chamfer");
+    assert_eq!(offset_face_op.family().as_str(), "offset_face");
+    assert_eq!(extrude_profile_op.family().as_str(), "extrude_profile");
     assert_eq!(transform_op.family().as_str(), "transform");
     assert_eq!(mass_op.family().as_str(), "mass_properties");
 }
@@ -536,6 +620,11 @@ fn a_curved_operand_needs_the_nurbs_capability() {
             distance: 0.1,
             second: None,
         },
+        SolidOperation::OffsetFace {
+            brep: &curved,
+            selector: SolidFaceSelector::NearestToPoint(p(0.0, 0.0, 0.0)),
+            distance: 0.1,
+        },
     ];
 
     let mut caps = ModelerCapabilities {
@@ -543,6 +632,8 @@ fn a_curved_operand_needs_the_nurbs_capability() {
         booleans: true,
         mass_properties: true,
         chamfer: true,
+        offset_face: true,
+        extrude_profile: false,
         fillet: false,
         shell: false,
         nurbs: false,
@@ -710,6 +801,8 @@ impl ToyModeler {
                 booleans: false,
                 mass_properties: true,
                 chamfer: false,
+                offset_face: false,
+                extrude_profile: false,
                 fillet: false,
                 shell: false,
                 nurbs: false,

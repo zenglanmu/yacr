@@ -15,6 +15,7 @@ import { Icon } from '../../icons.tsx';
 import type { IconName } from '../../icons.tsx';
 import { useI18n, useShell } from '../../context.ts';
 import type { RibbonItem, RibbonPanel } from '../../ribbon/ribbon-model.ts';
+import { itemLabel } from '../../ribbon/ribbon-model.ts';
 import { itemEnabled, runItem, unavailable } from '../../components/Ribbon.tsx';
 import { currentDomain } from '../store.ts';
 import { useDomainUi } from './use-ui-layout.ts';
@@ -32,7 +33,7 @@ function ToolCell({ item }: { readonly item: RibbonItem }) {
   const enabled = select || itemEnabled(shell, item);
   const active = select && !toolActive;
   const title = enabled
-    ? (item.hintKey ? t(item.hintKey) : t(item.labelKey))
+    ? (item.hintKey ? t(item.hintKey) : itemLabel(t, item))
     : unavailable(t, item, shell);
   const onClick = () => runItem(shell, item);
   return (
@@ -40,7 +41,7 @@ function ToolCell({ item }: { readonly item: RibbonItem }) {
       type="button"
       className={['concept-tool', active ? 'is-active' : '', enabled ? '' : 'is-disabled'].filter(Boolean).join(' ')}
       title={title}
-      aria-label={t(item.labelKey)}
+      aria-label={itemLabel(t, item)}
       aria-pressed={select ? active : undefined}
       aria-disabled={enabled ? undefined : 'true'}
       onClick={enabled ? onClick : undefined}
@@ -53,8 +54,8 @@ function ToolCell({ item }: { readonly item: RibbonItem }) {
 function Group({ group }: { readonly group: RibbonPanel }) {
   const { t } = useI18n();
   return (
-    <section className="concept-toolgroup" aria-label={t(group.titleKey)}>
-      <h2 className="sr-only">{t(group.titleKey)}</h2>
+    <section className="concept-toolgroup" aria-label={group.title ?? t(group.titleKey)}>
+      <h2 className="sr-only">{group.title ?? t(group.titleKey)}</h2>
       <div className="concept-toolgrid">
         {group.items.map(item => <ToolCell key={item.id} item={item} />)}
       </div>

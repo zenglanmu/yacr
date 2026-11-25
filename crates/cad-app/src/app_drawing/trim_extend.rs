@@ -458,7 +458,7 @@ impl Application {
     /// entity. Everything else (active layer, model space, the session `COLOR`
     /// colour, one transaction, one undo step, all-or-nothing) is the shared
     /// funnel.
-    pub(super) fn commit_new_entity_typed(
+    pub(crate) fn commit_new_entity_typed(
         &mut self,
         session: &SessionState,
         command: &Command,

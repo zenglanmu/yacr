@@ -129,8 +129,12 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::Union
                 | ExtendedCommandId::Subtract
                 | ExtendedCommandId::Intersect
-                // ADR-0036 P2.0: CHAMFEREDGE rewrites one exact body in place.
+                // ADR-0036 P2.0: CHAMFEREDGE rewrites one exact body in place;
+                // PRESSPULL (2026-11-25) moves one face of it in place; EXTRUDE
+                // inserts a new body from the selected profile.
                 | ExtendedCommandId::ChamferEdge
+                | ExtendedCommandId::PressPull
+                | ExtendedCommandId::Extrude
                 // XEDGES inserts one LINE per stored display-edge segment.
                 | ExtendedCommandId::Xedges
                 // ADR-0055 M3: block-attribute definitions and value edits

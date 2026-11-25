@@ -123,8 +123,11 @@ impl HostCore {
                 // carrier without a modeler and a selection that is not exactly
                 // one addressable exact solid are both named here, so no pick is
                 // silently consumed by a capture that can never commit.
-                if kind == cad_app::DrawToolKind::ChamferEdge {
-                    self.begin_chamfer_edge_tool()?;
+                if matches!(
+                    kind,
+                    cad_app::DrawToolKind::ChamferEdge | cad_app::DrawToolKind::PressPull
+                ) {
+                    self.begin_solid_face_tool(kind)?;
                 } else {
                     self.controller.borrow_mut().begin_draw_tool(kind)?;
                 }
@@ -237,21 +240,34 @@ impl HostCore {
                 // hit point the pick funnel resolved, never a work-plane
                 // projection (which would hard-stamp a fabricated `z` in a 3D
                 // view). This branch precedes `world_point` on purpose.
-                if self.controller.borrow().session.draw_kind()
-                    == Some(cad_app::DrawToolKind::ChamferEdge)
-                {
+                if matches!(
+                    self.controller.borrow().session.draw_kind(),
+                    Some(cad_app::DrawToolKind::ChamferEdge | cad_app::DrawToolKind::PressPull)
+                ) {
                     // A second click would run a whole pixel pick and target
                     // resolve only to be refused by the capture ("that step
                     // takes no entity pick"). Name the real state instead — the
                     // exact sentence `DrawTool::push_point_checked` uses for a
                     // completed fixed-arity pick capture.
                     if !self.controller.borrow().session.draw_accepts_entity_pick() {
+                        let kind = self
+                            .controller
+                            .borrow()
+                            .session
+                            .draw_kind()
+                            .expect("the face-pick capture kind");
                         return Err(CadError::InvalidInput(format!(
                             "draw kind '{}' is ready; press Enter to confirm",
-                            cad_app::DrawToolKind::ChamferEdge.key()
+                            kind.key()
                         )));
                     }
-                    self.capture_chamfer_edge_pick(point)?;
+                    let kind = self
+                        .controller
+                        .borrow()
+                        .session
+                        .draw_kind()
+                        .expect("the face-pick capture kind");
+                    self.capture_solid_face_pick(point, kind)?;
                     InteractionOutcome::PointCaptured
                 } else {
                     let point = self.world_point(point)?;
@@ -286,9 +302,10 @@ impl HostCore {
                     // suppressed-hover path (the drawing tool owns the pointer,
                     // so no pick and no tint run) instead of feeding a fabricated
                     // `z` into the tool cursor. No highlight exists to promise.
-                    if self.controller.borrow().session.draw_kind()
-                        == Some(cad_app::DrawToolKind::ChamferEdge)
-                    {
+                    if matches!(
+                        self.controller.borrow().session.draw_kind(),
+                        Some(cad_app::DrawToolKind::ChamferEdge | cad_app::DrawToolKind::PressPull)
+                    ) {
                         scope = DirtyScope::Overlay;
                         self.resolve_hover(point)?;
                     } else {
@@ -767,22 +784,23 @@ impl HostCore {
         Ok(self.pick_hit_at(point)?.map(|hit| hit.source))
     }
 
-    /// Start the `CHAMFEREDGE` capture after failing fast on its prerequisites.
+    /// Start a one-pick **solid face edit** capture (`CHAMFEREDGE` or
+    /// `PRESSPULL`) after failing fast on its prerequisites.
     ///
-    /// The order is the command path's order: **authorize first** (the
-    /// extended command is Work-only, so a Viewer session gets the same
-    /// `PermissionDenied` a typed `CHAMFEREDGE` would), then the carrier
-    /// capability (`unsupported-runtime: solid-modeler`), then the selection
-    /// (the shared [`cad_app::chamfer_edge_target`] `chamferedge.*` codes).
+    /// The order is the command path's order: **authorize first** (the extended
+    /// command is Work-only, so a Viewer session gets the same
+    /// `PermissionDenied` a typed command would), then the carrier capability
+    /// (`unsupported-runtime: solid-modeler`), then the selection (the shared
+    /// target resolver, with the command's own `*.selection_required`-family
+    /// codes).
     ///
     /// All of it runs before the session arms a capture, so a refused start
     /// leaves no tool and consumes no click.
-    fn begin_chamfer_edge_tool(&self) -> CadResult<()> {
+    fn begin_solid_face_tool(&self, kind: cad_app::DrawToolKind) -> CadResult<()> {
+        let pick = solid_face_tool(kind)?;
         {
             let c = self.controller.borrow();
-            c.session.authorize(cad_app::CommandId::Extended(
-                cad_app::ExtendedCommandId::ChamferEdge,
-            ))?;
+            c.session.authorize(pick.command)?;
         }
         let (has_modeler, document, refs) = {
             let c = self.controller.borrow();
@@ -799,14 +817,12 @@ impl HostCore {
         }
         {
             let c = self.controller.borrow();
-            cad_app::chamfer_edge_target(&c.application, document, &refs)?;
+            (pick.target)(&c.application, document, &refs)?;
         }
-        self.controller
-            .borrow_mut()
-            .begin_draw_tool(cad_app::DrawToolKind::ChamferEdge)
+        self.controller.borrow_mut().begin_draw_tool(kind)
     }
 
-    /// Capture `CHAMFEREDGE`'s one step: the pixel pick hit point on the
+    /// Capture a solid face edit's one step: the pixel pick hit point on the
     /// selected body.
     ///
     /// The click is resolved through [`Self::pick_hit_at`] (the one pick funnel,
@@ -816,27 +832,31 @@ impl HostCore {
     /// sub-element ignored, because a body click legitimately resolves a face —
     /// and the normalised body ref is stored with the point. A miss or a hit on
     /// another object is a named refusal that leaves the capture armed.
-    fn capture_chamfer_edge_pick(&self, point: PointInput) -> CadResult<()> {
+    fn capture_solid_face_pick(
+        &self,
+        point: PointInput,
+        kind: cad_app::DrawToolKind,
+    ) -> CadResult<()> {
+        let pick = solid_face_tool(kind)?;
         let logical = self.select_logical(point)?;
         let hit = self.pick_hit_at(logical)?.ok_or_else(|| {
-            CadError::InvalidInput(
-                "chamferedge.pick_missed: no object is under the cursor; pick an edge on the \
-                 selected body"
-                    .into(),
-            )
+            CadError::InvalidInput(format!(
+                "{}.pick_missed: no object is under the cursor; pick a face on the selected body",
+                pick.code
+            ))
         })?;
         let target = {
             let c = self.controller.borrow();
-            cad_app::chamfer_edge_target(&c.application, c.document_id, c.session.selection.refs())?
+            (pick.target)(&c.application, c.document_id, c.session.selection.refs())?
         };
         if hit.source.document != target.body.document
             || hit.source.entity != target.body.entity
             || hit.source.instance != target.body.instance
         {
             return Err(CadError::InvalidInput(format!(
-                "chamferedge.pick_not_selected_body: the pick hit entity {} but the selected body \
-                 is entity {}; select the body you want to chamfer",
-                hit.source.entity.0, target.body.entity.0
+                "{}.pick_not_selected_body: the pick hit entity {} but the selected body is \
+                 entity {}; select the body you want to edit",
+                pick.code, hit.source.entity.0, target.body.entity.0
             )));
         }
         self.controller
@@ -926,5 +946,36 @@ impl HostCore {
         }
         drop(c);
         self.immediate_command(CommandId::Select, CommandPayload::Selection(refs))
+    }
+}
+
+/// The command, refusal code and target resolver of a one-pick solid face edit.
+struct SolidFaceTool {
+    command: cad_app::CommandId,
+    code: &'static str,
+    target: fn(
+        &cad_app::Application,
+        cad_domain::DocumentId,
+        &[cad_domain::SelectionRef],
+    ) -> cad_domain::CadResult<cad_app::SolidEditTarget>,
+}
+
+/// Map a face-edit capture kind to its command, code prefix and target resolver.
+fn solid_face_tool(kind: cad_app::DrawToolKind) -> CadResult<SolidFaceTool> {
+    match kind {
+        cad_app::DrawToolKind::ChamferEdge => Ok(SolidFaceTool {
+            command: cad_app::CommandId::Extended(cad_app::ExtendedCommandId::ChamferEdge),
+            code: "chamferedge",
+            target: cad_app::chamfer_edge_target,
+        }),
+        cad_app::DrawToolKind::PressPull => Ok(SolidFaceTool {
+            command: cad_app::CommandId::Extended(cad_app::ExtendedCommandId::PressPull),
+            code: "presspull",
+            target: cad_app::press_pull_target,
+        }),
+        other => Err(CadError::Invariant(format!(
+            "solid_face_tool: {} is not a solid face edit",
+            other.key()
+        ))),
     }
 }

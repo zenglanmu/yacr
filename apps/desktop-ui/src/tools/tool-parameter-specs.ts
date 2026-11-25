@@ -24,6 +24,11 @@ const finiteAtLeast = (min: number): ParameterPredicate =>
 const finiteAny = (): ParameterPredicate => (value: number): boolean => Number.isFinite(value);
 const finiteAbove = (low: number): ParameterPredicate =>
   (value: number): boolean => Number.isFinite(value) && value > low;
+// Either sign, within a magnitude bound. PRESSPULL's distance is signed (outward
+// / inward) and `0` is the accepted "unset" write the host refuses only at
+// execute, so the control can be cleared.
+const finiteMagnitudeAtMost = (max: number): ParameterPredicate =>
+  (value: number): boolean => Number.isFinite(value) && Math.abs(value) <= max;
 // A closed set of integer codes (HATCH pattern type / style). The host refuses a
 // code outside the set rather than clamping, so only the listed codes are offered.
 const integerIn = (...values: number[]): ParameterPredicate =>
@@ -557,6 +562,95 @@ export const TOOL_PARAMETER_SPECS: ToolParameterSpecMap = Object.freeze({
     labelKey: 'status.tool_parameter.polyline_width',
     hintKey: 'status.tool_parameter.polyline_width.hint',
   },
+  // LINE's typed dimensions (2026-11-25): a real length and a direction in
+  // degrees. `0` is the host's unset sentinel for both, so the row stays visible
+  // while the capture runs and typing a positive length commits the endpoint.
+  // The angle is consulted only with a positive length; `0` there keeps the
+  // cursor direction, which the hint states.
+  lineLength: {
+    kind: 'number', statusKey: 'lineLength', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.line_length',
+    hintKey: 'status.tool_parameter.line_length.hint',
+  },
+  lineAngle: {
+    kind: 'number', statusKey: 'lineAngle', step: 15,
+    offered: finiteAny(), typed: true,
+    labelKey: 'status.tool_parameter.line_angle',
+    hintKey: 'status.tool_parameter.line_angle.hint',
+  },
+  // RECTANG's typed extents (2026-11-25): real lengths with `0` as the unset
+  // sentinel, so the row stays visible while the capture runs. A typed extent
+  // owns its axis and keeps the cursor's sign; the other axis stays cursor-led.
+  rectWidth: {
+    kind: 'number', statusKey: 'rectWidth', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.rect_width',
+    hintKey: 'status.tool_parameter.rect_width.hint',
+  },
+  rectHeight: {
+    kind: 'number', statusKey: 'rectHeight', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.rect_height',
+    hintKey: 'status.tool_parameter.rect_height.hint',
+  },
+  // CIRCLE's typed radius (2026-11-25): a real length with `0` as the unset
+  // sentinel; the direction stays the cursor's.
+  circleRadius: {
+    kind: 'number', statusKey: 'circleRadius', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.circle_radius',
+    hintKey: 'status.tool_parameter.circle_radius.hint',
+  },
+  // ROTATE's typed absolute angle (2026-11-25): `0` is the unset sentinel; any
+  // finite degrees value is offered and typed, and the radius stays the cursor's.
+  rotateAngle: {
+    kind: 'number', statusKey: 'rotateAngle', step: 15,
+    offered: finiteAny(), typed: true,
+    labelKey: 'status.tool_parameter.rotate_angle',
+    hintKey: 'status.tool_parameter.rotate_angle.hint',
+  },
+  // MOVE's typed distance (2026-11-25): `0` is the unset sentinel; the cursor
+  // direction is kept and only the magnitude changes.
+  moveDistance: {
+    kind: 'number', statusKey: 'moveDistance', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.move_distance',
+    hintKey: 'status.tool_parameter.move_distance.hint',
+  },
+  // SCALE's typed factor (2026-11-25): `0` is the unset sentinel; the reference
+  // direction comes from the capture's second point.
+  scaleFactor: {
+    kind: 'number', statusKey: 'scaleFactor', step: 0.1,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.scale_factor',
+    hintKey: 'status.tool_parameter.scale_factor.hint',
+  },
+  // OFFSET's typed distance (2026-11-25): `0` is the unset sentinel; the side
+  // point still selects which side, and the distance comes from the payload.
+  offsetDistance: {
+    kind: 'number', statusKey: 'offsetDistance', step: 0.5,
+    offered: finiteAtLeast(0), typed: true,
+    labelKey: 'status.tool_parameter.offset_distance',
+    hintKey: 'status.tool_parameter.offset_distance.hint',
+  },
+  // PRESSPULL's signed distance (2026-11-25): either sign is meaningful, `0` is
+  // the unset sentinel the host refuses at execute. The seam's own magnitude
+  // bound (1e6) is mirrored here so the control never offers a refused value.
+  pressPullDistance: {
+    kind: 'number', statusKey: 'pressPullDistance', step: 0.5,
+    offered: finiteMagnitudeAtMost(1e6), typed: true,
+    labelKey: 'status.tool_parameter.press_pull_distance',
+    hintKey: 'status.tool_parameter.press_pull_distance.hint',
+  },
+  // EXTRUDE's signed distance (2026-11-25): either sign is meaningful (`+Z`/`-Z`),
+  // `0` is the unset sentinel the host refuses at execute.
+  extrudeDistance: {
+    kind: 'number', statusKey: 'extrudeDistance', step: 0.5,
+    offered: finiteMagnitudeAtMost(1e6), typed: true,
+    labelKey: 'status.tool_parameter.extrude_distance',
+    hintKey: 'status.tool_parameter.extrude_distance.hint',
+  },
   // STRETCH's crossing-window capture mode: a **closed set of three codes** —
   // `0` rectangle (two opposite corners, AutoCAD's default), `1` polygon
   // (successive boundary clicks, closed by a click on the first vertex or Enter),
@@ -610,6 +704,27 @@ export type ToolParameterMap = Readonly<Record<string, ToolParameterOwner>>;
  * decisions B–E); the host must use the same key for the row to light up.
  */
 export const TOOL_PARAMETERS: ToolParameterMap = Object.freeze({
+  // LINE owns the typed length and direction; the host projects both only while
+  // a LINE capture is active.
+  'draw.line': { command: 'LINE', keys: ['lineLength', 'lineAngle'] },
+  // RECTANG owns the two typed extents; width comes first to match the order a
+  // rectangle is usually described ("10 × 6").
+  'draw.rectang': { command: 'RECTANG', keys: ['rectWidth', 'rectHeight'] },
+  // CIRCLE owns the one typed radius; the command's other forms (2P/3P/D) do
+  // not consume it, so they have no row.
+  'draw.circle': { command: 'CIRCLE', keys: ['circleRadius'] },
+  // ROTATE owns the one typed absolute angle.
+  'draw.rotate': { command: 'ROTATE', keys: ['rotateAngle'] },
+  // MOVE owns the one typed distance.
+  'draw.move': { command: 'MOVE', keys: ['moveDistance'] },
+  // SCALE owns the one typed factor.
+  'draw.scale': { command: 'SCALE', keys: ['scaleFactor'] },
+  // OFFSET owns the one typed distance (the side point still picks the side).
+  'draw.offset': { command: 'OFFSET', keys: ['offsetDistance'] },
+  // PRESSPULL owns the signed face-move distance.
+  'draw.presspull': { command: 'PRESSPULL', keys: ['pressPullDistance'] },
+  // EXTRUDE owns the signed profile-extrusion distance.
+  'draw.extrude': { command: 'EXTRUDE', keys: ['extrudeDistance'] },
   'draw.polygon': { command: 'POLYGON', keys: ['polygonSides'] },
   // PLINE reads the one `polylineWidth` value when it builds the polyline, so it
   // owns the row. RECTANG does **not** consume the parameter in the host (its

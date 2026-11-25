@@ -118,7 +118,7 @@ function DrawerVariant({ item, variant, onClose }: DrawerVariantProps) {
         onClick={enabled ? () => { runItem(shell, variant); onClose(); } : undefined}
       >
         <Icon name={(variant.icon ?? item.icon) as IconName} size={16} />
-        <span className="mobile-drawer__variant-label">{t(variant.labelKey)}</span>
+        <span className="mobile-drawer__variant-label">{variant.label ?? t(variant.labelKey)}</span>
         {enabled ? null : <em className="mobile-drawer__badge">{t('command.badge.unwired')}</em>}
       </button>
       {enabled ? null : <DrawerReason item={variant} />}
@@ -152,7 +152,7 @@ function DrawerItem({ item, openMenu, setOpenMenu, onClose, showReason }: Drawer
         onClick={enabled ? () => { runItem(shell, item); onClose(); } : undefined}
       >
         <Icon name={item.icon as IconName} size={22} />
-        <span className="mobile-drawer__label">{t(item.labelKey)}</span>
+        <span className="mobile-drawer__label">{item.label ?? t(item.labelKey)}</span>
       </button>
       {enabled || !showReason ? null : <DrawerReason item={item} />}
       {variants.length > 0 ? (
@@ -165,7 +165,7 @@ function DrawerItem({ item, openMenu, setOpenMenu, onClose, showReason }: Drawer
             onClick={() => setOpenMenu(menuOpen ? null : item.id)}
           >
             <Icon name={menuOpen ? 'chevronUp' : 'chevronDown'} size={14} />
-            <span>{t('ribbon.variants', { name: t(item.labelKey) })}</span>
+            <span>{t('ribbon.variants', { name: item.label ?? t(item.labelKey) })}</span>
           </button>
           {menuOpen ? (
             <ul className="mobile-drawer__variants" id={optionsId}>
@@ -333,12 +333,12 @@ export function MobileRibbonDrawer({ open, onClose }: MobileRibbonDrawerProps) {
               ].filter(Boolean).join(' ')}
               onClick={() => { setOpenMenu(null); shell.setRibbonTab(entry.id); }}
             >
-              {t(entry.labelKey)}
+              {entry.label ?? t(entry.labelKey)}
             </button>
           ))}
         </div>
         ) : null}
-        <div className="mobile-drawer__body" role="tabpanel" aria-label={t(tab.labelKey)}>
+        <div className="mobile-drawer__body" role="tabpanel" aria-label={tab.label ?? t(tab.labelKey)}>
           {sections.map(section => {
             const note = sectionRefusal(shell, t, section.items);
             return (

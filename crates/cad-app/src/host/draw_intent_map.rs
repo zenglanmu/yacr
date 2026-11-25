@@ -326,7 +326,18 @@ impl HostController {
             }
             DrawIntent::Offset { side_point } => {
                 let options = self.session.modify_options;
-                if options.offset_is_default() {
+                // The Measurements distance is the explicit per-capture input and
+                // wins over the stored `OFFSET <distance>` default; `0`/unset
+                // leaves the stored mode (fixed distance or `Through`) intact.
+                // Either way the side point only selects the side, because the
+                // atomic payload carries the distance itself.
+                let typed = self
+                    .session
+                    .tool_parameter(crate::ToolParameter::OffsetDistance)
+                    .number()
+                    .filter(|distance| distance.is_finite() && *distance > 0.0);
+                let mode = typed.or(options.offset_distance());
+                if mode.is_none() && !options.offset_erase() && !options.offset_current_layer() {
                     (
                         crate::CommandId::OffsetEntity,
                         crate::CommandPayload::Offset {
@@ -340,7 +351,7 @@ impl HostController {
                         crate::CommandPayload::OffsetOptions(Box::new(OffsetOptions {
                             refs: selection.to_vec(),
                             side_points: vec![side_point],
-                            mode: match options.offset_distance() {
+                            mode: match mode {
                                 Some(distance) => OffsetMode::Distance(distance),
                                 None => OffsetMode::Through,
                             },
@@ -427,6 +438,18 @@ impl HostController {
             DrawIntent::ChamferEdge { body, seed } => (
                 crate::CommandId::Extended(crate::ExtendedCommandId::ChamferEdge),
                 crate::CommandPayload::ChamferSolidEdge { body, seed },
+            ),
+            // PRESSPULL: the same body+seed payload; the signed distance is the
+            // session typed channel read by the command layer.
+            DrawIntent::PressPull { body, seed } => (
+                crate::CommandId::Extended(crate::ExtendedCommandId::PressPull),
+                crate::CommandPayload::PressPullFace { body, seed },
+            ),
+            // EXTRUDE: the selection snapshot is the profile; the signed distance
+            // is the session typed channel read by the command layer.
+            DrawIntent::Extrude => (
+                crate::CommandId::Extended(crate::ExtendedCommandId::Extrude),
+                crate::CommandPayload::ExtrudeProfile(selection.to_vec()),
             ),
             // ARRAYRECT/ARRAYPOLAR: the selection snapshot travels as the refs;
             // the row/column/item parameters and the fill angle are the session

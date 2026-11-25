@@ -80,6 +80,8 @@ export interface RibbonMenuEntry {
   readonly kind: 'section' | 'panel';
   readonly id: string;
   readonly titleKey: string;
+  /** Literal title from a plugin contribution; wins over `titleKey`. */
+  readonly title?: string;
   /**
    * Whether an inline section prints its caption row. A section whose title is
    * the **same words as the menu's own trigger** would repeat the menu title
@@ -131,14 +133,15 @@ export function ribbonMenuEntriesFor(tab: RibbonTab, palettesAvailable?: boolean
       kind,
       id: panel.id,
       titleKey: panel.titleKey,
+      ...(panel.title === undefined ? {} : { title: panel.title }),
       // A section caption is dropped when it says nothing the menu has not
       // already said: when it repeats the trigger's own words (File > File), or
       // when its first row is already labelled with the panel title (Home >
       // Properties). The rows stay either way; only the header goes. A submenu
       // row carries its title as the row label instead.
       caption: kind === 'section'
-        && panel.titleKey !== tab.labelKey
-        && items[0].labelKey !== panel.titleKey,
+        && (panel.title ?? panel.titleKey) !== (tab.label ?? tab.labelKey)
+        && (items[0].label ?? items[0].labelKey) !== (panel.title ?? panel.titleKey),
       rows: items.map(ribbonMenuRow),
     });
   }

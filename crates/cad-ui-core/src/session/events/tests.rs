@@ -533,6 +533,17 @@ fn cad_tool(key: &str, points: usize) -> super::super::status::CadTool {
             dim_rotation: None,
             polyline_width: None,
             stretch_window: None,
+            line_length: None,
+            line_angle: None,
+            rect_width: None,
+            rect_height: None,
+            circle_radius: None,
+            rotate_angle: None,
+            move_distance: None,
+            scale_factor: None,
+            offset_distance: None,
+            press_pull_distance: None,
+            extrude_distance: None,
         },
     }
 }

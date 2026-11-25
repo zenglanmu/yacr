@@ -7,7 +7,9 @@
 
 pub(crate) mod boolean;
 pub(crate) mod chamfer;
+pub(crate) mod extrude_profile;
 pub(crate) mod mass;
+pub(crate) mod offset_face;
 pub(crate) mod primitive;
 pub(crate) mod transform;
 
@@ -21,6 +23,38 @@ use solidcore_record::brep::Brep as Record;
 
 use crate::error::LiftRefusal;
 use crate::record;
+
+/// A pick's tolerance as a fraction of the body's bounding-box diagonal.
+///
+/// Shared by every point selector (a chamfer edge, a face to offset) so the same
+/// body and the same point resolve with the same resolution.
+pub(crate) const PICK_RELATIVE: f64 = 1e-3;
+
+/// The pick tolerance floor, so a degenerate/zero-extent record still accepts a
+/// point exactly on the geometry it names.
+pub(crate) const PICK_FLOOR: f64 = 1e-9;
+
+/// The diagonal of the record's vertex bounding box, or `0.0` when a vertex is
+/// not finite (the floor then supplies the tolerance).
+pub(crate) fn bbox_diagonal(record: &Record) -> f64 {
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for vertex in &record.vertices {
+        for (axis, value) in vertex.point.iter().enumerate() {
+            min[axis] = min[axis].min(*value);
+            max[axis] = max[axis].max(*value);
+        }
+    }
+    let mut squared = 0.0;
+    for axis in 0..3 {
+        let extent = max[axis] - min[axis];
+        if !extent.is_finite() {
+            return 0.0;
+        }
+        squared += extent * extent;
+    }
+    squared.sqrt()
+}
 
 /// How often a watcher thread polls the seam's cancellation callback.
 ///

@@ -13,9 +13,16 @@ const PRIMITIVES = ['BOX','CONE','CYLINDER','SPHERE','TORUS','WEDGE','PYRAMID'];
 const BOOLEANS = ['INTERSECT','UNION','SUBTRACT'];
 // CHAMFEREDGE (ADR-0036 P2.0) is a one-pick tool over exactly one selected body.
 const CHAMFER_EDGE = 'CHAMFEREDGE';
+// PRESSPULL (2026-11-25) is the same one-pick shape: one face of one body.
+const PRESS_PULL = 'PRESSPULL';
+const ONE_PICK_SOLID = [CHAMFER_EDGE, PRESS_PULL];
+// EXTRUDE (2026-11-25) is the zero-point pre-selection shape: the selected
+// closed profile is the input and the distance is the typed channel.
+const EXTRUDE = 'EXTRUDE';
+const SELECTION_SOLID = [...ONE_PICK_SOLID, EXTRUDE];
 // Everything else in the batch is still a stable named refusal.
-const REFUSALS = ['POLYSOLID','EXTRUDE','REVOLVE','SWEEP','LOFT','SLICE','THICKEN','PRESSPULL','IMPRINT','OFFSETEDGE','FILLETEDGE','EDGE','MIRROR3D','ROTATE3D'];
-const BATCH = [...PRIMITIVES, ...BOOLEANS, CHAMFER_EDGE, ...REFUSALS];
+const REFUSALS = ['POLYSOLID','REVOLVE','SWEEP','LOFT','SLICE','THICKEN','IMPRINT','OFFSETEDGE','FILLETEDGE','EDGE','MIRROR3D','ROTATE3D'];
+const BATCH = [...PRIMITIVES, ...BOOLEANS, ...SELECTION_SOLID, ...REFUSALS];
 const DOC={documentLabel:'drawing.dwg',loading:false}; const NO_DOC={documentLabel:null,loading:false};
 const SEL2={...DOC,selection:{count:2}};
 setCommandCatalog(HOST_NAMES);
@@ -30,7 +37,7 @@ test('every Wave 14 command is catalogued once with real keys', async()=>{
     // A document alone is not the whole requirement for a selection-gated row,
     // so CHAMFEREDGE answers the no-document case through
     // SELECTION_REQUIREMENTS instead of the document-scoped list.
-    assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id),id !== CHAMFER_EDGE,id);
+    assert.equal(DOCUMENT_SCOPED_COMMANDS.includes(id),!SELECTION_SOLID.includes(id),id);
     assert.equal(CAPABILITY_GATES[id],undefined,id);
     if(PRIMITIVES.includes(id)){
       assert.doesNotMatch(en[`${slug(id)}.hint`],/Named refusal/i,id);
@@ -53,6 +60,23 @@ test('every Wave 14 command is catalogued once with real keys', async()=>{
         assert.match(en[key],/greater than 0/i,key);
       }
       assert.match(en['tool.prompt.chamferedge.pick_edge'],/greater than 0/i,'chamferedge prompt');
+    } else if(id === EXTRUDE){
+      // The selected closed profile is the input; the hint words the profile rule.
+      assert.doesNotMatch(en[`${slug(id)}.hint`],/Named refusal/i,id);
+      assert.match(en[`${slug(id)}.hint`],/closed planar profile/i,id);
+      assert.match(en[`${slug(id)}.hint`],/positive \+Z/i,id);
+      assert.deepEqual({ ...SELECTION_REQUIREMENTS[id] },{count:1,reasonKey:`${slug(id)}.hint`},id);
+      assert.match(en['status.tool_parameter.extrude_distance.hint'],/signed/i,'distance hint');
+      assert.match(en['tool.prompt.extrude.profile'],/closed profile/i,'extrude prompt');
+    } else if(id === PRESS_PULL){
+      // One exact solid body is the target; the click names the face and the
+      // distance is the signed Measurements channel.
+      assert.doesNotMatch(en[`${slug(id)}.hint`],/Named refusal/i,id);
+      assert.match(en[`${slug(id)}.hint`],/exact solid body/i,id);
+      assert.match(en[`${slug(id)}.hint`],/positive pulls/i,id);
+      assert.deepEqual({ ...SELECTION_REQUIREMENTS[id] },{count:1,reasonKey:`${slug(id)}.hint`},id);
+      assert.match(en['status.tool_parameter.press_pull_distance.hint'],/signed/i,'distance hint');
+      assert.match(en['tool.prompt.presspull.pick_face'],/face/i,'presspull prompt');
     } else {
       assert.match(en[`${slug(id)}.hint`],/Named refusal/i,id);
       assert.equal(SELECTION_REQUIREMENTS[id],undefined,id);
@@ -65,7 +89,7 @@ test('the Wave 14 names are admitted with a drawing and refused without one',()=
       // A document alone is not the whole requirement: two selected bodies are required.
       assert.deepEqual(admitCommandText(id,{status:DOC}),{kind:'unavailable',command:id,reasonKey:`${slug(id)}.hint`},id);
       assert.deepEqual(admitCommandText(id,{status:SEL2}),{kind:'admitted',command:id,reasonKey:null},id);
-    } else if(id === CHAMFER_EDGE){
+    } else if(SELECTION_SOLID.includes(id)){
       // One selected body is the requirement (the hint is the refusal sentence).
       assert.deepEqual(admitCommandText(id,{status:DOC}),{kind:'unavailable',command:id,reasonKey:`${slug(id)}.hint`},id);
       assert.deepEqual(admitCommandText(id,{status:{...DOC,selection:{count:1}}}),{kind:'admitted',command:id,reasonKey:null},id);

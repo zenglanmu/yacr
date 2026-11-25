@@ -73,9 +73,43 @@ A refusal never reaches the host. A `null`/`undefined` answer to a wire call is
 `{ accepted: true }` — no placeholders, no empty selections, no default layers, no
 silent success. Host failures arrive as `CadApiError`; branch on `code`, not message.
 
+## UI contributions
+
+`api.ui.register(contribution)` is **client-local**, exactly like
+`runtime.registerCommand`: the package validates a declarative menu/toolbar/tray
+contribution and reports it to the host's `onUiRegister` hook. The loader installs
+it into the chrome and removes it on `deactivate`; without the hook the call
+refuses `unsupported-runtime: cad_api.Ui.register`. It has **no descriptor row**,
+because no wire request exists.
+
+```ts
+api.ui.register({
+  id: 'acme.roof-tools',
+  domain: 'concept',                 // or '*' for every profile
+  toolbar: [{
+    id: 'acme.roof',
+    title: 'Roof',
+    items: [
+      { id: 'ROOF', label: 'Roof', icon: 'line', command: 'LINE' },
+      { id: 'DORMER', label: 'Dormer', pendingReason: 'no dormer kernel op' },
+    ],
+  }],
+  tray: [{ id: 'acme.panel', title: 'Acme', pendingReason: 'no panel body yet' }],
+});
+```
+
+The contribution is **data, never JSX**: a plugin cannot inject HTML, a second
+React root, or a custom tray body. A pending item is labelled and disabled with
+its own sentence, never a fake button; every command item still passes the host's
+shared admission. Labels (`label` / `title` / `pendingReason`) are literal,
+plugin-supplied text — a third-party plugin cannot add rows to the host's i18n
+catalogs, so it localizes before registering (v1 limitation). `id` is the
+unregistration handle and must be unique in the client; `api.ui.unregister(id)`
+removes it explicitly.
+
 ## v1 status
 
-**The descriptor is 17 rows: 16 `supported`, one `pending`.** Five served
+**The descriptor is 18 rows: 17 `supported`, one `pending`.** Five served
 operations are reflected reads over `cad_api_call` —
 `documentManager.mdiActiveDocument` (the open `Document`, or `null`),
 `documentManager.documents` (0 or 1 `Document`, `[]` when none is open),
@@ -85,10 +119,11 @@ operations are reflected reads over `cad_api_call` —
 selected). Three are **live-session** operations over the submit/poll lane, because
 they read the session rather than the reflected snapshot: `database.getObjectId`
 (a handle lookup, `null` when no entity carries it), `transaction.getObject` (one
-entity, decoded by its `typeName`) and `transaction.commit`. Eight are **editor**
+entity, decoded by its `typeName`) and `transaction.commit`. Nine are **editor**
 operations on the same lane: the seven prompts (`getPoint`/`getEntity`/
-`getSelection`/`getString`/`getDouble`/`getInteger`/`getKeyword`) and the immediate
-`selectAll`; a prompt resolves only when the user answers, so the client waits far
+`getSelection`/`getString`/`getDouble`/`getInteger`/`getKeyword`), the immediate
+`selectAll` and `setSelection` (replace the live selection with a plugin-computed
+id set); a prompt resolves only when the user answers, so the client waits far
 longer for it than for a machine answer. `document.lock` is the one reservation
 left.
 
@@ -98,7 +133,7 @@ without a sink the call refuses
 (`unsupported-runtime: cad_api.EditorInput.editor.writeMessage`) instead of
 pretending the message went somewhere.
 
-`Runtime` has **no row at all**: command registration is client-local. `createCadApi`
+`Runtime` and `Ui` have **no rows at all**: command and UI registration are client-local. `createCadApi`
 takes an optional `onCommandRegister`/`onCommandUnregister` hook pair, and a plugin
 calls `ctx.api.runtime.registerCommand(name, flags, handler)` to hand a command to
 the host's funnel; without the hook the call refuses
@@ -158,8 +193,8 @@ the host's new revision and the ids it actually created.
   back to them.
 - `expectedRevision` is optimistic concurrency: a stale value is rejected by the host
   as `api.revision-conflict` (`details.actualRevision` when the host supplies one).
-- Creates are a closed set (`Line`/`Circle`/`Arc`, a layer **name** and the active
-  space); one transaction may not edit one entity twice
+- Creates are a closed set (`Line`/`Circle`/`Arc`/`Polyline`/`DBText`, a layer
+  **name** and the active space); one transaction may not edit one entity twice
   (`api.invalid_argument: edits.duplicate`).
 
 ## Identity

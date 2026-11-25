@@ -32,7 +32,7 @@ import { useI18n, useShell } from '../context.ts';
 import type { ShellValue } from '../context.ts';
 import type { RibbonItem, RibbonPanel } from '../ribbon/ribbon-model.ts';
 import type { Translator } from '../i18n.ts';
-import { offeredItems, offeredPanels, panelLauncherCommand, RIBBON_TABS, ribbonTab } from '../ribbon/ribbon-model.ts';
+import { itemLabel, offeredItems, offeredPanels, panelLauncherCommand, panelTitle, RIBBON_TABS, ribbonTab, tabLabel } from '../ribbon/ribbon-model.ts';
 import { ribbonItemActive } from '../ribbon/ribbon-active.ts';
 import { PANEL_DIALOG_MISSING_KEY } from '../limits.ts';
 import { NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands/commands.ts';
@@ -53,10 +53,13 @@ const NO_OVERFLOW: OverflowState = Object.freeze({ overflowing: false, start: fa
 /** The item facts a refusal sentence reads. */
 interface UnavailableItem {
   readonly labelKey: string;
+  readonly label?: string;
   readonly command?: string;
   readonly standardView?: string;
   /** The item's own "not wired" sentence; it wins over every generic reason. */
   readonly pendingKey?: string;
+  /** A plugin-supplied literal version of that sentence. */
+  readonly pendingText?: string;
 }
 
 /**
@@ -97,15 +100,15 @@ export function unavailable(t: Translator, item: UnavailableItem, shell: ShellVa
   // A domain/plugin item that deliberately has no dispatch token names its own
   // missing capability. It is checked before the generic branches because it
   // has neither a command nor a standard view to ask about.
-  if (item.pendingKey !== undefined) return t(item.pendingKey);
+  if (item.pendingKey !== undefined) return item.pendingText ?? t(item.pendingKey);
   if (item.standardView) {
-    return t(standardViewUnavailableReasonKey(shell, item.standardView), { command: t(item.labelKey) });
+    return t(standardViewUnavailableReasonKey(shell, item.standardView), { command: itemLabel(t, item) });
   }
   if (item.command !== undefined && DOCUMENT_SCOPED_COMMANDS.includes(item.command)
     && shell.status && !shell.loading && !shell.documentOpen) {
-    return t(NO_DOCUMENT_KEY, { command: t(item.labelKey) });
+    return t(NO_DOCUMENT_KEY, { command: itemLabel(t, item) });
   }
-  return t(unavailableReasonKey(item.command, { status: shell.status, pending: shell.pending }), { command: t(item.labelKey) });
+  return t(unavailableReasonKey(item.command, { status: shell.status, pending: shell.pending }), { command: itemLabel(t, item) });
 }
 
 /**
@@ -137,11 +140,11 @@ function ItemButton({ item }: { readonly item: RibbonItem }) {
   const pressed = item.activeKey === undefined ? undefined : ribbonItemActive(shell.status, item);
   const active = item.action === 'about' ? Boolean(shell.popupOpen) : Boolean(pressed);
   if (!enabled) {
-    return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} disabled hint={unavailable(t, item, shell)} active={active} pressed={pressed} />;
+    return <RibbonButton icon={item.icon as IconName} label={itemLabel(t, item)} disabled hint={unavailable(t, item, shell)} active={active} pressed={pressed} />;
   }
   // Enabled: the tooltip is the item's **own limit** (`hintKey`), never the
   // refusal sentence — a live button must not word a reason it does not have.
-  return <RibbonButton icon={item.icon as IconName} label={t(item.labelKey)} active={active} pressed={pressed} hint={item.hintKey ? t(item.hintKey) : undefined} onClick={() => runItem(shell, item)} />;
+  return <RibbonButton icon={item.icon as IconName} label={itemLabel(t, item)} active={active} pressed={pressed} hint={item.hintKey ? t(item.hintKey) : undefined} onClick={() => runItem(shell, item)} />;
 }
 
 /** One item cell, plus the variant caret when the item has variants. */
@@ -164,8 +167,8 @@ function PanelItem({ item, openMenu, setOpenMenu }: PanelItemProps) {
           className="ribbon-item__caret"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          aria-label={t('ribbon.variants', { name: t(item.labelKey) })}
-          title={t('ribbon.variants', { name: t(item.labelKey) })}
+          aria-label={t('ribbon.variants', { name: itemLabel(t, item) })}
+          title={t('ribbon.variants', { name: itemLabel(t, item) })}
           onClick={() => setOpenMenu(menuOpen ? null : item.id)}
         >
           <Icon name="chevronDown" size={12} />
@@ -179,7 +182,7 @@ function VariantMenu({ item, onClose }: { readonly item: RibbonItem; readonly on
   const { t } = useI18n();
   const shell = useShell();
   return (
-    <div className="ribbon-panel__menu" role="menu" aria-label={t('ribbon.variants', { name: t(item.labelKey) })}>
+    <div className="ribbon-panel__menu" role="menu" aria-label={t('ribbon.variants', { name: itemLabel(t, item) })}>
       {(item.variants ?? []).map(variant => {
         const enabled = itemEnabled(shell, variant);
         return (
@@ -195,7 +198,7 @@ function VariantMenu({ item, onClose }: { readonly item: RibbonItem; readonly on
             onClick={() => { runItem(shell, variant); onClose(); }}
           >
             <Icon name={(variant.icon ?? item.icon) as IconName} size={15} />
-            <span>{t(variant.labelKey)}</span>
+            <span>{itemLabel(t, variant)}</span>
             {enabled ? null : <em className="ribbon-menu-item__badge">{t('command.badge.unwired')}</em>}
           </button>
         );
@@ -227,7 +230,7 @@ function PanelLauncher({ panel }: { readonly panel: RibbonPanel }) {
         size="xs"
         label={label}
         disabled
-        title={t(PANEL_DIALOG_MISSING_KEY, { panel: t(panel.titleKey) })}
+        title={t(PANEL_DIALOG_MISSING_KEY, { panel: panelTitle(t, panel) })}
       />
     );
   }
@@ -241,8 +244,8 @@ function PanelLauncher({ panel }: { readonly panel: RibbonPanel }) {
       label={label}
       disabled={!enabled}
       title={enabled
-        ? `${label} — ${t(panel.titleKey)}`
-        : `${label} — ${unavailable(t, { command, labelKey: panel.titleKey }, shell)}`}
+        ? `${label} — ${panelTitle(t, panel)}`
+        : `${label} — ${unavailable(t, { command, labelKey: panel.titleKey, ...(panel.title === undefined ? {} : { label: panel.title }) }, shell)}`}
       onClick={enabled ? () => shell.runCommand(command) : undefined}
     />
   );
@@ -272,7 +275,7 @@ function Panel({ panel, openMenu, setOpenMenu }: PanelProps) {
   }
   const openItem = items.find(item => item.id === openMenu && item.variants?.length);
   return (
-    <section className="ribbon-panel" aria-label={t(panel.titleKey)}>
+    <section className="ribbon-panel" aria-label={panelTitle(t, panel)}>
       <div className="ribbon-panel__body">
         {groups.map((group, index) => (
           <div
@@ -289,7 +292,7 @@ function Panel({ panel, openMenu, setOpenMenu }: PanelProps) {
         {openItem ? <VariantMenu item={openItem} onClose={() => setOpenMenu(null)} /> : null}
       </div>
       <footer className="ribbon-panel__title">
-        <span>{t(panel.titleKey)}</span>
+        <span>{panelTitle(t, panel)}</span>
         {panel.launcher ? <PanelLauncher panel={panel} /> : null}
       </footer>
     </section>
@@ -436,7 +439,7 @@ export function Ribbon() {
               className={['ribbon-tab', entry.accent ? 'is-accent' : '', entry.id === shell.ribbonTab ? 'is-active' : ''].filter(Boolean).join(' ')}
               onClick={() => { setOpenMenu(null); shell.setRibbonTab(entry.id); }}
             >
-              {t(entry.labelKey)}
+              {tabLabel(t, entry)}
             </button>
           ))}
           <div className="ribbon__tabs-spacer" />
@@ -454,7 +457,7 @@ export function Ribbon() {
           className="ribbon__band"
           style={{ '--ribbon-cue-start': `${reserve.start}px`, '--ribbon-cue-end': `${reserve.end}px` } as React.CSSProperties}
         >
-          <div className="ribbon__panels" role="tabpanel" aria-label={t(tab.labelKey)} ref={panelsRef}>
+          <div className="ribbon__panels" role="tabpanel" aria-label={tabLabel(t, tab)} ref={panelsRef}>
             {offeredPanels(tab.panels, shell.palettesAvailable).map(panel => (
               <Panel key={panel.id} panel={panel} openMenu={openMenu} setOpenMenu={setOpenMenu} />
             ))}

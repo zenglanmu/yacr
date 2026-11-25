@@ -61,7 +61,7 @@ const DRAWING = group('concept.drawing', 'concept.toolbar.drawing', [
 
 const EDIT = group('concept.edit', 'concept.toolbar.edit', [
   { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', command: 'MOVE' },
-  pending('PRESSPULL', 'concept.tool.push_pull', 'move'),
+  { id: 'PRESSPULL', labelKey: 'concept.tool.push_pull', icon: 'pushPull', command: 'PRESSPULL', hintKey: 'concept.tool.push_pull.hint' },
   { id: 'ROTATE', labelKey: 'draw.kind.rotate', icon: 'rotate', command: 'ROTATE' },
   pending('FOLLOWME', 'concept.tool.follow_me', 'spline'),
   { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', command: 'SCALE' },

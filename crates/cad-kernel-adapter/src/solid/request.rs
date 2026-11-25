@@ -294,6 +294,10 @@ pub enum SolidOperationFamily {
     Primitive,
     Boolean,
     Chamfer,
+    /// Move one selected face of a solid along its outward normal.
+    OffsetFace,
+    /// Extrude one closed planar profile into a new solid.
+    ExtrudeProfile,
     Transform,
     MassProperties,
 }
@@ -305,6 +309,8 @@ impl SolidOperationFamily {
             SolidOperationFamily::Primitive => "primitive",
             SolidOperationFamily::Boolean => "boolean",
             SolidOperationFamily::Chamfer => "chamfer",
+            SolidOperationFamily::OffsetFace => "offset_face",
+            SolidOperationFamily::ExtrudeProfile => "extrude_profile",
             SolidOperationFamily::Transform => "transform",
             SolidOperationFamily::MassProperties => "mass_properties",
         }
@@ -335,12 +341,53 @@ pub const MAX_PYRAMID_NGON_SIDES: u32 = 1024;
 /// the faces it cuts, and may refuse it (`solid.chamfer_failed`).
 pub const MAX_CHAMFER_DISTANCE: f64 = 1e6;
 
+/// A seam-level sanity bound on a face-offset distance, in drawing units.
+///
+/// Like [`MAX_CHAMFER_DISTANCE`] this is **not** a geometric claim: it exists so
+/// a caller's unit mistake is rejected before any kernel work. The kernel still
+/// decides whether the move fits the body and reports
+/// `solid.offset_face_failed` when it does not.
+pub const MAX_OFFSET_FACE_DISTANCE: f64 = 1e6;
+
+/// A seam-level sanity bound on an extrusion distance, in drawing units.
+///
+/// Like [`MAX_CHAMFER_DISTANCE`] this is **not** a geometric claim: it rejects a
+/// unit mistake before any kernel work. The kernel still decides whether the
+/// profile is a closed loop it can extrude and reports
+/// `solid.extrude_profile_failed` when it cannot.
+pub const MAX_EXTRUDE_DISTANCE: f64 = 1e6;
+
 /// How a modeler picks the single edge a [`SolidOperation::Chamfer`] cuts.
 ///
 /// P2.0 deliberately keeps the seam free of kernel record ids: a caller that
 /// only has the neutral B-rep names a point, and the modeler resolves it against
 /// the body it lifted. A record-id selector would leak a kernel-side numbering
 /// that `BrepData` does not carry.
+/// How a modeler picks the single face an [`SolidOperation::OffsetFace`] moves.
+///
+/// Like [`SolidEdgeSelector`] this stays free of kernel record ids: the caller
+/// names a model-space point and the modeler resolves it against the **trimmed**
+/// faces of the body it lifted (a point on the surface of one face but outside
+/// its trim is not on that face).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SolidFaceSelector {
+    /// The trimmed face nearest to this model-space point, within the modeler's
+    /// pick tolerance (`max(1e-9, 1e-3 · bounding-box diagonal)`).
+    ///
+    /// A point farther than that from every face is refused with the stable
+    /// reason `solid.face_not_found` instead of moving an unrelated face.
+    NearestToPoint(Point3),
+}
+
+impl SolidFaceSelector {
+    /// The model-space pick point.
+    pub fn point(self) -> Point3 {
+        match self {
+            SolidFaceSelector::NearestToPoint(point) => point,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SolidEdgeSelector {
     /// The edge whose curve is nearest to this model-space point.
@@ -389,6 +436,36 @@ pub enum SolidOperation<'a> {
         distance: f64,
         second: Option<f64>,
     },
+    /// Move one face of a body along its outward normal (SketchUp Push/Pull's
+    /// atomic operation).
+    ///
+    /// `distance` is **signed**: positive moves the face outward (the body gains
+    /// the swept volume), negative inward (the body loses it). Zero is refused by
+    /// [`SolidRequest::validate`], never executed as a no-op. The kernel keeps the
+    /// body valid by extending or trimming the adjacent faces; a move it cannot
+    /// build (no room, a collapsing offset, a wall folding) is
+    /// `SolidOutcome::Unsupported` with `solid.offset_face_failed`, never an
+    /// approximation.
+    OffsetFace {
+        brep: &'a BrepData,
+        selector: SolidFaceSelector,
+        distance: f64,
+    },
+    /// Extrude one closed planar profile into a new solid.
+    ///
+    /// `profile` is the loop in traversal order (lines, arcs and a lone circle),
+    /// all in one plane; `direction` is the extrusion direction (any non-zero
+    /// length, square to the plane) and `distance` is strictly positive along it
+    /// — a caller that wants the other side negates `direction` instead of
+    /// passing a negative distance, so the kernel call is never ambiguous. The
+    /// produced body is capped on both ends. A profile the kernel cannot close
+    /// or extrude is `SolidOutcome::Unsupported` with
+    /// `solid.extrude_profile_failed`, never an approximate body.
+    ExtrudeProfile {
+        profile: &'a [cad_domain::BrepCurve],
+        direction: Point3,
+        distance: f64,
+    },
     /// Map a body through a transform.
     ///
     /// Only a **similarity** (uniform scale + rotation/reflection + translation)
@@ -409,6 +486,8 @@ impl SolidOperation<'_> {
             SolidOperation::Primitive { .. } => SolidOperationFamily::Primitive,
             SolidOperation::Boolean { .. } => SolidOperationFamily::Boolean,
             SolidOperation::Chamfer { .. } => SolidOperationFamily::Chamfer,
+            SolidOperation::OffsetFace { .. } => SolidOperationFamily::OffsetFace,
+            SolidOperation::ExtrudeProfile { .. } => SolidOperationFamily::ExtrudeProfile,
             SolidOperation::Transform { .. } => SolidOperationFamily::Transform,
             SolidOperation::MassProperties { .. } => SolidOperationFamily::MassProperties,
         }
@@ -467,6 +546,39 @@ impl SolidRequest<'_> {
                     require_chamfer_distance("second", *second)?;
                 }
                 require_finite_point("selector point", selector.point())
+            }
+            SolidOperation::OffsetFace {
+                brep,
+                selector,
+                distance,
+            } => {
+                require_operand("brep", brep)?;
+                require_face_offset_distance(*distance)?;
+                require_finite_point("selector point", selector.point())
+            }
+            SolidOperation::ExtrudeProfile {
+                profile,
+                direction,
+                distance,
+            } => {
+                require_profile(profile)?;
+                require_finite_point("direction", *direction)?;
+                if direction.x == 0.0 && direction.y == 0.0 && direction.z == 0.0 {
+                    return Err(SolidInputError {
+                        code: codes::SOLID_INVALID_POINT,
+                        message: "extrusion direction must be non-zero".into(),
+                    });
+                }
+                require_positive("extrude distance", *distance)?;
+                if *distance > MAX_EXTRUDE_DISTANCE {
+                    return Err(SolidInputError {
+                        code: codes::SOLID_INVALID_DIMENSION,
+                        message: format!(
+                            "extrude distance must be at most {MAX_EXTRUDE_DISTANCE}, got {distance}"
+                        ),
+                    });
+                }
+                Ok(())
             }
             SolidOperation::Transform { brep, transform } => {
                 require_operand("brep", brep)?;
@@ -567,6 +679,42 @@ fn require_chamfer_distance(name: &str, value: f64) -> Result<(), SolidInputErro
                 "{name} must be finite and in (0, {MAX_CHAMFER_DISTANCE}], got {value}"
             ),
         });
+    }
+    Ok(())
+}
+
+/// A face-offset distance: finite, non-zero and within
+/// [`MAX_OFFSET_FACE_DISTANCE`]. Either sign is meaningful (outward/inward), so
+/// only zero and non-finite values are refused.
+fn require_face_offset_distance(value: f64) -> Result<(), SolidInputError> {
+    if !value.is_finite() || value == 0.0 || value.abs() > MAX_OFFSET_FACE_DISTANCE {
+        return Err(SolidInputError {
+            code: codes::SOLID_INVALID_DIMENSION,
+            message: format!(
+                "face offset distance must be finite, non-zero and at most \
+                 {MAX_OFFSET_FACE_DISTANCE} in magnitude, got {value}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// A profile: at least one curve, and every curve a family this seam can carry
+/// (a line, a proper arc or a full circle — never [`cad_domain::BrepCurve::Unsupported`]).
+fn require_profile(profile: &[cad_domain::BrepCurve]) -> Result<(), SolidInputError> {
+    if profile.is_empty() {
+        return Err(SolidInputError {
+            code: codes::SOLID_EMPTY_OPERAND,
+            message: "profile carries no curve".into(),
+        });
+    }
+    for curve in profile {
+        if matches!(curve, cad_domain::BrepCurve::Unsupported { .. }) {
+            return Err(SolidInputError {
+                code: codes::SOLID_INVALID_DIMENSION,
+                message: "profile carries an unsupported curve".into(),
+            });
+        }
     }
     Ok(())
 }

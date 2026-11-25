@@ -363,3 +363,178 @@ fn a_submission_without_a_session_is_cad_waiting() {
     assert_eq!(outcome.request_id.as_deref(), Some("req-11"));
     assert_eq!(outcome.error.as_deref(), Some(CAD_WAITING));
 }
+
+#[test]
+fn a_commit_creates_a_polyline_and_a_dbtext() {
+    let session = fresh_session();
+    let (_document, _database, start_revision) = document_facts(&session);
+    let outcome = commit(
+        &session,
+        "req-polyline-text",
+        commit_parameters(
+            &session,
+            start_revision,
+            serde_json::json!([
+                {
+                    "typeName": "Polyline",
+                    "layer": "0",
+                    "space": "model",
+                    "parameters": {
+                        "points": [[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [4.0, 3.0, 0.0]],
+                        "closed": true,
+                    },
+                },
+                {
+                    "typeName": "DBText",
+                    "layer": "0",
+                    "space": "model",
+                    "parameters": {
+                        "value": "Roof",
+                        "origin": [1.0, 2.0, 0.0],
+                        "height": 2.5,
+                        "rotation": 0.0,
+                    },
+                },
+            ]),
+        ),
+    );
+    assert!(outcome.ok, "{outcome:?}");
+    let value = outcome.value.expect("a value");
+    let created = value["created"].as_array().expect("a created list");
+    assert_eq!(created.len(), 2, "two inserts created two entities");
+    let (_document, _database, end_revision) = document_facts(&session);
+    assert_eq!(end_revision, start_revision + 1, "one commit, one revision");
+}
+
+#[test]
+fn malformed_polyline_and_dbtext_payloads_are_refused_by_field() {
+    let session = fresh_session();
+    let (_document, _database, revision) = document_facts(&session);
+    let cases = [
+        (
+            serde_json::json!([{
+                "typeName": "Polyline",
+                "layer": "0",
+                "space": "model",
+                "parameters": { "points": [[0.0, 0.0, 0.0], [1.0, 0.0]], "closed": false },
+            }]),
+            "api.invalid_argument: parameters.points[1]",
+        ),
+        (
+            serde_json::json!([{
+                "typeName": "Polyline",
+                "layer": "0",
+                "space": "model",
+                "parameters": { "points": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]] },
+            }]),
+            "api.invalid_argument: parameters.closed",
+        ),
+        (
+            serde_json::json!([{
+                "typeName": "DBText",
+                "layer": "0",
+                "space": "model",
+                "parameters": { "value": "", "origin": [0.0, 0.0, 0.0], "height": 2.5, "rotation": 0.0 },
+            }]),
+            "api.invalid_argument: parameters.value",
+        ),
+        (
+            serde_json::json!([{
+                "typeName": "DBText",
+                "layer": "0",
+                "space": "model",
+                "parameters": { "value": "Roof", "origin": [0.0, 0.0, 0.0], "height": 2.5 },
+            }]),
+            "api.invalid_argument: parameters.rotation",
+        ),
+    ];
+    for (edits, marker) in cases {
+        let outcome = commit(
+            &session,
+            "req-malformed-insert",
+            commit_parameters(&session, revision, edits),
+        );
+        assert_eq!(error_of(outcome), marker);
+    }
+    let (_document, _database, after) = document_facts(&session);
+    assert_eq!(
+        after, revision,
+        "a refused insert never advances the revision"
+    );
+}
+
+#[test]
+fn set_selection_replaces_the_live_selection_and_clears_with_an_empty_list() {
+    let session = fresh_session();
+    let (_document, _database, revision) = document_facts(&session);
+    let inserted = commit(
+        &session,
+        "req-select-insert",
+        commit_parameters(&session, revision, line_insert()),
+    );
+    let created = inserted.value.expect("a value")["created"][0]
+        .as_str()
+        .expect("a decimal id")
+        .to_string();
+
+    let selected = session.api_submit(submission(
+        "req-select",
+        "EditorInput",
+        "editor.setSelection",
+        Some(serde_json::json!({ "objectIds": [created] })),
+    ));
+    assert!(selected.ok, "{selected:?}");
+    assert_eq!(
+        selected.value.expect("a value"),
+        serde_json::json!({ "selected": 1 })
+    );
+    assert_eq!(
+        session.snapshot(None, None, 0).selection.count,
+        1,
+        "the host applied the selection"
+    );
+
+    let cleared = session.api_submit(submission(
+        "req-clear",
+        "EditorInput",
+        "editor.setSelection",
+        Some(serde_json::json!({ "objectIds": [] })),
+    ));
+    assert!(cleared.ok, "{cleared:?}");
+    assert_eq!(
+        cleared.value.expect("a value"),
+        serde_json::json!({ "selected": 0 })
+    );
+    assert_eq!(session.snapshot(None, None, 0).selection.count, 0);
+}
+
+#[test]
+fn set_selection_refuses_unknown_ids_and_malformed_bodies_by_name() {
+    let session = fresh_session();
+    let unknown = session.api_submit(submission(
+        "req-select-unknown",
+        "EditorInput",
+        "editor.setSelection",
+        Some(serde_json::json!({ "objectIds": ["999999"] })),
+    ));
+    assert_eq!(error_of(unknown), "cad_api.unknown_object: 999999");
+    assert_eq!(session.snapshot(None, None, 0).selection.count, 0);
+
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({ "objectIds": "12" }),
+        serde_json::json!({ "objectIds": [12] }),
+        serde_json::json!({ "objectIds": ["not-a-number"] }),
+    ] {
+        let outcome = session.api_submit(submission(
+            "req-select-malformed",
+            "EditorInput",
+            "editor.setSelection",
+            Some(body),
+        ));
+        assert!(
+            error_of(outcome).starts_with("api.invalid_argument: parameters.objectIds"),
+            "malformed body refused by field"
+        );
+    }
+}

@@ -86,9 +86,9 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
 - 新增**域/插件 UI 插槽**（`apps/desktop-ui/src/domains/ui/`）：`menu`（`RibbonTab[]`）、
   `toolbar`（`RibbonPanel[]`，左列）、`tray`（声明式 `TrayPanel[]`，右列）。域用
   `registerDomainUi` 注册；插件用 `registerPluginUi({domain:'*'|id,...})` 增量扩展菜单/工具组/
-  托盘，命令仍走 `runItem` → `shell.canCommand` → `cad_command`/`runAction`。插件面在
-  `apps/desktop-ui/src/plugins/ui.ts`；`cad-plugin-api` 的 `ui.register` **尚未**发布，不得把
-  它写进已发布能力表。
+  托盘，命令仍走 `runItem` → `shell.canCommand` → `cad_command`/`runAction`。公开插件面是
+  `@yacr/plugin-api` 的 `api.ui.register`（2026-11-25 发布，client-local，无描述符行）；
+  `apps/desktop-ui/src/plugins/ui.ts` 只保留宿主侧注册入口，`ui.register` 不得写进已发布能力表。
 - 结构按官方 Help 转录到 `apps/desktop-ui/test/fixtures/sketchup-2024-concept.json`：
   9 个顶层菜单、8 个工具栏分组、托盘面板顺序、官方默认单键表。未实现工具用 `pendingKey`
   的 disabled 行表示（`RibbonPendingItem`），不摆假按钮。
@@ -101,8 +101,9 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
   ribbon/命令行/`data-domain` 主题都读它；`currentDomain()` 仍保留请求值用于提示与切换器。
 - **仍未实现/未验证**：推拉、跟随、剖面、位置相机/漫游/环视、材质、场景/阴影/雾/照片匹配、
   推断锁定与吸附锁定；这些保持稳定拒绝或显式 pending。真实窗口/GPU/像素、Windows/macOS/
-  Android/Web 运行结论一律 **NOT VERIFIED**；concept 的紧凑抽屉只折入工具组（无第二套菜单/托盘），
-  `ui.register` 公共插件命名空间是后续阶段。
+  Android/Web 运行结论一律 **NOT VERIFIED**；concept 的紧凑抽屉只折入工具组（无第二套菜单/托盘）。
+  插件 `ui.register` 已发布；仍未实现的是插件自定义托盘 body、插件自带 locale 切换，以及
+  移动端抽屉读取 `uiLayoutFor`。
 
 ## 后果
 

@@ -52,6 +52,12 @@ const FIELD_CENTER: &str = "parameters.center";
 const FIELD_RADIUS: &str = "parameters.radius";
 const FIELD_START_ANGLE: &str = "parameters.startAngle";
 const FIELD_END_ANGLE: &str = "parameters.endAngle";
+const FIELD_POINTS: &str = "parameters.points";
+const FIELD_CLOSED: &str = "parameters.closed";
+const FIELD_VALUE: &str = "parameters.value";
+const FIELD_ORIGIN: &str = "parameters.origin";
+const FIELD_HEIGHT: &str = "parameters.height";
+const FIELD_ROTATION: &str = "parameters.rotation";
 
 /// The active space's wire name: `"model"` for model space, else the layout name.
 ///
@@ -105,6 +111,37 @@ fn point(value: Option<&Value>, field: &str) -> Result<Point3, String> {
         y: coordinates[1],
         z: coordinates[2],
     })
+}
+
+/// Parse an array of `[x, y, z]` triples.
+fn point_list(value: Option<&Value>, field: &str) -> Result<Vec<Point3>, String> {
+    let Some(value) = value else {
+        return Err(api_call_invalid_argument(field));
+    };
+    let Some(entries) = value.as_array() else {
+        return Err(api_call_invalid_argument(field));
+    };
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| point(Some(entry), &format!("{field}[{index}]")))
+        .collect()
+}
+
+/// Parse a required boolean.
+fn boolean(value: Option<&Value>, field: &str) -> Result<bool, String> {
+    value
+        .and_then(Value::as_bool)
+        .ok_or_else(|| api_call_invalid_argument(field))
+}
+
+/// Parse a required non-empty string.
+fn text(value: Option<&Value>, field: &str) -> Result<String, String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| api_call_invalid_argument(field))
 }
 
 /// Parse one scalar number.
@@ -255,6 +292,16 @@ fn map_new_entity(type_name: &str, parameters: Option<&Value>) -> Result<NewEnti
             radius: number(field("radius"), FIELD_RADIUS)?,
             start_angle: number(field("startAngle"), FIELD_START_ANGLE)?,
             end_angle: number(field("endAngle"), FIELD_END_ANGLE)?,
+        }),
+        "Polyline" => Ok(NewEntity::Polyline {
+            points: point_list(field("points"), FIELD_POINTS)?,
+            closed: boolean(field("closed"), FIELD_CLOSED)?,
+        }),
+        "DBText" => Ok(NewEntity::Text {
+            value: text(field("value"), FIELD_VALUE)?,
+            origin: point(field("origin"), FIELD_ORIGIN)?,
+            height: number(field("height"), FIELD_HEIGHT)?,
+            rotation: number(field("rotation"), FIELD_ROTATION)?,
         }),
         _ => Err(api_call_invalid_argument(FIELD_TYPE_NAME)),
     }
