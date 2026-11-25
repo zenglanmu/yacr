@@ -27,7 +27,13 @@ What this file pins is the wiring that keeps such a compile gate honest:
       bundler stays off; release packaging is the manual, event-gated script);
   (f) `.github/workflows/build.yml`'s `macos-check` builds the frontend
       **before** `cargo check -p app-macos`, because `tauri::generate_context!`
-      embeds `frontendDist` at compile time — exactly like `linux-app`.
+      embeds `frontendDist` at compile time — exactly like `linux-app`;
+  (g) the **open half** of the OS file associations is wired: `CFBundleDocumentTypes`
+      only makes Yacr a candidate, macOS delivers the document as
+      `RunEvent::Opened { urls }` (never a process argument), so `entry.rs` must
+      convert the file URL to a path and hand it to the host queue, and the tick
+      must drain that queue (a launch-time event arrives before the CAD session
+      exists; dropping it opens the welcome page instead of the document).
 
 Every rule is a pure function over file text so the built-in self-tests can
 mutate a copy and prove the check really fails (a guard that cannot fail is not
@@ -53,6 +59,13 @@ WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
 BIN_NAME = "yacr-macos"
 MACOS_TARGET = 'cfg(target_os = "macos")'
 FRONTEND_DIST = "../desktop-ui/dist"
+
+# The OS-open wiring (check (g)): the event handler, the pure URL → path step and
+# the two host files that queue/drain a launch-time open.
+ENTRY = APP_DIR / "src" / "entry.rs"
+OPEN_EVENT = APP_DIR / "src" / "open_event.rs"
+HOST_MOD = APP_DIR / "src" / "host" / "mod.rs"
+HOST_TICK = APP_DIR / "src" / "host" / "tick.rs"
 
 # The macOS-only dependency set `apps/app-macos/Cargo.toml` must keep: the Tauri
 # runtime, the renderer surface (built from raw `AppKitWindowHandle`s), the shared
@@ -325,9 +338,42 @@ def workflow_problems(text: str) -> list[str]:
     return problems
 
 
+def open_event_problems(entry: str, pure: str, host_mod: str, tick: str) -> list[str]:
+    """Check (g): the OS-open half of the file associations is wired.
+
+    `CFBundleDocumentTypes` only makes Yacr a *candidate*. macOS delivers the
+    chosen file as `RunEvent::Opened { urls }` (an AppKit open event), never as a
+    process argument, so an unhandled event silently opens the welcome page — the
+    association exists on paper but does nothing. The URL → path step is pure code
+    unit-tested on the development host; the queue exists because a double-click
+    **launch** delivers the event before the CAD session is created on the first
+    tick.
+    """
+    problems: list[str] = []
+    for fragment, label in (
+        ("tauri::RunEvent::Opened", "handle `tauri::RunEvent::Opened`"),
+        ("crate::open_event::file_url_to_path", "convert the file URL to a local path"),
+        ("crate::host::open_event::dispatch", "hand the path to the host open queue"),
+    ):
+        if fragment not in entry:
+            problems.append(f"entry.rs: must {label} (missing '{fragment}')")
+    if "pub fn file_url_to_path" not in pure:
+        problems.append(
+            "open_event.rs: must define the pure `file_url_to_path` URL → path step"
+        )
+    if "mod open_event;" not in host_mod:
+        problems.append("host/mod.rs: must declare `mod open_event;`")
+    if "super::open_event::drain()" not in tick:
+        problems.append(
+            "host/tick.rs: must drain queued OS opens (`super::open_event::drain()`) so a "
+            "launch-time event is not lost before the session exists"
+        )
+    return problems
+
+
 def real_file_problems() -> list[str]:
     problems: list[str] = []
-    for path in (MANIFEST, BUILD_RS, CONF):
+    for path in (MANIFEST, BUILD_RS, CONF, ENTRY, OPEN_EVENT, HOST_MOD, HOST_TICK):
         if not path.is_file():
             problems.append(f"missing {path.relative_to(ROOT)}")
     if problems:
@@ -338,6 +384,11 @@ def real_file_problems() -> list[str]:
     problems.extend(manifest_problems(read(MANIFEST)))
     problems.extend(build_rs_problems(read(BUILD_RS)))
     problems.extend(conf_problems(read(CONF), workspace_version()))
+    problems.extend(
+        open_event_problems(
+            read(ENTRY), read(OPEN_EVENT), read(HOST_MOD), read(HOST_TICK)
+        )
+    )
     if WORKFLOW.is_file():
         problems.extend(workflow_problems(read(WORKFLOW)))
     else:
@@ -352,6 +403,10 @@ def self_test_problems() -> list[str]:
     build_rs = read(BUILD_RS)
     conf = read(CONF)
     workflow = read(WORKFLOW)
+    entry = read(ENTRY)
+    pure_open = read(OPEN_EVENT)
+    host_mod = read(HOST_MOD)
+    tick = read(HOST_TICK)
     version = workspace_version()
 
     mutations: tuple[tuple[str, list[str]], ...] = (
@@ -427,6 +482,33 @@ def self_test_problems() -> list[str]:
                 )
             ),
         ),
+        (
+            "OS open event dropped",
+            open_event_problems(
+                entry.replace("tauri::RunEvent::Opened", "tauri::RunEvent::Exiting"),
+                pure_open,
+                host_mod,
+                tick,
+            ),
+        ),
+        (
+            "file URL opened without converting it",
+            open_event_problems(
+                entry.replace("crate::open_event::file_url_to_path", "unused"),
+                pure_open,
+                host_mod,
+                tick,
+            ),
+        ),
+        (
+            "launch-time queue never drained",
+            open_event_problems(
+                entry,
+                pure_open,
+                host_mod,
+                tick.replace("super::open_event::drain()", "super::open_event::ignored()"),
+            ),
+        ),
     )
     for label, found in mutations:
         if not found:
@@ -446,7 +528,8 @@ def main() -> int:
         "macos-host OK: macOS-only tauri target table, `yacr-macos` binary, no CAD dep "
         "outside the macOS table, target-gated tauri-build, shared frontendDist + wasm CSP, "
         "manual packaging (bundle.active false), macos-check builds the frontend "
-        "before the compile (self-tests pass)"
+        "before the compile, OS open events (RunEvent::Opened) converted and queued "
+        "(self-tests pass)"
     )
     return 0
 

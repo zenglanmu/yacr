@@ -76,6 +76,15 @@ NSWindow (Tauri, transparent)
   由 `DocumentArchive` 解码（见下），**不**经过导入器 probe。AppKit 要求主线程，因此
   `begin_open` 的 worker 用 `AppHandle::run_on_main_thread` 把面板送到宿主主线程并等待结果
   （单飞：一次只允许一个交互，终态事件容量 1）。
+- **“打开方式”/双击**：`CFBundleDocumentTypes`（打包脚本的 `Info.plist`）只让 Yacr 成为候选；
+  macOS 把选中的文档作为 AppKit open 事件投递，Tauri 暴露为
+  `tauri::RunEvent::Opened { urls }`，**从不**作为进程参数，所以 `LaunchOptions::from_args`
+  看不到它。`entry.rs` 用纯函数 `open_event::file_url_to_path`（本地 `file:`、空 authority 或
+  `localhost`、percent 解码；拒绝远程 authority/其它 scheme/畸形转义/非 UTF-8）转成路径，再交给
+  `host::open_event` 的**有界（16）有序**队列，由 `host/tick.rs` 在会话可用时经
+  `CadSession::open_path` 走与 `--open` **相同**的漏斗（`Busy` = 已有保存或加载，保留重试；溢出丢最旧
+  并打 `[probe]` 行）。双击**启动**时事件先于首个 tick 创建的会话，因此必须排队而不是丢弃。
+  真机行为 **NOT VERIFIED**（见 `docs/validation-macos-open-event-2026-11-25.md`）。
 - **保存**（ADR-0041）：`SAVE` 写 `.ymodel`（`NSSavePanel`，只允许 `*.ymodel`，预填宿主给出的
   `<stem>.ymodel`）；`EXPORT` 同一面板按目标扩展名分派（`dxf`/`dwg`/`stl`/`obj`/`ply`/`off`/
   `coff`/`ifc`/`skp`/`glb`/`gltf`），`PLOT` 为 `svg`/`pdf`。选择器与打开共用同一单飞准入。

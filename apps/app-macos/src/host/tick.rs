@@ -473,6 +473,16 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         }
     }
 
+    // ---- OS "open with" paths queued before the session/file slot ----
+    //
+    // macOS may deliver `RunEvent::Opened` during launch, before the session
+    // exists, and a second open while a load is running is `Busy`. The host
+    // queues those paths (bounded, ordered) instead of dropping the user's file;
+    // draining every tick picks them up as soon as the slot frees.
+    if cad_mode {
+        super::open_event::drain();
+    }
+
     // ---- CAD session bind (main thread): only a successful bind marks ready ----
     //
     // A bind is attempted **at most once per presenter generation**: a failure is

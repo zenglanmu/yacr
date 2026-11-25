@@ -226,10 +226,10 @@ apps/app-android/
   `documentLaunchOpen` 从 `classes.dex` 移除（Rust 是唯一调用方），运行期必抛 `NoSuchMethodError`；
   该缺陷已在验证中实际捕获。
 - `tauri.conf.json` 的 `bundle.fileAssociations` 从单一权威 `packaging/mime/formats.json` 派生
-  （AGENTS.md 铁律 9），覆盖**全部导入扩展名**：`dwg`、`dxf`、`dgn`、`obj`、`stl`、`ply`、`off`、`coff`、
-  `step`/`stp`、`ifc`、`rvt`、`rte`、`rfa`、`rft`、`skp`。按 `formats.json` 的 mime 表逐条声明 24 条
-  关联（`step`/`stp` 合并进一条），**再加**一条 `application/octet-stream` 通配关联，列出全部 16 个
-  扩展名：内容供应方常把 CAD 文件报成 octet-stream，没有这条「打开方式」永远不匹配。
+  （AGENTS.md 铁律 9），覆盖**全部导入扩展名**：`ymodel`、`dwg`、`dxf`、`dgn`、`obj`、`stl`、`ply`、`off`、
+  `coff`、`gltf`、`glb`、`step`/`stp`、`ifc`、`rvt`、`rte`、`rfa`、`rft`、`skp`。按 `formats.json` 的
+  mime 表逐条声明 27 条关联，**再加**一条 `application/octet-stream` 通配关联（合计 28 条），列出
+  全部 19 个扩展名：内容供应方常把 CAD 文件报成 octet-stream，没有这条「打开方式」永远不匹配。
   - 每条关联都带 `androidIntentActionFilters: ["view"]`，必须是**小写** `view`：Tauri 原样写成
     `android.intent.action.VIEW`，大写 `VIEW` 只会生成永不匹配的 filter。
   - Tauri 为每条关联的每个 mimeType 发一条 `<intent-filter>`，并为每个扩展名再发一条

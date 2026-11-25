@@ -5,7 +5,6 @@ use cad_app::AsyncOpenPoll;
 #[cfg(not(target_arch = "wasm32"))]
 use cad_platform::FsXrefSource;
 use cad_platform::{FileEvent, FilePurpose};
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 /// The status argument for a failed solid boolean.
@@ -71,6 +70,19 @@ fn xref_options_for(_target: &FileTarget) -> Option<Arc<XrefOptions>> {
     None
 }
 
+/// What [`HostCore::open_path`] did with an explicit path.
+///
+/// A carrier-facing OS open ("open with"/double-click) needs to distinguish
+/// "started" from "another file interaction owns the slot right now": the macOS
+/// host keeps a bounded queue instead of silently dropping the user's file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathOpenOutcome {
+    /// The platform read was started; the document arrives through `poll_files`.
+    Started,
+    /// A save is pending or a load is already running; nothing changed.
+    Busy,
+}
+
 impl HostCore {
     /// Open the configured `--open` drawing at startup (or fit the demo).
     ///
@@ -82,20 +94,44 @@ impl HostCore {
     pub fn open_configured_drawing(&self) -> CadResult<()> {
         self.metrics()?;
         if let Some(path) = &self.options.drawing {
-            let target = FileTarget::from_path(&path.to_string_lossy());
-            self.begin_open_attempt();
-            self.open_pending.set(true);
-            if let Err(error) = self.files.begin_open_target(&target) {
-                self.open_pending.set(false);
-                return Err(error);
-            }
-            self.drain_files()?;
+            self.open_path(path)?;
         } else if self.options.document_at_start == StartDocument::Demo {
             // Historical demo framing only: an empty start has no document and a
             // blank document has no extent.
             self.controller.borrow_mut().fit_opened_document()?;
         }
         Ok(())
+    }
+
+    /// Open one explicit filesystem path (an OS "open with"/double-click).
+    ///
+    /// This is the runtime counterpart of the startup `--open` drawing and uses
+    /// the **same** funnel (`begin_open_target` → poll → install); the caller
+    /// owns the path, so unlike [`Self::open_recent`] there is no recent-row
+    /// validation. A save or an in-flight load owns the single file-interaction
+    /// slot: the answer is then [`PathOpenOutcome::Busy`] and nothing is
+    /// changed, so the carrier can queue the path and retry instead of dropping
+    /// the user's file or faking success.
+    pub fn open_path(&self, path: &Path) -> CadResult<PathOpenOutcome> {
+        if self.save_pending() || (!self.options.headless && self.loading()) {
+            return Ok(PathOpenOutcome::Busy);
+        }
+        let target = FileTarget::from_path(&path.to_string_lossy());
+        self.begin_open_attempt();
+        self.open_pending.set(true);
+        if let Err(error) = self.files.begin_open_target(&target) {
+            self.open_pending.set(false);
+            return Err(error);
+        }
+        self.drain_files()?;
+        if self.open_pending.get() {
+            if !self.options.headless {
+                self.set_catalog_status("linux.picker_waiting", &[])?;
+            }
+        } else {
+            self.grade_pending_open()?;
+        }
+        Ok(PathOpenOutcome::Started)
     }
 
     /// Arm the supersession guard for a new open attempt.

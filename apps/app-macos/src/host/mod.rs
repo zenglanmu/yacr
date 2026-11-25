@@ -42,6 +42,7 @@ mod fonts;
 mod host_read;
 mod init;
 mod layers;
+pub(crate) mod open_event;
 mod popup;
 mod recent;
 mod release;

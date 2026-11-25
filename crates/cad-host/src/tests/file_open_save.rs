@@ -357,6 +357,40 @@ fn cancelled_open_is_discarded_and_progress_is_cancellable_then_idle() {
 }
 
 #[test]
+fn an_explicit_path_opens_through_the_platform_open_funnel() {
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files.clone(), false);
+    let outcome = core
+        .open_path(Path::new("/tmp/plan.rvt"))
+        .expect("the platform read starts");
+    assert_eq!(outcome, crate::PathOpenOutcome::Started);
+    let target = files
+        .opened_target
+        .borrow()
+        .clone()
+        .expect("begin_open_target saw the caller's own path");
+    assert_eq!(target.opaque, "/tmp/plan.rvt");
+    assert_eq!(target.display_name, "/tmp/plan.rvt");
+}
+
+#[test]
+fn an_explicit_path_while_a_load_runs_is_busy_and_is_not_started() {
+    let files = Rc::new(FakeFiles::default());
+    let core = core_with(files.clone(), false);
+    core.request_open().expect("the chooser starts");
+    assert!(core.loading(), "the picker read is pending");
+    assert_eq!(
+        core.open_path(Path::new("/tmp/second.dwg"))
+            .expect("busy is an answer, not an error"),
+        crate::PathOpenOutcome::Busy
+    );
+    assert!(
+        files.opened_target.borrow().is_none(),
+        "a busy session must not start a second platform open"
+    );
+}
+
+#[test]
 fn delivered_open_retains_the_platform_target_until_publish() {
     let files = Rc::new(FakeFiles::default());
     let core = core_with(files.clone(), true);

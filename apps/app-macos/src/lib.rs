@@ -25,16 +25,21 @@
 //!
 //! **macOS only**: `tauri`/`wry`/`tao`, the Objective-C bindings and the Metal
 //! presenter are `target_os = "macos"` dependencies, so every module except
-//! [`entry`] is gated. [`entry`] is target-independent on purpose: its `run` body
-//! is `cfg`-gated and the non-macOS branch is an explicit NOT IMPLEMENTED refusal,
-//! so a Linux/Windows workspace check type-checks the refusal instead of skipping
-//! it (and its unit test runs on those hosts).
+//! [`entry`] and [`open_event`] is gated. [`entry`] is target-independent on
+//! purpose: its `run` body is `cfg`-gated and the non-macOS branch is an explicit
+//! NOT IMPLEMENTED refusal, so a Linux/Windows workspace check type-checks the
+//! refusal instead of skipping it (and its unit test runs on those hosts).
+//! [`open_event`] is the pure URL → path half of the OS open gesture, unit-tested
+//! on those hosts too.
 //!
 //! Verification reality: only compilation is claimed (`cargo check -p app-macos
 //! --target aarch64-apple-darwin --all-targets` and the CI `macos-check` gate).
 //! Runtime, visual, Metal, DPI and native-dialog behaviour are **NOT VERIFIED**.
 
 pub mod entry;
+// The URL → path step of the macOS open-file gesture. Pure std code, compiled
+// (and unit-tested) on every host so the contract is not only a macOS claim.
+pub mod open_event;
 
 #[cfg(target_os = "macos")]
 pub mod host;

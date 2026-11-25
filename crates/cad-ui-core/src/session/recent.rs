@@ -11,8 +11,14 @@
 //! capability answers `supported: false`, an empty list and the stable
 //! `unsupported-runtime: <command>` reason. A malformed/absent preference file
 //! is an empty list, never a fabricated row.
+//!
+//! The same open funnel also serves an **explicit path** the carrier received from
+//! the OS (macOS `RunEvent::Opened`); that is not a recent row, so it skips the
+//! list validation. See [`CadSession::open_path`].
 
-use cad_host::RecentEntry;
+use std::path::Path;
+
+use cad_host::{PathOpenOutcome, RecentEntry};
 
 use super::CadSession;
 
@@ -76,6 +82,23 @@ impl CadSession {
     pub fn open_recent(&self, opaque: &str, display_name: &str) -> Result<(), String> {
         self.core
             .open_recent(opaque, display_name)
+            .map_err(|error| super::cad_error_text(&error))
+    }
+
+    /// Open one explicit filesystem path at runtime (an OS "open with").
+    ///
+    /// This is the macOS `RunEvent::Opened` seam — the runtime counterpart of the
+    /// startup `--open` drawing, on the **same** funnel
+    /// ([`cad_host::HostCore::open_path`]): import worker or synchronous install,
+    /// xref policy rooted at the drawing's directory, `openedSource` notice and
+    /// recent/source bookkeeping. It is **not** a recent-row reopen, so there is no
+    /// list validation: the caller owns the path. `Started` means the platform read
+    /// began (the document still arrives through `cad_status`); `Busy` means a save
+    /// or load already owns the slot and the carrier should retry rather than drop
+    /// the user's file. A platform refusal is returned unchanged.
+    pub fn open_path(&self, path: &Path) -> Result<PathOpenOutcome, String> {
+        self.core
+            .open_path(path)
             .map_err(|error| super::cad_error_text(&error))
     }
 }

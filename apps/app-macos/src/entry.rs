@@ -87,6 +87,36 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             crate::host::close_presenter();
             crate::host::request_stop(&run_shared, &run_telemetry);
         }
+        // The other half of the OS file associations: `CFBundleDocumentTypes`
+        // makes Yacr a candidate, and this is the document arriving. macOS never
+        // passes it as a process argument, so `LaunchOptions::from_args` is blind
+        // to it. A launch-time event can precede the CAD session; the host queues
+        // it (bounded, ordered) and the tick drains it.
+        tauri::RunEvent::Opened { urls } => {
+            eprintln!("[probe] run event: Opened ({} url(s))", urls.len());
+            for url in urls {
+                let Some(path) = crate::open_event::file_url_to_path(url.as_str()) else {
+                    eprintln!("[probe] open event refused (not a local file URL): {url}");
+                    continue;
+                };
+                let dispatch = crate::host::open_event::dispatch(path.clone());
+                if let Some(dropped) = dispatch.dropped {
+                    eprintln!(
+                        "[probe] open event queue full, dropped oldest: {}",
+                        dropped.display()
+                    );
+                }
+                eprintln!(
+                    "[probe] open event {}: {}",
+                    if dispatch.started {
+                        "started"
+                    } else {
+                        "queued"
+                    },
+                    path.display()
+                );
+            }
+        }
         _ => {}
     });
     Ok(())
