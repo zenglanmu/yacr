@@ -1,15 +1,17 @@
 //! Contract test for a **kernel-produced round fillet** in this crate's neutral
 //! B-rep (ADR-0036 P2.1c-2, first slice).
 //!
-//! The pinned kernel records a round as `Surface::Cone { half_angle: 0.0 }` plus a
-//! rational NURBS net, which is a cylinder. `record::surface` maps that label to
-//! [`BrepSurface::Cylinder`] (an exact-zero test, unit-tested in `src`), so a round
-//! the kernel produced lifts, measures and booleans through the existing
-//! trimmed-side path. This file pins, against the real kernel:
+//! The pinned kernel records a round as `Surface::Cylinder` (a previous pin wrote
+//! the same face as a zero-slope `Surface::Cone`, which `record::surface` still
+//! reclassifies) plus a rational NURBS net. That label maps to
+//! [`BrepSurface::Cylinder`], so a round the kernel produced lifts, measures and
+//! booleans through the existing trimmed-side path. This file pins, against the
+//! real kernel:
 //!
-//! 1. the blend's own record: face count, **label census** (`cone`, never `blend`
-//!    at this pin), the presence and shape of `Face.nurbs` (3×2, knots, degrees,
-//!    weights `[1, 1, √2⁄2, √2⁄2, 1, 1]`) and the loop families;
+//! 1. the blend's own record: face count, **label census** (`cylinder` for a round,
+//!    `blend` for a G² round at this pin), the presence and shape of `Face.nurbs`
+//!    (3×2, knots, degrees, weights `[1, 1, √2⁄2, √2⁄2, 1, 1]`) and the loop
+//!    families;
 //! 2. `Body::mass_properties(1e-6)` against the closed form
 //!    `V = 1 − (1 − π/4)·r²` for one full-length edge of a unit cube, at
 //!    r = 0.1 / 0.25 / 0.49;
@@ -18,8 +20,9 @@
 //!    round become, and the volume of the result;
 //! 4. the two mappings that stay refused — the round's **net** as
 //!    [`BrepSurface::Nurbs`] (no exact pcurve of a circle on a spline surface) and
-//!    a neutral **cone with no slope** written back out (the record writer needs a
-//!    slope) — which is why the reclassification happens on the way in.
+//!    a neutral **cone with no slope** written back out (the record writer still
+//!    needs a slope); the second documents why the reader keeps its zero-slope
+//!    cone compatibility mapping for records written by older pins.
 //!
 //! # What this file cannot do
 //!
@@ -192,6 +195,19 @@ fn loop_families(record: &Record, face: &solidcore_record::brep::Face) -> Vec<Ve
         .collect()
 }
 
+/// A loop's curve kinds as a cycle: the smallest rotation, so the loop's starting
+/// use (which this pin moved) does not have to be pinned.
+fn canonical_cycle(kinds: &[&'static str]) -> Vec<&'static str> {
+    (0..kinds.len())
+        .map(|offset| {
+            (0..kinds.len())
+                .map(|index| kinds[(offset + index) % kinds.len()])
+                .collect::<Vec<_>>()
+        })
+        .min()
+        .expect("a loop has at least one use")
+}
+
 /// The face's `Face.nurbs` net as a neutral NURBS surface.
 fn net(surface: &Surface) -> BrepSurface {
     match surface {
@@ -222,8 +238,8 @@ fn net(surface: &Surface) -> BrepSurface {
 }
 
 /// One record face's neutral surface, **as the reader maps it** (`record::surface`):
-/// planes analytic, and a cone of exactly zero slope as the cylinder it is. Any
-/// other label is a measurement this file does not expect.
+/// planes analytic and the round's cylinder label as itself. Any other label is a
+/// measurement this file does not expect.
 fn reader_surface(face: &solidcore_record::brep::Face) -> BrepSurface {
     match &face.surface {
         Surface::Plane {
@@ -238,27 +254,17 @@ fn reader_surface(face: &solidcore_record::brep::Face) -> BrepSurface {
                 u_dir: unit(u),
             }
         }
-        // The only non-planar label a one-edge round of a box produces, and the
-        // one the reader reclassifies: `half_angle == 0.0` is a cylinder.
-        Surface::Cone {
-            frame,
-            radius_at_origin,
-            half_angle,
-        } => {
-            assert_eq!(
-                *half_angle, 0.0,
-                "the round's label is a zero-slope cone; a real cone is a different face"
-            );
-            BrepSurface::Cylinder {
-                origin: point_of(frame.origin),
-                axis: unit(cross(
-                    unit(point_of(frame.x_axis)),
-                    unit(point_of(frame.y_axis)),
-                )),
-                ref_dir: unit(point_of(frame.x_axis)),
-                radius: *radius_at_origin,
-            }
-        }
+        // The only non-planar label a one-edge round of a box produces at this
+        // pin: the kernel labels the round as the cylinder it is.
+        Surface::Cylinder { frame, radius } => BrepSurface::Cylinder {
+            origin: point_of(frame.origin),
+            axis: unit(cross(
+                unit(point_of(frame.x_axis)),
+                unit(point_of(frame.y_axis)),
+            )),
+            ref_dir: unit(point_of(frame.x_axis)),
+            radius: *radius,
+        },
         other => panic!("an unexpected face label '{}'", label(other)),
     }
 }
@@ -434,7 +440,7 @@ fn assert_pinned(measured: f64, pinned: f64, what: &str) {
 }
 
 #[test]
-fn a_round_on_one_unit_cube_edge_is_a_zero_slope_cone_with_a_rational_net() {
+fn a_round_on_one_unit_cube_edge_is_a_cylinder_with_a_rational_net() {
     let blended = rounded_cube(Blend::Round, R);
     let record = &blended.record;
 
@@ -452,26 +458,22 @@ fn a_round_on_one_unit_cube_edge_is_a_zero_slope_cone_with_a_rational_net() {
         "one bounded region, one shell, no void"
     );
 
-    // The label census: the round face is **not** a `Surface::Blend` at this pin.
+    // The label census: the round face is a cylinder at this pin, not a `Blend`.
     assert_eq!(
         census(record),
-        vec!["plane", "plane", "plane", "plane", "plane", "plane", "cone"],
+        vec!["plane", "plane", "plane", "plane", "plane", "plane", "cylinder"],
         "the round face's analytic label"
     );
     let round = &record.faces[6];
-    let Surface::Cone {
-        frame,
-        radius_at_origin,
-        half_angle,
-    } = &round.surface
-    else {
-        panic!("the round face is not a cone: {}", label(&round.surface))
+    let Surface::Cylinder { frame, radius } = &round.surface else {
+        panic!(
+            "the round face is not a cylinder: {}",
+            label(&round.surface)
+        )
     };
-    // A cone of zero half angle is a cylinder — the label the reader reclassifies.
-    assert_eq!(*half_angle, 0.0, "the round's cone has no slope");
     assert!(
-        (radius_at_origin - R).abs() < 1e-12,
-        "the label's radius is the round's: {radius_at_origin}"
+        (radius - R).abs() < 1e-12,
+        "the label's radius is the round's: {radius}"
     );
     // The rounded edge is the cube's at x = 0, y = 1: its axis sits at (r, 1 − r).
     let axis = unit(cross(
@@ -565,18 +567,35 @@ fn a_round_on_one_unit_cube_edge_is_a_zero_slope_cone_with_a_rational_net() {
     );
 
     // The round's loop: two tangent **lines** and two **arcs** on the box's end
-    // faces (an open circle is an arc in this record).
+    // faces (an open circle is an arc in this record). Compared as a cycle: this
+    // pin starts the loop at a different use, not in a different order.
+    let families = loop_families(record, round);
+    assert_eq!(families.len(), 1, "the round has one loop");
     assert_eq!(
-        loop_families(record, round),
-        vec![vec!["line", "circle", "line", "circle"]],
-        "the round is bounded by two tangency lines and two end arcs"
+        canonical_cycle(&families[0]),
+        ["circle", "line", "circle", "line"],
+        "the round is bounded by two tangency lines and two end arcs (cycle)"
     );
     // ... and the two end faces each gained one arc (4 → 5 uses); the two tangent
     // faces keep four lines (the rounded edge is replaced by the tangency line).
-    let families = loop_families(record, &record.faces[4]);
-    assert_eq!(families[0].len(), 5);
-    assert!(families[0].contains(&"circle"));
-    assert_eq!(loop_families(record, &record.faces[0])[0].len(), 4);
+    // Faces are found by shape: this pin's face order is not the box's.
+    let mut end_faces = 0;
+    let mut plain_faces = 0;
+    for face in &record.faces {
+        if !matches!(face.surface, Surface::Plane { .. }) {
+            continue;
+        }
+        let families = loop_families(record, face);
+        assert_eq!(families.len(), 1, "every box face has one loop");
+        let arcs = families[0].iter().filter(|kind| **kind == "circle").count();
+        match (families[0].len(), arcs) {
+            (5, 1) => end_faces += 1,
+            (4, 0) => plain_faces += 1,
+            other => panic!("an unexpected box face: {other:?}, {families:?}"),
+        }
+    }
+    assert_eq!(end_faces, 2, "two end faces with the round's arc");
+    assert_eq!(plain_faces, 4, "four untrimmed planar box faces");
 
     // The `(u, v)` box the producer states is a positive finite box.
     let domain = round.domain;
@@ -613,7 +632,7 @@ fn other_round_sizes_build_and_match_the_same_closed_form() {
         assert_eq!(blended.record.faces.len(), 7, "r = {radius}");
         assert_eq!(
             census(&blended.record),
-            vec!["plane", "plane", "plane", "plane", "plane", "plane", "cone"],
+            vec!["plane", "plane", "plane", "plane", "plane", "plane", "cylinder"],
             "r = {radius}"
         );
         let measured = match blended.body.mass_properties(ACCURACY) {
@@ -629,46 +648,58 @@ fn other_round_sizes_build_and_match_the_same_closed_form() {
 }
 
 #[test]
-fn a_curvature_round_is_a_bare_rational_net_with_spline_boundaries() {
-    // The G² round is the contrast: it has no analytic label to fall back on, so the
-    // face *is* its net and its boundary curves are splines, not lines and arcs.
-    // Nothing here is mapped (there is no label), and the neutral model has no
-    // spline *curve* either — this stays P2.1c-2's remaining gap.
+fn a_curvature_round_is_a_blend_label_with_its_net_in_face_nurbs() {
+    // The G² round is the contrast: it has no analytic surface to fall back on, so
+    // this pin labels the face `Surface::Blend` with a procedural definition and
+    // carries the geometry in `Face.nurbs`; its boundary curves are splines, not
+    // lines and arcs. The neutral model has no blend surface and no spline *curve*,
+    // so the reader refuses it by name — this stays P2.1c-2's remaining gap.
     let blended = rounded_cube(Blend::Curvature, R);
     let record = &blended.record;
     assert_eq!(record.faces.len(), 7);
     assert_eq!(blended.made, vec![6]);
     assert_eq!(
         census(record),
-        vec![
-            "plane",
-            "plane",
-            "plane",
-            "plane",
-            "plane",
-            "plane",
-            "rational-spline"
-        ],
-        "the G² round's label is its own net"
+        vec!["plane", "plane", "plane", "plane", "plane", "plane", "blend"],
+        "the G² round's label is the blend definition"
     );
     let round = &record.faces[6];
-    assert!(
-        round.nurbs.is_none(),
-        "a form-labelled face carries no separate nurbs"
-    );
-    let Surface::RationalSpline {
+    let Surface::Blend { definition } = &round.surface else {
+        panic!("the G² round is not a blend: {}", label(&round.surface))
+    };
+    let solidcore_record::brep::blend::BlendDefinition::Procedural(definition) = &**definition
+    else {
+        panic!("the G² round is not a procedural blend definition");
+    };
+    assert_eq!(definition.order, 2, "a G² section, not the ball");
+    match definition.radius {
+        solidcore_record::brep::blend::RadiusRecord::Constant { offsets } => {
+            for offset in offsets {
+                assert!(
+                    (offset - R).abs() < 1e-12,
+                    "the G² round's radius is the one asked for: {offsets:?}"
+                );
+            }
+        }
+        _ => panic!("the G² round is not a constant-radius round"),
+    }
+    let source = round
+        .nurbs
+        .as_ref()
+        .expect("a blend-labelled face carries its net in Face.nurbs");
+    let BrepSurface::Nurbs {
         u_knots,
         v_knots,
-        homogeneous,
-    } = &round.surface
+        points,
+    } = net(source)
     else {
-        panic!("the G² round is not a rational net");
+        unreachable!("net() only builds a Nurbs")
     };
-    assert_eq!(homogeneous.len(), 4, "4 rows along u");
-    assert_eq!(homogeneous[0].len(), 8, "8 columns along v");
+    assert_eq!(points.len(), 4, "4 rows along u");
+    assert_eq!(points[0].len(), 8, "8 columns along v");
     assert_eq!(u_knots.len(), 8, "8 u knots: degree 3");
     assert_eq!(v_knots.len(), 16, "16 v knots: degree 7");
-    let weights: Vec<f64> = homogeneous
+    let weights: Vec<f64> = points
         .iter()
         .flat_map(|row| row.iter().map(|q| q[3]))
         .collect();
@@ -692,18 +723,23 @@ fn a_curvature_round_is_a_bare_rational_net_with_spline_boundaries() {
 }
 
 #[test]
-fn a_round_never_carries_a_blend_label_at_this_pin() {
-    // Does the round face carry `Surface::Blend { definition }` with `Face.nurbs` as
-    // its net? No — for `Blend::Round` the label is the analytic `Cone` (half angle
-    // zero) and for `Blend::Curvature` it is the `RationalSpline` net itself.
-    // `Surface::Blend` never appears, so `record::surface`'s "blend" refusal is not
-    // the gate a fillet meets here.
-    for kind in [Blend::Round, Blend::Curvature, Blend::Chord] {
+fn a_blend_label_appears_only_for_the_curvature_round_at_this_pin() {
+    // Which blend classes carry `Surface::Blend { definition }` at this pin? The
+    // round and the chord have an analytic surface (`Surface::Cylinder`); the G²
+    // round's face is the blend definition with its net in `Face.nurbs`. So a
+    // `Blend` label reaches `record::surface`'s "blend" refusal only on the G²
+    // path, and the round lifts through the cylinder label.
+    for (kind, blended_label) in [
+        (Blend::Round, false),
+        (Blend::Chord, false),
+        (Blend::Curvature, true),
+    ] {
         let blended = rounded_cube(kind, R);
         let labels = census(&blended.record);
-        assert!(
-            !labels.contains(&"blend"),
-            "{kind:?} carried a Blend label: {labels:?}"
+        assert_eq!(
+            labels.contains(&"blend"),
+            blended_label,
+            "{kind:?} label census: {labels:?}"
         );
     }
 }
@@ -714,7 +750,7 @@ fn a_kernel_round_lifts_measures_and_booleans_through_the_neutral_model() {
     let brep = neutral(&blended.record);
 
     // The neutral body the reader hands out: seven faces, and the round is the
-    // cylinder its zero-slope cone label describes (`src/record/surface.rs`).
+    // cylinder the record's own label describes.
     assert_eq!(brep.shells.len(), 1);
     assert_eq!(brep.face_count(), 7);
     let rounds: Vec<&BrepFace> = brep
@@ -794,7 +830,11 @@ fn a_kernel_round_lifts_measures_and_booleans_through_the_neutral_model() {
             _ => "other",
         })
         .collect();
-    assert_eq!(kinds, vec!["line", "arc", "line", "arc"]);
+    assert_eq!(
+        canonical_cycle(&kinds),
+        ["arc", "line", "arc", "line"],
+        "two tangency lines and two end arcs, in cycle"
+    );
     assert_eq!(cylinders[0].loops.len(), 1);
 
     let notch = (SIDE - 0.6) * 0.4 * SIDE;
@@ -827,9 +867,9 @@ fn carrying_the_round_as_its_net_is_still_refused() {
     assert_eq!(code, PCURVE_NOT_EXACT);
     assert_eq!(
         detail,
-        "no exact pcurve for this face's boundary in its surface: pcurve of loop 0 use 1 \
-         (Some([2.7755575615628914e-17, 0.9000000000000002, 0.0]) to Some([0.1, 1.0, 0.0])): \
-         not supported yet: no exact pcurve of a circle on a spline surface",
+        "no exact pcurve for this face's boundary in its surface: pcurve of loop 0 use 0 \
+         (Some([0.0, 0.9, 0.0]) to Some([0.1, 1.0, 0.0])): not supported yet: no exact \
+         pcurve of a circle on a spline surface",
         "a verbatim measurement of this pin's refusal: the arc ends are the round's"
     );
 }

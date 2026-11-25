@@ -266,12 +266,21 @@ pub(crate) fn from_extrude_profile(error: Error) -> CadResult<SolidOutcome> {
             UNSURE_REGION,
             format!("the kernel is unsure whether region {region} is material"),
         )),
+        // The kernel's own status is a refusal of this profile/parameter set too:
+        // since upstream #18402 (the `sweep_statuses_pass_on` retirement) the
+        // sweeps propagate the status they used to drop, and a profile the direct
+        // linear sweep cannot close and cap arrives as `Status(1001)` instead of
+        // the drafted path's `Argument`. The extrusion takes nothing but the
+        // profile, direction and distance, so a status is read the same way the
+        // chamfer and face-offset families read one: the request cannot be built
+        // exactly, `Unsupported` with the ADR-0036 code — never a plausible body.
         error @ (Error::Profile(_)
         | Error::Argument
         | Error::NotSolid
         | Error::NotExact
         | Error::Degenerate
-        | Error::Empty) => Ok(unsupported(
+        | Error::Empty
+        | Error::Status(_)) => Ok(unsupported(
             LiftRefusal {
                 code: EXTRUDE_PROFILE_FAILED,
                 detail: format!("the profile cannot be extruded exactly: {error}"),
@@ -381,7 +390,7 @@ pub(crate) fn from_chamfer(error: Error) -> CadResult<SolidOutcome> {
         | Error::SetbackTooShort { .. }
         | Error::SetbackTooLong { .. }
         | Error::CornerRefused { .. }
-        | Error::CornerUnsupported
+        | Error::CornerUnsupported { .. }
         | Error::RoundsCross { .. }
         | Error::BlendFailed { .. }
         | Error::BlendNotCertified { .. }) => chamfer_refusal(error),
@@ -518,6 +527,7 @@ mod tests {
                 size: 0.2,
                 kind: solidcore_ops::FitKind::Distance,
                 at: None,
+                face: None,
                 why: None,
             },
         ] {
@@ -572,6 +582,27 @@ mod tests {
             assert_eq!(
                 outcome.unsupported().map(|reason| reason.code),
                 Some(codes::SOLID_UNSUPPORTED)
+            );
+        }
+    }
+
+    #[test]
+    fn extrude_reads_a_kernel_status_as_the_profile_refusal() {
+        // Upstream #18402 made the sweeps propagate their status instead of
+        // dropping it; an open profile reaches the direct linear sweep as
+        // `Status(1001)`. The family takes only the profile, direction and
+        // distance, so a status is this build's profile refusal (ADR-0036's
+        // stable code), not a generic kernel failure.
+        for error in [Error::Status(1001), Error::Argument, Error::NotSolid] {
+            let outcome = from_extrude_profile(error).expect("only cancellation is an Err");
+            assert_eq!(
+                outcome.unsupported().map(|reason| reason.code),
+                Some(EXTRUDE_PROFILE_FAILED),
+                "{outcome:?}"
+            );
+            assert_eq!(
+                outcome.unsupported().map(|reason| reason.operation),
+                Some(SolidOperationFamily::ExtrudeProfile)
             );
         }
     }

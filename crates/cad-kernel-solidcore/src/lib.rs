@@ -135,7 +135,7 @@
 //! this cut neither creates nor accepts, so they are not advertised.
 //! [`cad_domain::Registration::version`] is a `u32`, so the pinned upstream
 //! version string is carried in [`SolidCoreModeler::UPSTREAM_VERSION`]
-//! (`1.0.1+55ae49ef919b`) and advertised in `Registration::capabilities`;
+//! (`1.0.1+f17599cbfa99`) and advertised in `Registration::capabilities`;
 //! `version` stays `1`, the contract version of this adapter. The upstream
 //! `1.0.1` string was **not** bumped at the pin, so it does not identify the
 //! revision on its own — the suffix does.

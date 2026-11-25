@@ -19,7 +19,7 @@ cad-kernel-adapter.workspace = true
 # single crate from an older commit with no cancellation token. Licence
 # Apache-2.0 (upstream LICENSE + NOTICE, SMLib port). Upstream repository
 # <https://github.com/tangency-labs/solidcore>, pinned to revision
-# 55ae49ef919b606bf77901df626ed9bb543e5212 (ADR-0036 D1, unchanged by this
+# f17599cbfa99b420ea9bc24531ad2a808dbda34c (ADR-0036 D1, unchanged by this
 # crate).
 #
 # Five upstream crates are named directly (all at the same pin, all inside the
@@ -48,8 +48,8 @@ cad-kernel-adapter.workspace = true
 # `cad-kernel-solidcore` is the only consumer in this workspace
 # (`scripts/check-architecture.py` enforces that); no `[patch.crates-io]` entry.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
-solidcore-convert = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
-solidcore-ops = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
-solidcore-tess = { git = "https://github.com/tangency-labs/solidcore", rev = "55ae49ef919b606bf77901df626ed9bb543e5212" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "f17599cbfa99b420ea9bc24531ad2a808dbda34c" }
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore", rev = "f17599cbfa99b420ea9bc24531ad2a808dbda34c" }
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore", rev = "f17599cbfa99b420ea9bc24531ad2a808dbda34c" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "f17599cbfa99b420ea9bc24531ad2a808dbda34c" }
+solidcore-tess = { git = "https://github.com/tangency-labs/solidcore", rev = "f17599cbfa99b420ea9bc24531ad2a808dbda34c" }

@@ -23,9 +23,11 @@
 //!
 //! # A zero-slope cone is a cylinder
 //!
-//! The pinned kernel writes a **round fillet** as `Surface::Cone { half_angle:
-//! 0.0 }` plus a rational NURBS net (measured: `tests/fillet.rs`, one round on a
-//! unit cube's edge). A zero-slope cone *is* a cylinder, and mapping it to
+//! Older pins wrote a **round fillet** as `Surface::Cone { half_angle: 0.0 }`
+//! plus a rational NURBS net (measured: `tests/fillet.rs`, one round on a unit
+//! cube's edge); the current pin writes `Surface::Cylinder` directly, and this
+//! mapping stays for records produced by the older kernels. A zero-slope cone
+//! *is* a cylinder, and mapping it to
 //! [`cad_domain::BrepSurface::Cone`] would keep a face this build cannot write
 //! back — the record writer needs a slope for a cone label, and the cone's loop
 //! mapping refuses a slope-less lateral face — so the round would be lost on the
@@ -141,10 +143,10 @@ pub(crate) fn to_brep(surface: &Surface) -> Result<BrepSurface, LiftRefusal> {
             // An exactly zero slope is a cylinder, and one that keeps the cone label
             // cannot be carried: the record writer needs a slope for a cone label and
             // the cone's loop mapping refuses a slope-less lateral face, so the face
-            // (and with it a round fillet, which the pinned kernel records exactly
-            // this way) would be lost on the next lift. The radius is guarded like
-            // the cylinder label it becomes; a genuinely conical face keeps its own
-            // label below.
+            // (and with it a round fillet from a record written by an older pin,
+            // which recorded it exactly this way) would be lost on the next lift.
+            // The radius is guarded like the cylinder label it becomes; a genuinely
+            // conical face keeps its own label below.
             if *half_angle == 0.0 {
                 if !radius_at_origin.is_finite() || *radius_at_origin <= 0.0 {
                     return Err(LiftRefusal::unsupported(format!(
@@ -304,8 +306,8 @@ mod tests {
     use super::*;
     use crate::LIFT_UNSUPPORTED;
 
-    /// The frame the pinned kernel writes for a round on a unit cube's edge at
-    /// x = 0, y = 1 (see `tests/fillet.rs`, which measures it).
+    /// The frame an older pin wrote for a round on a unit cube's edge at x = 0,
+    /// y = 1 (see `tests/fillet.rs`, which measures the current shape).
     fn round_frame() -> Frame {
         Frame {
             origin: [0.1, 0.9, -0.5],
@@ -314,9 +316,10 @@ mod tests {
         }
     }
 
-    /// A round fillet comes back as `Surface::Cone { half_angle: 0.0 }` plus a
-    /// rational net; the label alone must map to the cylinder it describes, or the
-    /// face would be unwritable (the cone writer needs a slope) and the round lost.
+    /// An older pin's round fillet came back as `Surface::Cone { half_angle: 0.0 }`
+    /// plus a rational net; the label alone must map to the cylinder it describes,
+    /// or the face would be unwritable (the cone writer needs a slope) and the
+    /// round lost.
     #[test]
     fn a_zero_slope_cone_maps_to_the_cylinder_it_is() {
         let mapped = to_brep(&Surface::Cone {

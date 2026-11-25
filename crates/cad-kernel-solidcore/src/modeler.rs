@@ -17,13 +17,13 @@ use cad_kernel_adapter::{
 use crate::ops;
 
 /// The pinned upstream revision this build links (the first 12 hex digits of
-/// `55ae49ef919b606bf77901df626ed9bb543e5212`).
-pub const UPSTREAM_REVISION: &str = "55ae49ef919b";
+/// `f17599cbfa99b420ea9bc24531ad2a808dbda34c`).
+pub const UPSTREAM_REVISION: &str = "f17599cbfa99";
 
 /// The pinned upstream version string, **unchanged by upstream at the pin**
-/// (`1.0.1` is the crates.io release; the repository did not bump it), so the
-/// revision suffix is what identifies this build.
-pub const UPSTREAM_VERSION: &str = "1.0.1+55ae49ef919b";
+/// (`1.0.1` is the `solidcore` crate's version in the repository, not just the
+/// crates.io release), so the revision suffix is what identifies this build.
+pub const UPSTREAM_VERSION: &str = "1.0.1+f17599cbfa99";
 
 /// The seam's registration type key: this is the `solidcore` modeler, by name.
 pub const TYPE_KEY: &str = "yacr.kernel.solidcore";

@@ -335,8 +335,8 @@ pub struct Body3d { pub kind: BodyKind, pub exact: BodyExact, pub display: BodyD
 | 项 | 事实 |
 |---|---|
 | crate | `crates/cad-kernel-solidcore`（唯一允许命名 `solidcore` 的包，`#![cfg(not(target_arch = "wasm32"))]`） |
-| 依赖 | `solidcore-ops` + `solidcore-record`（`ops` 传递引入内核与 `solidcore-convert`），git revision `55ae49ef919b606bf77901df626ed9bb543e5212`，Apache-2.0，目标表 `cfg(not(wasm32))`；无 `[patch.crates-io]` |
-| 注册 | `type_key = yacr.kernel.solidcore`，`priority = 10`，`entity_types = 3DSOLID/BODY`（**只有**这两类：`REGION`/`SURFACE` 是零厚度 sheet body，本切面既不创建也不接受为操作数，声明它们会过度承诺；P2 的 SURFACE 家族再加）；`Registration::version` 是 `u32`（本适配器契约版本 `1`），上游版本串 `1.0.1+55ae49ef919b` 由 `SolidCoreModeler::UPSTREAM_VERSION` 与 capabilities 声明 |
+| 依赖 | `solidcore-ops` + `solidcore-record`（`ops` 传递引入内核与 `solidcore-convert`），git revision `f17599cbfa99b420ea9bc24531ad2a808dbda34c`，Apache-2.0，目标表 `cfg(not(wasm32))`；无 `[patch.crates-io]` |
+| 注册 | `type_key = yacr.kernel.solidcore`，`priority = 10`，`entity_types = 3DSOLID/BODY`（**只有**这两类：`REGION`/`SURFACE` 是零厚度 sheet body，本切面既不创建也不接受为操作数，声明它们会过度承诺；P2 的 SURFACE 家族再加）；`Registration::version` 是 `u32`（本适配器契约版本 `1`），上游版本串 `1.0.1+f17599cbfa99` 由 `SolidCoreModeler::UPSTREAM_VERSION` 与 capabilities 声明 |
 | 能力 | primitives 全真（7 族）、booleans 真、mass_properties 真、chamfer 真（P2.0，**平面体**上的单边直线倒角）、offset_face 真（2026-11-25，`SolidOperation::OffsetFace`：单面沿外法向的带符号移动 = PRESSPULL 的原子操作，登记 `offset.face`；曲面面同样可移动）、extrude_profile 真（2026-11-25，`SolidOperation::ExtrudeProfile`：闭合平面轮廓 → 封顶实体，登记 `extrude.profile`）、nurbs 真（P2.1b，登记 `nurbs.faces`，**承载**曲面操作数）；fillet/shell 假。**booleans / chamfer / nurbs 是 family 级声明**：单个操作数不可 lift（开放 sheet、无 `(u,v)` box 或无精确 pcurve 的曲面面、多于一个 shell、空腔、结构不一致）时，该次调用返回 `Unsupported` 并带稳定码，调用方**必须**逐次处理，不得把 family 级 `true` 当成「每个操作数都能算」 |
 | 转换 | `BrepData → record`：平面面 + `Line` 环，**自 P2.1b 起**解析曲面面带解析 label + `eval::form` 精确 NURBS form + `(u,v)` box + 精确 pcurve（`Line`/整圆/圆弧），单 shell、可烘焙 placement；`record → BrepData`：Plane/PlaneThrough/Cylinder/Cone/Sphere/Torus + **`Spline`/`RationalSpline` → `Nurbs`** + `Face.domain` + Line/整圆/圆弧 |
 | 精确性 | 作者化 box/wedge/pyramid 由内核 `Body::from_record(.., false)` 验证后才交出；体积用闭式断言（1.0 / l·w·h、l·w·h/2、s²·h/3） |
@@ -543,7 +543,7 @@ P2.1c 的路径；在它落地前不允许用采样网格冒充实体的精确�
 **依赖与门禁**：`eval::form` 收内核的 `eval` 类型，所以本 crate 直接命名了**两个新依赖**——
 `solidcore`（只用 `eval::form::{surface,curve}`）与 `solidcore-convert`（record↔kernel 的
 `surface`/`record_surface`/`curve`/`record_curve`）。两者与既有的 `solidcore-ops`/`solidcore-record`
-同一 pin（`55ae49ef`），同一仓库，**无 `[patch.crates-io]`、无版本变化**；
+同一 pin（`f17599cb`），同一仓库，**无 `[patch.crates-io]`、无版本变化**；
 `scripts/check-architecture.py` 的允许表已包含这四个名字，且只有 `cad-kernel-solidcore` 可以命名它们。
 
 **证据**（Linux x86-64、真实固定内核；不是 GPU/像素/宿主/其它载体）：圆柱 r=1 h=2 → `V=2π`/`A=6π`；
@@ -570,7 +570,7 @@ phase P2.1c)`），该面进 `missing_faces`、body 停在 `Partial`。
 - `crates/cad-kernel-solidcore/src/tess.rs`：`SolidCoreTessellator`（ZST，`type_key =
   yacr.kernel.solidcore.tess`）。`lift()` 中性 B-Rep → `solidcore_tess::plan(&record, tolerance,
   size)` → `TessPlan::evaluate()` → 映射成接缝的 `TessellationMesh`。
-- 依赖：`solidcore-tess` 与既有四个 solidcore crate **同一 git pin**（`55ae49ef`），上游
+- 依赖：`solidcore-tess` 与既有四个 solidcore crate **同一 git pin**（`f17599cb`），上游
   `publish = false`，**无 `[patch.crates-io]`、无版本变化**；`Cargo.lock` 只新增
   `solidcore-tess`/`spade`/`robust`（rayon 只在上游的 non-wasm target 上）。只有
   `cad-kernel-solidcore` 可以命名它（`check-architecture.py` 早就保留了该名字）。
@@ -710,3 +710,14 @@ vs `0.837853981633974`。读取映射本身在 `record/surface.rs` 的单测里�
 - 被裁剪的圆角侧面**显示**仍按 P2.1b 规则是部分（圆柱条带要求两个整圆）；没有像素证据。
 - 圆角体上再倒角会撞上 `from_record` 对 “spline 边曲线” 的具名拒绝（实测副产物，未修，记在这里
   供下一步参考）。
+
+**2026-11-26 依赖升版（pin `f17599cb`，727 个上游提交）后的复测**：上游把 `Blend::Round`
+的 label 直接写成 **`Surface::Cylinder`**，不再需要“零斜率 cone → cylinder”的读取端重分类
+（该映射保留为旧 record 兼容，单测不动）；`Blend::Curvature` 改为
+**`Surface::Blend { definition: Procedural }`**（`order == 2`、常数半径），网仍挂在
+`Face.nurbs`。`tests/fillet.rs` 的 census/解构随 pin 更新，圆角体的 lift / 质量属性 / 布尔
+闭式数字**不变**（同一文件重跑通过）。因此 `record/surface.rs` 的 “blend” 具名拒绝现在**正是**
+G² 圆角的阻塞点（它同时需要 NURBS **边界曲线**，中性模型没有）。另一个行为变化：上游
+`#18402` 起 sweep 状态**总是向上传递**，未闭合轮廓的拉伸由“被忽略的状态”变成内核
+`Status(1001)`；`from_extrude_profile` 把该族的 `Status` 与 `Argument`/`NotSolid` 同类处理
+（`solid.extrude_profile_failed`，ADR-0036 的拒绝码表），不落库、不伪造成功。
