@@ -583,9 +583,10 @@ impl ViewAperture {
 /// This is deliberately a **budget**, not the card's capacity: the renderer
 /// resolves the percentage against the device memory it can actually determine
 /// and treats the result as the memory CAD may use, never as the card's total.
-/// `10..=100` keeps a usable floor and never asks for more than the whole card;
-/// values outside it are rejected by [`ViewerConfig::validate`], never clamped.
-/// The default `90` leaves headroom for the window compositor and the WebView.
+/// `10..=80` keeps a usable floor and always leaves **20 %** of the card for the
+/// window compositor, the WebView and the driver; values outside it are rejected
+/// by [`ViewerConfig::validate`], never clamped. The default `80` uses the whole
+/// allowed share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct ViewGpuBudget {
@@ -593,13 +594,36 @@ pub struct ViewGpuBudget {
 }
 impl Default for ViewGpuBudget {
     fn default() -> Self {
-        Self { percent: 90 }
+        Self { percent: 80 }
     }
 }
 
 impl ViewGpuBudget {
     /// The accepted percentage range of the graphics card's memory.
-    pub const RANGE: std::ops::RangeInclusive<u32> = 10..=100;
+    pub const RANGE: std::ops::RangeInclusive<u32> = 10..=80;
+}
+
+/// The accelerated GPU storage choice (`view.gpuStorage.disabled`).
+///
+/// The accelerated renderer keeps a second, GPU-resident copy of the convertible
+/// scene in vertex-stage **storage** buffers (the "pulled" organisation: one
+/// draw per class). That copy is what makes large drawings fast, and it is also
+/// the largest single VRAM consumer. This preference is the user's explicit
+/// opt-out: `disabled = true` (the default) selects the universal per-run path,
+/// which needs no vertex-stage storage buffers and keeps no pulled copy; the
+/// pixels are the same and the cost is speed.
+///
+/// The tier is chosen once per device, so a change takes effect at the next
+/// device attach (a new window / restart of the carrier), never mid-frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewGpuStorage {
+    pub disabled: bool,
+}
+impl Default for ViewGpuStorage {
+    fn default() -> Self {
+        Self { disabled: true }
+    }
 }
 
 /// Canvas anti-aliasing: the user's MSAA choice (`view.msaa.mode`).
@@ -666,6 +690,7 @@ pub struct ViewConfig {
     pub crosshair: ViewCrosshair,
     pub pickbox: ViewPickbox,
     pub aperture: ViewAperture,
+    pub gpu_storage: ViewGpuStorage,
     pub gpu_budget: ViewGpuBudget,
     pub msaa: ViewMsaa,
 }

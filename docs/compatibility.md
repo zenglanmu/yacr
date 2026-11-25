@@ -1369,13 +1369,22 @@ Distance/Angle/Delta X/Y/Z，点不足两个时只显示距离，`unit:null` 不
 `kind`、`options` 取图纸真实图层/线型表名，上限 256）与**写侧** `SETENTITYPROPERTY`（一次事务/
 一步撤销；`layer`、`color`=ByLayer/ByBlock/`aci:0..=256`/`#RRGGBB`、`linetype`、`lineweight`
 = 规范毫米列表、`transparency`=0..90 百分比→不透明度；非直接可寻址引用拒绝；无变化不产生撤销步）；
-**选项设置** **20** 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
+**选项设置** **21** 个类型化键（grid/axes/selectionHighlight/snapHints/plotFormat/snapEnabled/
 hoverPreview/gridSnapEnabled/orthoEnabled/snapSpacing/backgroundModel/backgroundPaper/
-crosshairSize/pickboxSize/apertureSize/gpuBudgetPercent/wgpu_backend/leftDragPans/
+crosshairSize/pickboxSize/apertureSize/gpuStorageDisabled/gpuBudgetPercent/wgpu_backend/leftDragPans/
 orbitSensitivityPercent/msaaMode，另有 `theme`/`navbarVisible`/`navvcubeDisplay`/`viewCubeIn2d`/
 `viewCubeIn3d` 五个根级叶子见导航一节），持久化到
 `preference.json`、**实时生效**并在 open/替换后重新播种（七个 `interaction.*` 叶子：对象捕捉、悬停预览、
-`SNAP`、`ORTHO`、`SNAPUNIT` 间距、左键拖动平移、3D 旋转灵敏度倍率）；**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
+`SNAP`、`ORTHO`、`SNAPUNIT` 间距、左键拖动平移、3D 旋转灵敏度倍率）；`gpuStorageDisabled`
+（`view.gpuStorage.disabled`，默认 **true**）是渲染器策略：默认不分配加速的顶点级存储副本
+（universal 路径），关闭它才允许有能力的设备构建 pulled 加速组织；绘制层级（draw tier）每设备只选一次，
+所以该写入在**下次设备 attach**（新窗口/重启）生效，预算行只在该项关闭时显示。`gpuBudgetPercent`
+的可接受范围收窄为 **10..=80**（默认 80，越界拒绝不裁剪；CLI 的 `--gpu-budget-percent` 仍是渲染器
+自身的 10..=100 专家入口）。**证据边界**：tier 选择、宿主设置/快照/持久化契约与前端的模型测试；
+真实 GPU（Linux `native-below`，P620，`fixtures/complex-test.dwg`，2026-11-25）已跑通默认 universal
+路径 45 s：`budget_percent=80`、`cap=3,435,973,836 B`、渲染器记账 1.07 GB、进程树峰值 RSS 4.07 GB
+（稳态 3.38 GB），无 present 错误；accelerated↔universal 切换、性能与 Windows/macOS/Android/Web
+载体仍 **NOT RUN / NOT VERIFIED**。**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
 （`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
 （默认 5、以光标为中心对称、按视图尺寸计算；100% 位级不变），均**即时**生效。

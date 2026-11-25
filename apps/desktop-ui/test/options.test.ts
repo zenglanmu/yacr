@@ -72,7 +72,8 @@ function snapshot(overrides = {}) {
     leftDragPans: false,
     // The 3D drag rate as a percentage of the host's base rate (100 = base).
     orbitSensitivityPercent: 100,
-    gpuBudgetPercent: 90,
+    gpuStorageDisabled: true,
+    gpuBudgetPercent: 80,
     plotFormat: 'svg',
     // The two Save-As export versions: the host always reports them (its own
     // defaults are `2010` and `7.0`).
@@ -146,7 +147,7 @@ test('every field sits on a declared tab exactly once and nothing else exists', 
   assert.equal(fieldById('nope'), null);
   assert.deepEqual(fieldsForTab('display').map(field => field.id), [
     'backgroundModel', 'backgroundPaper', 'crosshairSize', 'grid', 'axes', 'selectionHighlight',
-    'snapHints', 'gpuBudgetPercent', 'msaaMode',
+    'snapHints', 'gpuStorageDisabled', 'gpuBudgetPercent', 'msaaMode',
   ]);
   assert.deepEqual(fieldsForTab('drafting').map(field => field.id), [
     'snapEnabled', 'hoverPreview', 'snapSpacing', 'pickboxSize', 'apertureSize', 'leftDragPans',
@@ -178,6 +179,7 @@ test('each control is the editor its backend value really needs', () => {
     apertureSize: 'number',
     leftDragPans: 'bool',
     orbitSensitivity: 'real',
+    gpuStorageDisabled: 'bool',
     gpuBudgetPercent: 'number',
     msaaMode: 'select',
     plotFormat: 'select',
@@ -194,7 +196,7 @@ test('each control is the editor its backend value really needs', () => {
   assert.deepEqual(
     OPTIONS_FIELDS.filter(field => field.kind === 'number').map(field => [field.id, field.min, field.max]),
     [
-      ['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 100], ['pickboxSize', 1, 50],
+      ['crosshairSize', 1, 100], ['gpuBudgetPercent', 10, 80], ['pickboxSize', 1, 50],
       ['apertureSize', 1, 50], ['unitPrecision', 0, 8], ['recoveryInterval', 0, 3600],
     ],
   );
@@ -318,15 +320,23 @@ test('the validation table matches the host ranges and codes', () => {
     ['snapSpacing', '', SETTINGS_ERROR.invalidValue],
     ['snapSpacing', '2000001', SETTINGS_ERROR.invalidValue],
     ['snapSpacing', NaN, SETTINGS_ERROR.invalidValue],
-    // The GPU budget is a percentage of the card: the floor and the whole card
-    // are accepted, anything outside is a refusal (never clamped).
+    // The GPU budget is a percentage of the card, capped at 80 so the
+    // compositor/WebView keep 20 %: the floor and the cap are accepted, anything
+    // outside is a refusal (never clamped).
     ['gpuBudgetPercent', '10', null],
-    ['gpuBudgetPercent', '90', null],
-    ['gpuBudgetPercent', '100', null],
+    ['gpuBudgetPercent', '80', null],
+    ['gpuBudgetPercent', '81', SETTINGS_ERROR.invalidValue],
     ['gpuBudgetPercent', '9', SETTINGS_ERROR.invalidValue],
+    ['gpuBudgetPercent', '90', SETTINGS_ERROR.invalidValue],
+    ['gpuBudgetPercent', '100', SETTINGS_ERROR.invalidValue],
     ['gpuBudgetPercent', '101', SETTINGS_ERROR.invalidValue],
     ['gpuBudgetPercent', '', SETTINGS_ERROR.invalidValue],
-    ['gpuBudgetPercent', '90.5', SETTINGS_ERROR.invalidValue],
+    ['gpuBudgetPercent', '80.5', SETTINGS_ERROR.invalidValue],
+    // The GPU-storage opt-out is a plain boolean.
+    ['gpuStorageDisabled', true, null],
+    ['gpuStorageDisabled', false, null],
+    ['gpuStorageDisabled', 'false', SETTINGS_ERROR.invalidValue],
+    ['gpuStorageDisabled', 1, SETTINGS_ERROR.invalidValue],
     // The orbit sensitivity is the host's closed f64 percentage range, inclusive:
     // a fraction is legal, and nothing outside 25–200 is clamped.
     ['orbitSensitivity', '25', null],
@@ -421,7 +431,8 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   assert.equal(draft.pickboxSize, '6');
   assert.equal(draft.apertureSize, '12');
   assert.equal(draft.snapSpacing, '10');
-  assert.equal(draft.gpuBudgetPercent, '90');
+  assert.equal(draft.gpuStorageDisabled, true);
+  assert.equal(draft.gpuBudgetPercent, '80');
   assert.equal(draft.grid, true);
   assert.equal(draft.plotFormat, 'svg');
   // The export versions are seeded from the host snapshot, never from the row's
@@ -437,6 +448,7 @@ test('the draft is seeded from the host snapshot, never from local defaults', ()
   // An older/partial host reports less: those controls stay explicitly absent.
   const empty = draftFromSettings({}, null);
   assert.equal(empty.crosshairSize, null);
+  assert.equal(empty.gpuStorageDisabled, null);
   assert.equal(empty.gpuBudgetPercent, null);
   assert.equal(empty.snapSpacing, null);
   assert.equal(empty.grid, null);
@@ -502,6 +514,8 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     crosshairSize: '40',
     backgroundModel: '#AABBCC',
     grid: false,
+    // The budget row is only rendered while GPU storage is enabled.
+    gpuStorageDisabled: false,
     gpuBudgetPercent: '25',
     plotFormat: 'pdf',
     wgpuBackend: 'vulkan',
@@ -512,6 +526,9 @@ test('the apply payload carries write keys, typed values and nothing else', () =
     // The wire field is `crosshairPercent`; the write key is `crosshairSize`.
     { field: 'crosshairSize', key: 'crosshairSize', value: 40 },
     { field: 'grid', key: 'grid', value: false },
+    // Enabling the accelerated GPU copy is a real write, ordered before the
+    // budget it makes relevant.
+    { field: 'gpuStorageDisabled', key: 'gpuStorageDisabled', value: false },
     // The GPU budget is the same key in the snapshot, the write and the config.
     { field: 'gpuBudgetPercent', key: 'gpuBudgetPercent', value: 25 },
     { field: 'plotFormat', key: 'plotFormat', value: 'pdf' },
@@ -881,35 +898,6 @@ test('the left drag scheme is a generic boolean drafting row, written through ca
   const dialog = await readModule('components/OptionsDialog.tsx');
   assert.ok(!dialog.includes('leftDragPans'), 'no special case for this field');
   assert.ok(dialog.includes("case 'bool':"));
-});
-
-test('the GPU budget is a generic numeric row, never a bespoke control', async () => {
-  const field = fieldById('gpuBudgetPercent');
-  assert.equal(field.kind, 'number');
-  assert.equal(field.tab, 'display', 'it sits with the other graphics settings');
-  assert.equal(field.wire, 'gpuBudgetPercent');
-  assert.equal(field.key, 'gpuBudgetPercent');
-  assert.equal(field.min, 10);
-  assert.equal(field.max, 100);
-  assert.equal(field.unitKey, 'options.unit.percent');
-  assert.equal(field.labelKey, 'options.field.gpuBudgetPercent');
-  assert.equal(field.helpKey, 'options.help.gpuBudgetPercent');
-  assert.ok(fieldsForTab('display').includes(field));
-  // The dialog renders every number field through the same row/editor path, so
-  // this control needs (and has) no per-field branch of its own.
-  const dialog = await readModule('components/OptionsDialog.tsx');
-  assert.ok(!dialog.includes('gpuBudgetPercent'), 'no special case for this field');
-  assert.ok(dialog.includes("case 'number':"));
-  assert.ok(dialog.includes('t(field.unitKey)'));
-  // Both catalogs carry the copy the descriptor points at.
-  assert.equal(zh[field.labelKey], 'GPU 内存预算');
-  assert.equal(en[field.labelKey], 'GPU memory budget');
-  assert.ok(zh[field.helpKey].trim().length > 0);
-  assert.ok(en[field.helpKey].trim().length > 0);
-  // The help says it is a share of the card's memory and a budget, not the total.
-  assert.match(en[field.helpKey], /graphics card's memory/i);
-  assert.match(en[field.helpKey], /budget/i);
-  assert.match(en[field.helpKey], /not the card's total/i);
 });
 
 test('the options popup kind is allowlisted and carries no payload', () => {

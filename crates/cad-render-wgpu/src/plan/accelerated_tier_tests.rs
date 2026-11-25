@@ -44,6 +44,32 @@ fn tier_gate_requires_storage_buffers_and_a_usable_binding() {
 }
 
 #[test]
+fn the_gpu_storage_opt_out_wins_over_capability_and_the_test_override() {
+    let limits = wgpu::Limits::default();
+    // Disabled storage is universal even on a capable device and even when a
+    // test override would force the accelerated tier.
+    assert_eq!(
+        tier_for_policy(true, true, &limits, None),
+        RenderTier::Universal
+    );
+    assert_eq!(
+        tier_for_policy(true, true, &limits, Some(true)),
+        RenderTier::Universal,
+        "an explicit user opt-out must never be overridden into acceleration"
+    );
+    // Enabled storage is a permission, not a force: a downlevel device still
+    // downgrades and the automatic gate is unchanged.
+    assert_eq!(
+        tier_for_policy(false, true, &limits, None),
+        RenderTier::Accelerated
+    );
+    assert_eq!(
+        tier_for_policy(false, false, &limits, None),
+        RenderTier::Universal
+    );
+}
+
+#[test]
 fn tier_gate_rejects_zero_storage_buffers_and_tiny_bindings() {
     // The gate must require the *true* number of vertex-stage storage
     // bindings (three: `mesh_pulled.wgsl` binds vertices, indices and the

@@ -8,7 +8,8 @@
 //! `SNAPUNIT` spacing), the persisted 2D left-drag input scheme, the renderer
 //! backend preference (`wgpu_backend`, read by the next presenter construction),
 //! the GPU memory budget percentage the renderer lane reads
-//! (`view.gpuBudget.percent`), the canvas anti-aliasing choice
+//! (`view.gpuBudget.percent`), the accelerated-GPU-storage opt-out
+//! (`view.gpuStorage.disabled`), the canvas anti-aliasing choice
 //! (`view.msaa.mode`, resolved into the next `ViewSnapshot`'s sample count), the
 //! six host-owned appearance/navigation/notice leaves (`theme`, `navbarVisible`,
 //! `navvcubeDisplay`, `viewCubeIn2d`, `viewCubeIn3d`, `formatNoticeEnabled`), the
@@ -32,6 +33,8 @@ use cad_app::viewer_config::HexColor;
 
 // The persisted font-directory preference: a child module so both files stay
 // inside the file-size gate.
+mod gpu;
+pub(crate) use gpu::migrate_persisted_gpu_budget_percent;
 pub(crate) mod paths;
 
 use crate::settings_root::RootPreferences;
@@ -103,6 +106,12 @@ pub enum CadSettingKey {
     /// GPU memory budget: an integer percentage of the graphics card's memory
     /// (`view.gpuBudget.percent`).
     GpuBudgetPercent,
+    /// Accelerated GPU storage opt-out (`view.gpuStorage.disabled`): `true`
+    /// (the default) keeps the universal per-run renderer and allocates no
+    /// vertex-stage storage copy of the scene; `false` lets a capable device
+    /// build the pulled accelerated organisation. The tier is chosen once per
+    /// device, so a change takes effect at the next device attach.
+    GpuStorageDisabled,
     /// Renderer graphics backend (`auto`/`vulkan`/`dx12`).
     WgpuBackend,
     /// UI theme (`dark`/`light`): a root preference leaf that also selects the
@@ -149,7 +158,7 @@ pub enum CadSettingKey {
 
 impl CadSettingKey {
     /// Every writable key, in a stable order.
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::Grid,
         Self::Axes,
         Self::SelectionHighlight,
@@ -170,6 +179,7 @@ impl CadSettingKey {
         Self::PickboxSize,
         Self::ApertureSize,
         Self::GpuBudgetPercent,
+        Self::GpuStorageDisabled,
         Self::WgpuBackend,
         Self::Theme,
         Self::NavbarVisible,
@@ -188,13 +198,15 @@ impl CadSettingKey {
     /// The stable camelCase wire key (also the `cad_set_setting` key).
     ///
     /// Every key but [`Self::WgpuBackend`], [`Self::GpuBudgetPercent`],
-    /// [`Self::MsaaMode`] and the six [`ROOT_PREFERENCE_KEYS`] leaves is the
-    /// final segment of a camelCase `ViewerConfig` path. The backend and the
-    /// appearance/navigation/notice keys are root-level host preferences, so
-    /// their wire key, `cad_set_setting` key and persisted key are identical; the
-    /// GPU budget is persisted under `view.gpuBudget.percent`, whose leaf is
-    /// `percent`; the MSAA choice is persisted under `view.msaa.mode`, whose leaf
-    /// is `mode` while the wire key names the option.
+    /// [`Self::GpuStorageDisabled`], [`Self::MsaaMode`] and the six
+    /// [`ROOT_PREFERENCE_KEYS`] leaves is the final segment of a camelCase
+    /// `ViewerConfig` path. The backend and the appearance/navigation/notice keys
+    /// are root-level host preferences, so their wire key, `cad_set_setting` key
+    /// and persisted key are identical; the GPU budget is persisted under
+    /// `view.gpuBudget.percent` and the storage opt-out under
+    /// `view.gpuStorage.disabled`, whose leaves are `percent`/`disabled`; the
+    /// MSAA choice is persisted under `view.msaa.mode`, whose leaf is `mode` while
+    /// the wire key names the option.
     pub fn key(self) -> &'static str {
         match self {
             Self::Grid => "grid",
@@ -217,6 +229,7 @@ impl CadSettingKey {
             Self::PickboxSize => "pickboxSize",
             Self::ApertureSize => "apertureSize",
             Self::GpuBudgetPercent => "gpuBudgetPercent",
+            Self::GpuStorageDisabled => "gpuStorageDisabled",
             Self::WgpuBackend => WGPU_BACKEND_PREFERENCE_KEY,
             Self::Theme => "theme",
             Self::NavbarVisible => "navbarVisible",
@@ -250,7 +263,7 @@ impl CadSettingKey {
     /// integer percentage in `1..=100`, `pickboxSize` an integer pixel count in
     /// `1..=50`, `apertureSize` an integer pixel count in `1..=50`,
     /// `gpuBudgetPercent` an integer percentage of the graphics card's memory in
-    /// `10..=100` (all four rejected, never clamped), `msaaMode` only the three
+    /// `10..=80` (all four rejected, never clamped), `msaaMode` only the three
     /// canvas-anti-aliasing tokens (`off`/`2x`/`4x`), `snapSpacing` a finite
     /// spacing greater than zero drawing units (an integer or a real; `0`,
     /// negative, non-finite and a wrong shape are rejected, never defaulted),
@@ -342,7 +355,7 @@ impl CadSettingKey {
             },
             // The share of the graphics card's memory CAD may use. The renderer
             // lane reads the effective config; this table only refuses values
-            // outside `10..=100`, never clamps them.
+            // outside `10..=80`, never clamps them.
             Self::GpuBudgetPercent => match value {
                 CadSettingValue::Number(percent)
                     if cad_app::viewer_config::ViewGpuBudget::RANGE.contains(percent) =>
@@ -415,6 +428,7 @@ impl CadSettingKey {
             | Self::NavbarVisible
             | Self::ViewCubeIn2d
             | Self::ViewCubeIn3d
+            | Self::GpuStorageDisabled
             | Self::FormatNoticeEnabled => match value {
                 CadSettingValue::Bool(_) => Ok(()),
                 CadSettingValue::Text(_)
@@ -523,6 +537,7 @@ impl HostCore {
             CadSettingKey::PickboxSize => self.apply_pixel_size("pickbox", &value),
             CadSettingKey::ApertureSize => self.apply_pixel_size("aperture", &value),
             CadSettingKey::GpuBudgetPercent => self.apply_gpu_budget_percent(&value),
+            CadSettingKey::GpuStorageDisabled => self.apply_gpu_storage_disabled(&value),
             CadSettingKey::WgpuBackend => self.apply_wgpu_backend(&value),
             CadSettingKey::Theme => self.apply_theme(&value),
             CadSettingKey::NavbarVisible => {
@@ -626,7 +641,7 @@ impl HostCore {
 
     /// Persist `view.gpuBudget.percent`.
     ///
-    /// The value is already validated against `10..=100`, so the number written
+    /// The value is already validated against `10..=80`, so the number written
     /// here is exactly what the schema validates back. The renderer lane that
     /// applies the budget reads the effective config (or the same durable
     /// preference document); this host only stores and republishes it, so an

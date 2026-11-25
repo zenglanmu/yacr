@@ -949,7 +949,7 @@ pub fn close_popup(popups: &mut dyn PopupTarget) -> Result<CadCommandAck, String
 /// refused with `settings.invalid_value`; a `plotFormat` other than `svg`/`pdf`
 /// is refused by the key table's own validation, as is a colour that is not
 /// `#rrggbb`, a crosshair percentage outside `1..=100` and a GPU budget outside
-/// `10..=100` (the same authority the owner thread uses). Nothing is coerced and
+/// `10..=80` (the same authority the owner thread uses). Nothing is coerced and
 /// no file is touched here.
 ///
 /// A JSON number has two typed shapes: a non-negative integer that fits `u32`

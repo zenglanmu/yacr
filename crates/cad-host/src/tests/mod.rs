@@ -270,6 +270,14 @@ fn install_hover_clock(core: &mut HostCore) -> Rc<Cell<u64>> {
 }
 
 fn core_with_config(config_store: Rc<dyn ConfigStore>) -> HostCore {
+    core_with_config_and_render(config_store).0
+}
+
+/// [`core_with_config`] that also hands back the render session, so a settings
+/// write can be shown to reach the renderer-policy seam without a device.
+fn core_with_config_and_render(
+    config_store: Rc<dyn ConfigStore>,
+) -> (HostCore, RenderSessionHandle) {
     let platform = HostPlatform {
         files: Rc::new(FakeFiles::default()),
         config_store,
@@ -277,7 +285,9 @@ fn core_with_config(config_store: Rc<dyn ConfigStore>) -> HostCore {
         resources: Rc::new(UnsupportedResources),
         capabilities: capabilities(false),
     };
-    HostCore::new(options(), platform, RenderSessionHandle::default()).unwrap()
+    let render = RenderSessionHandle::default();
+    let core = HostCore::new(options(), platform, render.clone()).unwrap();
+    (core, render)
 }
 
 fn p(x: f64, y: f64) -> Point3 {

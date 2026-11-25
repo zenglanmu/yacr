@@ -32,10 +32,16 @@ wgpu 30.0.1 的能力边界（读源码确认，不是推测）：
 color/depth target、image/mask texture、other）。报告是若干原子读，**不做逐帧扫描**。
 peak 记录真实的"旧常驻 + 新 staging 同时驻留"瞬态。
 
-### D2' 预算基准 = **显存百分比**（默认 90 %），并在 UI 可改
+### D2' 预算基准 = **显存百分比**（渲染器默认 90 %，选项默认 80 %），并在 UI 可改
 
 - 预算基准由固定字节改为 **卡上显存**：`percent_of_vram`（默认 **90**，范围 10–100，可在
   **选项对话框**里改，持久化为 `view.gpuBudget.percent`）。
+  - **2026-11-25 修订**：选项对话框/`ViewerConfig` 的接受范围收窄为 **10–80**（默认 80），
+    始终为合成器/WebView 至少留 20%；渲染器自身的 `GpuBudgetConfig` 与 CLI
+    `--gpu-budget-percent` 仍是 10–100 的专家入口。同时新增
+    `view.gpuStorage.disabled`（默认 **true**，选项行“Disable GPU storage”）：默认不分配加速的
+    顶点级存储副本（universal 路径），关闭它才允许有能力的设备构建 pulled 加速组织；draw tier
+    每设备只选一次，所以该写入在下次设备 attach 生效。
 - 解析顺序：`explicit_bytes`（`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`，`0`=取消上限） **>**
   `percent × VRAM` **>** **无上限**。
 - **探测不到显存就不做预算**（用户 2026-10-24 决定）：不再有 3 GiB 估算兜底。此时

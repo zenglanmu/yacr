@@ -46,12 +46,13 @@ impl ViewerConfig {
             ));
         }
         // The GPU memory budget is a percentage of the card, refused outside
-        // `10..=100` rather than clamped: a budget below the floor or above the
-        // card is never a value the renderer should silently accept.
+        // `10..=80` rather than clamped: a budget below the floor or above the
+        // headroom the compositor/WebView need is never a value the renderer
+        // should silently accept.
         if !ViewGpuBudget::RANGE.contains(&self.view.gpu_budget.percent) {
             return Err(ConfigError::new(
                 "view.gpuBudget.percent",
-                "GPU budget must be an integer percentage from 10 to 100",
+                "GPU budget must be an integer percentage from 10 to 80",
             ));
         }
         // Canvas anti-aliasing has no numeric leaf to bound: `MsaaMode` is a

@@ -720,6 +720,7 @@ impl CadRenderRuntime {
 
 mod navigation;
 mod session;
+pub(crate) use session::AttachPolicies;
 mod staging;
 #[cfg(test)]
 mod tests;

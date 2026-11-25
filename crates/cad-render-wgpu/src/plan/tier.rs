@@ -47,6 +47,26 @@ pub(crate) fn tier_for(
     RenderTier::Accelerated
 }
 
+/// Decide the draw tier once per device, honouring the user's
+/// accelerated-GPU-storage opt-out first.
+///
+/// `gpu_storage_disabled` comes from `view.gpuStorage.disabled` (default
+/// `true`). It wins over capability **and** over the test override: a user who
+/// turned the accelerated copy off must never receive it just because the
+/// adapter could build it. The reverse is not true — enabling storage is only a
+/// permission, never a force.
+pub(crate) fn tier_for_policy(
+    gpu_storage_disabled: bool,
+    storage_buffers: bool,
+    limits: &wgpu::Limits,
+    storage_support_override: Option<bool>,
+) -> RenderTier {
+    if gpu_storage_disabled {
+        return RenderTier::Universal;
+    }
+    tier_for(storage_buffers, limits, storage_support_override)
+}
+
 /// Capability snapshot derived from what the device actually reports.
 ///
 /// Pure (it takes no `Device`), so the derivation is unit-testable with

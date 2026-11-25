@@ -6,6 +6,33 @@ use super::*;
 // are here) so the wasm-safe clock stays the only one named by `session.rs`.
 pub(super) use web_time::Instant;
 
+/// The renderer policies a fresh device attach installs **before** any pipeline
+/// is created.
+///
+/// Grouped so the attach signature stays readable: the draw tier and the
+/// pipeline sample counts are decided once per device, and a fresh renderer must
+/// be told both up front. `Default` keeps the historical behaviour (no MSAA
+/// request, accelerated storage allowed) for direct callers.
+#[derive(Debug, Clone)]
+pub(crate) struct AttachPolicies {
+    /// Requested MSAA sample count (`1`/`2`/`4`).
+    pub msaa_samples: u32,
+    /// Adapter-reported MSAA counts (empty = WebGPU guarantee `1`/`4`).
+    pub msaa_supported_samples: Vec<u32>,
+    /// Whether the accelerated vertex-stage storage copy may be built.
+    pub gpu_storage_enabled: bool,
+}
+
+impl Default for AttachPolicies {
+    fn default() -> Self {
+        Self {
+            msaa_samples: 1,
+            msaa_supported_samples: Vec::new(),
+            gpu_storage_enabled: true,
+        }
+    }
+}
+
 impl CadRenderRuntime {
     /// Attach a host device and initialize the renderer.
     ///
@@ -19,16 +46,16 @@ impl CadRenderRuntime {
         queue: wgpu::Queue,
         preference: BackendPreference,
         gpu_time: cad_render_wgpu::gpu_time::GpuTimeConfig,
-        msaa_samples: u32,
-        msaa_supported_samples: Vec<u32>,
+        policies: AttachPolicies,
     ) {
         self.detach();
         let mut renderer = Renderer::new(preference);
         renderer.set_progressive_rendering(true);
-        // A fresh renderer must be told the host's MSAA request and the
-        // adapter's real capability before any pipeline is created.
-        renderer.set_requested_msaa_samples(msaa_samples);
-        renderer.set_supported_msaa_samples(msaa_supported_samples);
+        // A fresh renderer must be told the host's renderer policies before any
+        // pipeline is created: MSAA and the accelerated-GPU-storage opt-out.
+        renderer.set_requested_msaa_samples(policies.msaa_samples);
+        renderer.set_supported_msaa_samples(policies.msaa_supported_samples);
+        renderer.set_gpu_storage_enabled(policies.gpu_storage_enabled);
         match renderer.initialize_with_device(device, queue) {
             Ok(caps) => {
                 // The production session uses the in-stream flags path for

@@ -99,6 +99,7 @@ impl Renderer {
             // `initialize_with_device` probes the real device.
             render_tier: RenderTier::Universal,
             storage_support_override: None,
+            gpu_storage_disabled: false,
             pulled_lines: None,
             pulled_mesh: None,
             pulled_binding_limit_override: None,
@@ -242,8 +243,10 @@ impl Renderer {
         // absent on WebGL2, so this is capability-gated rather than assumed; a
         // host-provided device is never asked for a feature. A device that fails
         // the gate downgrades to the universal per-run path, labelled by
-        // `render_tier()` / `FrameStats::tier`.
-        self.render_tier = tier_for(
+        // `render_tier()` / `FrameStats::tier`. The user's explicit opt-out wins
+        // over the capability: no pulled copy is allocated at all.
+        self.render_tier = tier_for_policy(
+            self.gpu_storage_disabled,
             caps.storage_buffers,
             &device.limits(),
             self.storage_support_override,

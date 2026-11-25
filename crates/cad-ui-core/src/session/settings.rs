@@ -22,7 +22,7 @@ pub use cad_host::{
 /// the font directory actually used and `fontsDirOverride` the persisted choice
 /// behind it; both are omitted when the carrier cannot answer them (the Web
 /// `dom-canvas` host has no local font directory), which renders the row
-/// disabled rather than inventing a path. The other thirty-two fields correspond
+/// disabled rather than inventing a path. The other thirty-three fields correspond
 /// one-to-one with [`CadSettingKey`] (`fontsDir` included), the two
 /// backgrounds as canonical `#rrggbb` strings, the crosshair and the GPU memory
 /// budget as integer percentages, the pickbox/aperture as integer pixel counts,
@@ -76,8 +76,13 @@ pub struct CadSettings {
     /// option).
     pub aperture_size: u32,
     /// GPU memory budget as an integer percentage of the graphics card's memory
-    /// (`10..=100`): a budget for CAD rendering, not the card's total memory.
+    /// (`10..=80`): a budget for CAD rendering, not the card's total memory.
     pub gpu_budget_percent: u32,
+    /// Accelerated GPU storage opt-out (`view.gpuStorage.disabled`, default
+    /// `true`). `true` keeps the universal per-run renderer and allocates no
+    /// vertex-stage storage copy; `false` lets a capable device build the pulled
+    /// accelerated organisation. Applies at the next device attach.
+    pub gpu_storage_disabled: bool,
     /// Canvas anti-aliasing (`view.msaa.mode`): `"off"`, `"2x"` or `"4x"`
     /// (default `"4x"`). The host resolves the token to the renderer's sample
     /// count (`1`/`2`/`4`) on the next frame; `off` is exactly one sample.
@@ -169,6 +174,7 @@ impl From<HostSettings> for CadSettings {
             pickbox_size: value.pickbox_size,
             aperture_size: value.aperture_size,
             gpu_budget_percent: value.gpu_budget_percent,
+            gpu_storage_disabled: value.gpu_storage_disabled,
             msaa_mode: value.msaa_mode,
             wgpu_backend: value.wgpu_backend,
             theme: value.theme,

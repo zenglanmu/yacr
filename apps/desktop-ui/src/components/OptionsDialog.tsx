@@ -46,6 +46,7 @@ import {
   dirtyFields,
   draftFromSettings,
   fieldsForTab,
+  fieldVisible,
   languageChanged,
   normalizeValue,
   optionsErrorView,
@@ -539,7 +540,7 @@ export function OptionsDialog({ onClose, closeFailure }: OptionsDialogProps) {
   // the disabled/missing shape, so a carrier that would refuse the write never
   // shows an empty editable field. The effective row below it always renders, so
   // the user still sees the directory in use (or that there is none).
-  const fields = tab ? fieldsForTab(tab) : [];
+  const fields = tab ? fieldsForTab(tab).filter(field => fieldVisible(field, draft)) : [];
   // The host's own verdict on the saved choice, and whether it can name any
   // directory at all. Both come from the snapshot: the warning is never derived
   // from comparing the two paths (a `--fonts-dir` value legitimately wins).

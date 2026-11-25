@@ -577,10 +577,10 @@ pub struct Renderer {
     /// Live draw tier (see [`RenderTier`]), chosen once per device in
     /// `initialize_with_device`.
     render_tier: RenderTier,
-    /// Test hook: force storage-buffer support on/off for the tier decision
-    /// before a device is initialized, so the automatic downgrade is testable
-    /// without a WebGL2 device.
+    /// Test hook: force storage-buffer support on/off for the tier decision.
     storage_support_override: Option<bool>,
+    /// User opt-out from the accelerated GPU-storage copy (universal tier).
+    gpu_storage_disabled: bool,
     /// Accelerated whole-scene line storage; `None` on the universal tier or
     /// when no instanced lines are resident.
     pulled_lines: Option<PulledLines>,

@@ -70,7 +70,7 @@ fn acds_sab_version(bytes: &[u8]) -> u32 {
 fn the_export_version_keys_are_in_the_closed_table_with_their_defaults() {
     assert_eq!(
         CadSettingKey::ALL.len(),
-        33,
+        34,
         "one writable key per contract"
     );
     for (key, wire) in [

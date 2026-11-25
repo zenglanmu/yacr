@@ -45,6 +45,7 @@ pub use runtime::{
 mod diagnostics;
 mod host_error;
 mod session_display;
+mod session_gpu;
 mod session_impl;
 mod session_msaa;
 pub use diagnostics::{RenderDiagnostics, RenderGateReason};
@@ -302,6 +303,15 @@ struct State {
     /// [`CadRenderRuntime::attach_with_gpu_time`] constructs a **fresh**
     /// renderer that would otherwise silently fall back to the environment.
     gpu_budget_config: Option<GpuBudgetConfig>,
+    /// Whether the accelerated vertex-stage storage copy of the scene is
+    /// allowed (`view.gpuStorage.disabled` inverted).
+    ///
+    /// The draw tier is chosen **once per device**, and
+    /// [`CadRenderRuntime::attach_with_gpu_time`] constructs a fresh renderer,
+    /// so the choice is recorded here and re-applied at every attach. A live
+    /// change therefore applies at the next device attach (a new window or a
+    /// restart), never mid-frame.
+    gpu_storage_enabled: bool,
     /// The host's requested MSAA sample count for the next device attach
     /// (`1`/`2`/`4`). A fresh renderer is constructed on every attach, so the
     /// request is re-applied there.
@@ -363,6 +373,7 @@ impl Default for State {
             published_base_identity: None,
             runtime: CadRenderRuntime::default(),
             gpu_budget_config: None,
+            gpu_storage_enabled: true,
             msaa_samples: 1,
             msaa_supported_samples: Vec::new(),
             preference: BackendPreference::Auto,

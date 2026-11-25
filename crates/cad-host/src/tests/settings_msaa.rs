@@ -37,7 +37,7 @@ fn the_msaa_key_is_in_the_closed_table() {
     let key = CadSettingKey::MsaaMode;
     assert_eq!(
         CadSettingKey::ALL.len(),
-        33,
+        34,
         "one writable key per contract"
     );
     assert_eq!(

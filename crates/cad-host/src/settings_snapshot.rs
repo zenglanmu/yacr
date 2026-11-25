@@ -55,8 +55,13 @@ pub struct HostSettings {
     /// option).
     pub aperture_size: u32,
     /// GPU memory budget as an integer percentage of the graphics card's memory
-    /// (`10..=100`). A budget for CAD rendering, not the card's total memory.
+    /// (`10..=80`). A budget for CAD rendering, not the card's total memory.
     pub gpu_budget_percent: u32,
+    /// Accelerated GPU storage opt-out (`view.gpuStorage.disabled`, default
+    /// `true`): `true` means the renderer keeps no vertex-stage storage copy of
+    /// the scene and draws with the universal per-run path. The tier is chosen
+    /// per device, so a change applies at the next device attach.
+    pub gpu_storage_disabled: bool,
     /// Canvas anti-aliasing token (`view.msaa.mode`): `"off"`, `"2x"` or `"4x"`
     /// (default `"4x"`). The host resolves it to the frame's sample count
     /// (`1`/`2`/`4`) when it publishes the next view snapshot.
@@ -125,6 +130,7 @@ impl HostCore {
             pickbox_size,
             aperture_size,
             gpu_budget_percent,
+            gpu_storage_disabled,
             msaa_mode,
         ) = {
             let store = self.viewer_config.borrow();
@@ -141,6 +147,7 @@ impl HostCore {
                 effective.view.pickbox.size_pixels,
                 effective.view.aperture.size_pixels,
                 effective.view.gpu_budget.percent,
+                effective.view.gpu_storage.disabled,
                 effective.view.msaa.mode.as_token().to_string(),
             )
         };
@@ -235,6 +242,7 @@ impl HostCore {
             pickbox_size,
             aperture_size,
             gpu_budget_percent,
+            gpu_storage_disabled,
             msaa_mode,
             wgpu_backend: normalize_wgpu_backend(self.wgpu_backend.borrow().as_deref()).to_string(),
             // The six host-owned appearance/navigation/notice leaves live outside

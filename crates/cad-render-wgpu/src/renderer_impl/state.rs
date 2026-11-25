@@ -156,6 +156,19 @@ impl Renderer {
         self.storage_support_override = support;
     }
 
+    /// Set the user's accelerated-GPU-storage policy before a device is
+    /// initialized (`view.gpuStorage.disabled` inverted).
+    ///
+    /// `false` selects [`RenderTier::Universal`] on the next
+    /// `initialize_with_device` even when the device reports vertex-stage
+    /// storage buffers: the renderer then allocates no pulled copy. This is a
+    /// **policy**, not a capability override — `true` never forces the
+    /// accelerated tier on a device that cannot support it. The tier is chosen
+    /// once per device, so a live call does not switch the current device.
+    pub fn set_gpu_storage_enabled(&mut self, enabled: bool) {
+        self.gpu_storage_disabled = !enabled;
+    }
+
     /// Number of instances in the resident accelerated line storage (0 on the
     /// universal tier).
     pub fn pulled_line_instance_count(&self) -> u32 {

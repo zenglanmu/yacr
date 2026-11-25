@@ -16,6 +16,7 @@ fn store_allowing_display() -> ViewerConfigStore {
                 "view.crosshair.sizePercent",
                 "view.pickbox.sizePixels",
                 "view.aperture.sizePixels",
+                "view.gpuStorage.disabled",
                 "view.gpuBudget.percent"
             ] } }
         }))
@@ -270,10 +271,10 @@ fn a_non_integer_crosshair_percentage_is_refused() {
 fn the_gpu_budget_is_a_percentage_of_the_card_validated_not_clamped() {
     // The default leaves headroom below the card's total memory.
     let store = ViewerConfigStore::default();
-    assert_eq!(store.effective().view.gpu_budget.percent, 90);
+    assert_eq!(store.effective().view.gpu_budget.percent, 80);
 
     // Both accepted bounds survive as written.
-    for percent in [10, 90, 100] {
+    for percent in [10, 50, 80] {
         let mut store = ViewerConfigStore::default();
         store
             .update_config(json!({ "view": { "gpuBudget": { "percent": percent } } }))
@@ -281,14 +282,17 @@ fn the_gpu_budget_is_a_percentage_of_the_card_validated_not_clamped() {
         assert_eq!(store.effective().view.gpu_budget.percent, percent);
     }
 
-    // Outside `10..=100` it is a path-named refusal, never a clamp.
-    for percent in [0, 9, 101, 400] {
+    // Outside `10..=80` it is a path-named refusal, never a clamp. `100` used
+    // to be accepted; `90` and `100` now leave the card with only 10 % or no
+    // compositor/WebView headroom and are refused like any other over-range
+    // value.
+    for percent in [0, 9, 81, 90, 100, 400] {
         let mut store = ViewerConfigStore::default();
         let error = store
             .update_config(json!({ "view": { "gpuBudget": { "percent": percent } } }))
             .unwrap_err();
         assert_eq!(error.path, "view.gpuBudget.percent");
-        assert_eq!(store.effective().view.gpu_budget.percent, 90);
+        assert_eq!(store.effective().view.gpu_budget.percent, 80);
     }
 
     // A fractional, negative or string percentage is a schema type error, not a
@@ -303,8 +307,32 @@ fn the_gpu_budget_is_a_percentage_of_the_card_validated_not_clamped() {
             store.update_config(patch).is_err(),
             "a non-integer percentage must be refused"
         );
-        assert_eq!(store.effective().view.gpu_budget.percent, 90);
+        assert_eq!(store.effective().view.gpu_budget.percent, 80);
     }
+}
+
+#[test]
+fn gpu_storage_is_disabled_by_default_and_only_an_allowed_leaf() {
+    // The shipped default is no accelerated GPU copy, so a device that has the
+    // storage-buffer capability still chooses the universal per-run tier.
+    let store = ViewerConfigStore::default();
+    assert!(store.effective().view.gpu_storage.disabled);
+
+    // The leaf is not user-writable unless the host policy allows it; a closed
+    // store refuses the write outright and keeps the default.
+    let mut closed = ViewerConfigStore::default();
+    assert!(closed
+        .apply_user_preference(json!({ "view": { "gpuStorage": { "disabled": false } } }))
+        .is_err());
+    assert!(closed.effective().view.gpu_storage.disabled);
+
+    let mut open = store_allowing_display();
+    open.apply_user_preference(json!({ "view": { "gpuStorage": { "disabled": false } } }))
+        .unwrap();
+    assert!(!open.effective().view.gpu_storage.disabled);
+    assert!(open
+        .projected_user_preference_json()
+        .contains("\"gpuStorage\":{\"disabled\":false}"));
 }
 
 #[test]

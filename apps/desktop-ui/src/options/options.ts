@@ -20,11 +20,13 @@
 // (rendered as "not reported"), is never dirty and is never written.
 import type { Translator } from '../i18n.ts';
 import { MSAA_FIELDS } from './msaa-fields.ts';
+import { GPU_FIELDS, fieldVisible } from './gpu-fields.ts';
 import type { OptionField } from './unit-fields.ts';
 import { UNIT_FIELDS, UNIT_TOKENS, unitPairError } from './unit-fields.ts';
 
 export type { OptionField } from './unit-fields.ts';
 export { MSAA_MODES, MSAA_FIELDS } from './msaa-fields.ts';
+export { GPU_FIELDS, fieldVisible } from './gpu-fields.ts';
 export { UNIT_TOKENS, UNIT_FIELDS } from './unit-fields.ts';
 
 /** The IPC that returns the effective settings snapshot. */
@@ -222,21 +224,7 @@ export const OPTIONS_FIELDS: readonly OptionField[] = Object.freeze<OptionField[
     labelKey: 'options.field.snapHints',
     helpKey: 'options.help.snapHints',
   },
-  {
-    // The share of the graphics card's memory CAD may use. The renderer lane
-    // reads this persisted value; neither the wire field, the write key nor the
-    // config leaf is renamed here, so the three spellings cannot drift apart.
-    id: 'gpuBudgetPercent',
-    tab: 'display',
-    kind: 'number',
-    wire: 'gpuBudgetPercent',
-    key: 'gpuBudgetPercent',
-    min: 10,
-    max: 100,
-    unitKey: 'options.unit.percent',
-    labelKey: 'options.field.gpuBudgetPercent',
-    helpKey: 'options.help.gpuBudgetPercent',
-  },
+  ...GPU_FIELDS,
   ...MSAA_FIELDS,
   {
     id: 'snapEnabled',
@@ -654,6 +642,7 @@ export function validateDraft(draft: OptionsDraft | null | undefined): Record<st
   if (!draft) return errors;
   for (const field of OPTIONS_FIELDS) {
     if (field.kind === 'readonly' || field.kind === 'locale' || !field.key) continue;
+    if (!fieldVisible(field, draft)) continue;
     const value = draft[field.id];
     if (value === undefined || value === null) continue;
     const code = validateField(field.id, value);
@@ -715,6 +704,7 @@ export function dirtyFields(
   const dirty: string[] = [];
   for (const field of OPTIONS_FIELDS) {
     if (field.kind === 'readonly') continue;
+    if (!fieldVisible(field, draft)) continue;
     if (field.kind === 'locale') {
       const next = normalizeValue(field.id, draft[field.id]);
       if (next !== null && locale !== null && next !== locale) dirty.push(field.id);

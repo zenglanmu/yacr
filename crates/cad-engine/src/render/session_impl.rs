@@ -1,3 +1,4 @@
+use super::runtime::AttachPolicies;
 use super::*;
 
 impl RenderSessionHandle {
@@ -705,13 +706,17 @@ impl RenderSessionHandle {
         let preference = state.preference;
         let msaa_samples = state.msaa_samples;
         let msaa_supported_samples = state.msaa_supported_samples.clone();
+        let gpu_storage_enabled = state.gpu_storage_enabled;
         state.runtime.attach_with_gpu_time(
             device,
             queue,
             preference,
             gpu_time,
-            msaa_samples,
-            msaa_supported_samples,
+            AttachPolicies {
+                msaa_samples,
+                msaa_supported_samples,
+                gpu_storage_enabled,
+            },
         );
         // A device attach constructs a fresh renderer, so the host's policy (if
         // any) is re-applied here instead of being dropped with the old device.

@@ -161,6 +161,12 @@ impl HostCore {
         if let Some(drawing) = initial_document.clone() {
             render.sync_drawing(Some(drawing));
         }
+        // The shipped renderer policy is the universal path (no accelerated GPU
+        // storage copy). Record it on the engine handle **before** construction
+        // hands the handle out, so an attach that happens before `load_startup`
+        // still honours the documented default instead of probing the device as
+        // if the user had opted in.
+        render.set_gpu_storage_enabled(!viewer_config.effective().view.gpu_storage.disabled);
         // Native hosts get a real monotonic clock by default; wasm32 has none and
         // must inject one (an omitted clock is an explicit refusal, never a fake
         // elapsed of 0).
@@ -867,11 +873,26 @@ impl HostCore {
                 // *re-persist* its normalized projection must not make the
                 // loaded values disappear (`load_user_preference` applies them
                 // in memory; only runtime writes demand durability).
-                match self.load_user_preference(&recent::without_recent_files(
-                    &aliases::without_command_aliases(&settings_root::without_root_preferences(
-                        &settings::without_wgpu_backend(&text),
+                //
+                // A budget written by a release with the wider `10..=100` range
+                // is migrated down to the current maximum **before** it is
+                // validated, with a diagnostic naming the old and new value.
+                // This is the read path only: a live write is still refused,
+                // never clamped.
+                let preference = recent::without_recent_files(&aliases::without_command_aliases(
+                    &settings_root::without_root_preferences(&settings::without_wgpu_backend(
+                        &text,
                     )),
-                )) {
+                ));
+                let (preference, migrated_budget) =
+                    settings::migrate_persisted_gpu_budget_percent(&preference);
+                if let Some(previous) = migrated_budget {
+                    diagnostics.push(format!(
+                        "preferences {path} migrated view.gpuBudget.percent {previous} -> {} (the accepted maximum)",
+                        *cad_app::viewer_config::ViewGpuBudget::RANGE.end(),
+                    ));
+                }
+                match self.load_user_preference(&preference) {
                     Ok(()) => {
                         if let Err(error) = self.persist_preference() {
                             diagnostics
@@ -887,6 +908,10 @@ impl HostCore {
         }
         // A persisted font directory that disappeared is diagnosed, not fatal.
         self.diagnose_fonts_dir(&mut diagnostics);
+        // The loaded preference must seed the renderer policy the same way it
+        // seeds the live interaction switches: the draw tier is chosen at the
+        // next device attach from the engine handle's recorded choice.
+        self.seed_gpu_storage();
         // The loaded preference must actually seed the live session, not just
         // sit in the config store: `CadStatus.snap_enabled`/`hover_preview` read
         // `SessionState`, whose constructor defaults both switches on.
