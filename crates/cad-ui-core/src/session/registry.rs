@@ -99,10 +99,11 @@ macro_rules! cad_wire_registry {
             @row(tauri_only, host, NoArgs, cad_recovery_files, { }, $crate::session::CadRecoveryFiles, { })
             @row(tauri_only, host, OpenRecoveryArgs, cad_open_recovery, { arg(req, key, ::std::string::String) }, $crate::session::wire::CadCommandAck, { })
             // The save dialog's self-containment question (ADR-0040 D3/D17). Both
-            // are about a `.ymodel` archive, so only the carrier that installs one
-            // serves them; every other host refuses by name
-            // (`unsupported-runtime: ymodel` / `unsupported-runtime: embed_resources`)
-            // through the same host seam family as the recovery rows.
+            // are about *external* resources: a carrier without an archive refuses
+            // with `unsupported-runtime: ymodel`, and one that has the archive but
+            // cannot read local files (Web/`dom-canvas`) with
+            // `unsupported-runtime: embed_resources`, through the same host seam
+            // family as the recovery rows.
             @row(tauri_only, host, NoArgs, cad_ymodel_resource_preview, { }, $crate::session::CadYmodelResources, { })
             @row(tauri_only, host, EmbedResourcesArgs, cad_set_embed_resources, { arg(req, embed, bool) }, $crate::session::wire::CadCommandAck, { })
             // The Options > Files folder chooser: a host file capability, not a
@@ -136,6 +137,12 @@ macro_rules! cad_wire_registry {
             @row(shared, sink, SelectionArgs, cad_select_entities, { arg(req, entity_ids, ::std::vec::Vec<u64>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::select_entities(sink, entity_ids) })
             @row(shared, sink, StandardViewArgs, cad_standard_view, { arg(req, view, String) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::standard_view(sink, &view) })
             @row(shared, sink, OrbitArgs, cad_orbit, { arg(req, yaw, f64) arg(req, pitch, f64) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::orbit(sink, yaw, pitch) })
+            // Typed absolute/fitted camera placement. Exactly one of `preset`
+            // (fitted BIM/standard observation) or `camera` (eye/target/up +
+            // projection + 2d/3d mode) is required; the shared parser validates
+            // both before the queue. Not a router selector: absent from
+            // `cad_commands`.
+            @row(shared, sink, SetViewArgs, cad_set_view, { arg(opt, preset, ::std::option::Option<::std::string::String>) arg(opt, camera, ::std::option::Option<$crate::session::wire::SetViewCameraArgs>) }, $crate::session::wire::CadCommandAck, { $crate::session::wire::set_view(sink, preset.as_deref(), camera) })
             @row(shared, popups, PopupArgs, cad_open_popup, { arg(req, kind, String) }, $crate::popup::PopupAck, { $crate::session::wire::open_popup(popups, &kind) })
             @row(shared, popups, NoArgs, cad_close_popup, { }, $crate::session::wire::CadCommandAck, { $crate::session::wire::close_popup(popups) })
             @row(shared, reads, NoArgs, cad_settings, { }, $crate::session::CadSettings, { $crate::session::wire::settings(reads) })

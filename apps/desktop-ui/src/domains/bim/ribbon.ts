@@ -22,6 +22,7 @@ import type { RibbonItem, RibbonPanel, RibbonTab } from '../../ribbon/ribbon-mod
 import type { RibbonPendingItem } from '../../ribbon/ribbon-model.ts';
 import { STANDARD_VIEWS } from '../../cad/view3d.ts';
 import { BIM_ACTION } from '../../ribbon/bim-panel.ts';
+import { DOMAIN_PANEL } from '../../ribbon/domain-entry.ts';
 import { SHELL_ACTIONS } from '../../ribbon/actions.ts';
 
 function panel(id: string, titleKey: string, items: readonly RibbonItem[]): RibbonPanel {
@@ -52,6 +53,23 @@ function pending(
 function standardViewItems(): readonly RibbonItem[] {
   return STANDARD_VIEWS.map(entry => ({ ...entry }));
 }
+
+// --- File -----------------------------------------------------------------
+//
+// Revit's first ribbon tab is **File** (the application menu): New, Open, Save,
+// Save As, Export, Print, Close, Options. `SAVE` always writes `.ymodel` and
+// other formats go through `EXPORT` (ADR-0041/0052), so there is no separate
+// Save As row. Every row is the same payload-free command the drafting File tab
+// and the TitleBar QAT dispatch; the tab adds reachability, not a second path.
+const FILE = panel('bim.file.actions', 'bim.panel.file', [
+  { id: 'bim.new', labelKey: 'qat.new', icon: 'new', command: 'NEW', large: true },
+  { id: 'bim.open', labelKey: 'file.open', icon: 'open', command: 'OPEN', large: true },
+  { id: 'bim.save', labelKey: 'qat.save', icon: 'save', command: 'SAVE', large: true },
+  { id: 'bim.export', labelKey: 'file.export', icon: 'export', command: 'EXPORT', large: true },
+  { id: 'bim.plot', labelKey: 'file.plot', icon: 'printer', command: 'PLOT' },
+  { id: 'bim.close', labelKey: 'doctabs.close', icon: 'close', command: 'CLOSE' },
+  { id: 'bim.file_options', labelKey: 'file.options', icon: 'settings', action: SHELL_ACTIONS.options },
+]);
 
 // --- Architecture ---------------------------------------------------------
 
@@ -234,6 +252,15 @@ const LINK_MODELS = panel('bim.link_models', 'bim.panel.link_models', [
 
 // --- View -----------------------------------------------------------------
 
+const BIM_VIEWS = panel('bim.views', 'bim.panel.views', [
+  { id: 'bim.view_overview', labelKey: 'bim.view.overview', icon: 'view', viewPreset: 'overview', large: true },
+  { id: 'bim.view_plan', labelKey: 'bim.view.plan', icon: 'viewTop', viewPreset: 'plan', large: true },
+  { id: 'bim.view_front', labelKey: 'bim.view.front', icon: 'viewFront', viewPreset: 'front' },
+  { id: 'bim.view_back', labelKey: 'bim.view.back', icon: 'viewBack', viewPreset: 'back' },
+  { id: 'bim.view_left', labelKey: 'bim.view.left', icon: 'viewLeft', viewPreset: 'left' },
+  { id: 'bim.view_right', labelKey: 'bim.view.right', icon: 'viewRight', viewPreset: 'right' },
+]);
+
 const GRAPHICS = panel('bim.graphics', 'bim.panel.graphics', [
   { id: 'bim.visual_style', labelKey: 'draw.kind.vscurrent', icon: 'view', command: 'VSCURRENT', large: true },
   { id: 'bim.projection', labelKey: 'view.projection', icon: 'axes', command: 'PROJECTION' },
@@ -255,6 +282,10 @@ const STANDARD = panel('bim.standard_views', 'bim.panel.standard_views', standar
 
 const WINDOWS = panel('bim.windows', 'bim.panel.windows', [
   { id: 'bim.vports', labelKey: 'draw.kind.vports', icon: 'rectang', command: 'VPORTS', large: true },
+  // Revit's View > Windows panel hosts User Interface (Properties/Project
+  // Browser visibility). This chrome has one tray slot, so the same place owns
+  // showing/hiding it; the tray's own header runs the identical action.
+  { id: 'bim.domain_tray', labelKey: 'domain.tray_toggle', icon: 'menu', action: SHELL_ACTIONS.domainTray },
 ]);
 
 // --- Manage ---------------------------------------------------------------
@@ -282,8 +313,13 @@ const INQUIRY = panel('bim.inquiry', 'bim.panel.inquiry', [
   { id: 'bim.block_list', labelKey: 'draw.kind.block_list', icon: 'properties', command: 'BLOCK?' },
 ]);
 
-/** The nine Revit-derived tabs, in the reference order. */
+/** The ten tabs, in the reference order: File first, then the nine Revit tabs. */
 export const BIM_RIBBON_TABS: readonly RibbonTab[] = Object.freeze([
+  // The reference application's File tab is the first tab and is accented; the
+  // band opens on the first non-accented tab (`DomainRibbonBand`), like the
+  // drafting ribbon opens on `home` rather than `file`. The shared `DOMAIN_PANEL`
+  // is the one application-domain entry every profile puts under File.
+  { id: 'bim.file', labelKey: 'bim.tab.file', accent: true, panels: [FILE, DOMAIN_PANEL] },
   tab('bim.architecture', 'bim.tab.architecture', [BUILD, ROOMS, DATUM, MODIFY]),
   tab('bim.structure', 'bim.tab.structure', [FRAMING, FOUNDATION, REINFORCEMENT, CONNECTIONS]),
   tab('bim.insert', 'bim.tab.insert', [LINK, IMPORT, FAMILY, LIBRARY]),
@@ -291,6 +327,6 @@ export const BIM_RIBBON_TABS: readonly RibbonTab[] = Object.freeze([
   tab('bim.analyze', 'bim.tab.analyze', [SCHEDULES, MEASURE, SPACES]),
   tab('bim.massing', 'bim.tab.massing', [MASSING, SITE]),
   tab('bim.collaborate', 'bim.tab.collaborate', [COORDINATION, WORKSHARING, LINK_MODELS]),
-  tab('bim.view', 'bim.tab.view', [GRAPHICS, NAVIGATE, STANDARD, WINDOWS]),
+  tab('bim.view', 'bim.tab.view', [BIM_VIEWS, GRAPHICS, NAVIGATE, STANDARD, WINDOWS]),
   tab('bim.manage', 'bim.tab.manage', [PARAMETERS, PROJECT, SETTINGS, INQUIRY]),
 ]);

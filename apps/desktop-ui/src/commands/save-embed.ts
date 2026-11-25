@@ -7,11 +7,12 @@
 // the whole model of that answer, so the dialog and the shell stay dumb:
 //
 //   * `readEmbedPreview` asks `cad_ymodel_resource_preview`. A **refusal is the
-//     honest answer** on a carrier whose document is not an archive (Web,
-//     `dom-canvas`, no open archive): it returns `null`, the dialog never opens
-//     and the save proceeds exactly as before. It is never rewritten into a
-//     fake "nothing to embed" answer — that is why `null` and an empty list are
-//     two different results.
+//     honest answer** on a carrier that cannot resolve external resources (Web and
+//     the X11 `dom-canvas` path have no local directory to read a font/xref/image
+//     from), even though such a carrier can open and save the archive itself: it
+//     returns `null`, the dialog never opens and the save proceeds exactly as
+//     before. It is never rewritten into a fake "nothing to embed" answer — that
+//     is why `null` and an empty list are two different results.
 //   * `parseEmbedPreview` validates the payload; a row it cannot name is
 //     dropped, and a payload without an `entries` array is not a preview. A
 //     `found` flag counts only as `true`: a resource is never claimed as

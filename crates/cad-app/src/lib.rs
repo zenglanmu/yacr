@@ -21,6 +21,7 @@ use std::{collections::BTreeMap, sync::Arc};
 pub mod acad_info;
 pub mod api;
 pub mod camera;
+pub mod view_placement;
 // The ordered import/export connector table (Phase 1: contract + registry only).
 mod connector;
 pub mod draw_tool;
@@ -165,6 +166,7 @@ pub use camera::{
     orthonormal_work_plane, xy_work_plane, Camera, Camera2dParams, Camera3dParams, Projection,
     ProjectionKind, StandardView, ViewBasis,
 };
+pub use view_placement::{ViewModeRequest, ViewPlacement, ViewPreset};
 pub mod command_aliases;
 pub mod command_id;
 pub use app_chamfer_edge::{

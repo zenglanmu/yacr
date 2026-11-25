@@ -50,6 +50,19 @@ test('the nine menus and their panel order are the reference order', async () =>
   }
 });
 
+test('Window > Default tray is the live tray toggle, not a pending row', () => {
+  const item = allItems(CONCEPT_MENUS, CONCEPT_TOOLBAR).find(entry => entry.id === 'DEFAULTTRAY');
+  assert.equal(item?.action, SHELL_ACTIONS.domainTray);
+  assert.equal(item?.pendingKey, undefined);
+});
+
+test('the File menu reaches the application-domain switcher', () => {
+  const file = CONCEPT_MENUS.find(tab => tab.id === 'file');
+  const item = file?.panels.flatMap(panel => [...panel.items]).find(entry => entry.id === 'DOMAIN');
+  assert.equal(item?.action, SHELL_ACTIONS.domainSwitcher);
+  assert.equal(item?.pendingKey, undefined);
+});
+
 test('the tool column and tray carry the documented groups/panels', async () => {
   const expected = await fixture();
   assert.deepEqual(CONCEPT_TOOLBAR.map(group => group.id), expected.toolbar);

@@ -48,6 +48,8 @@ use crate::state::{lock, ProbeShared, Shared};
 pub use cad_ui_core::session::admit_selected_text;
 // Re-exported for the owner tick, which drains the queue with the shared rule.
 pub use cad_ui_core::session::drain_standard_views;
+// Re-exported for the owner tick, which drains the typed camera-placement queue.
+pub use cad_ui_core::session::drain_set_views;
 // Re-exported for the owner tick, which drains the ViewCube orbit queue with the
 // shared rule.
 pub use cad_ui_core::session::drain_orbits;

@@ -237,14 +237,28 @@ pub mod fonts;
 
 /// The browser [`platform::PlatformFiles`]: **save/plot become real downloads**.
 ///
-/// `begin_save` synthesizes the `download://` target the session exports into and
-/// `write_atomic` publishes those bytes through a [`download::DownloadSink`]. The
-/// wasm32 sink is a synchronous `Blob` + `<a download>` click (same user gesture as
-/// the SAVE/PLOT click); the host-target sink records name+bytes so the contract is
-/// asserted by `cargo test -p app-web` without a browser. Open is **not** part of
-/// this adapter: the page's file picker owns selection and the bytes arrive through
+/// `begin_save` synthesizes a `download://<seq>/<name>` target the session exports
+/// into (a fresh handle per call: a browser download never replaces a file in
+/// place) and `write_atomic` publishes those bytes through a
+/// [`download::DownloadSink`]. `SAVE` therefore writes the native `.ymodel`
+/// container through [`ymodel_archive`], and `PLOT`/`EXPORT` write their own
+/// formats the same way. The wasm32 sink is a synchronous `Blob` +
+/// `<a download>` click (same user gesture as the SAVE/PLOT click); the
+/// host-target sink records name+bytes so the contract is asserted by
+/// `cargo test -p app-web` without a browser. Open is **not** part of this
+/// adapter: the page's file picker owns selection and the bytes arrive through
 /// the session's `open_bytes` entry.
 pub mod download;
+
+/// The `dom-canvas` carrier's native `.ymodel` archive adapter
+/// ([`ymodel_archive::ZipArchive`] over `cad-store-zip`).
+///
+/// Only an `apps/app-*` carrier may link the container crate
+/// (`scripts/check-architecture.py`), so this is the wasm side of ADR-0037 D16:
+/// a page upload that is a `.ymodel` decodes through the real store, and `SAVE`
+/// encodes the same container in memory for the browser download. No filesystem,
+/// no temp file, no `.bak`: the carrier has nothing durable to replace.
+pub mod ymodel_archive;
 
 /// Which isolation a browser can actually deliver (`worker_capability()`).
 ///

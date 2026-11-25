@@ -77,6 +77,12 @@ pub enum CommandId {
     SwitchBackend,
     Switch2d3d,
     StandardView,
+    /// `cad_set_view`: one absolute camera pose or a host-fitted preset.
+    ///
+    /// Not a router selector (there is no `SETVIEW` text command): the typed
+    /// `cad_set_view` channel is its only entry, because a camera pose cannot be
+    /// carried by the name-only `cad_command` funnel. View-only.
+    SetView,
     /// `PLAN`: display the top/plan 2D view — the same observation as [`crate::StandardView::Top`], recording one `ZOOM PREVIOUS` step when it leaves a
     /// 3D view and doing nothing while already 2D. AutoCAD's UCS/World/Current choices are **NOT IMPLEMENTED** (this build has no UCS model); any
     /// payload is refused. View-only, so Viewer mode allows it.

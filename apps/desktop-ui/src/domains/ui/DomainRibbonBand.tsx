@@ -32,7 +32,10 @@ export interface DomainRibbonBandProps {
 export function DomainRibbonBand({ tabs }: DomainRibbonBandProps) {
   const { t, locale } = useI18n();
   const shell = useShell();
-  const [activeId, setActiveId] = useState(() => tabs[0]?.id ?? '');
+  // Open on the first non-accented tab. The accented tab is the reference's
+  // File/application menu, and the drafting ribbon likewise opens on `home`
+  // rather than `file`: a band whose default view is a file menu hides the work.
+  const [activeId, setActiveId] = useState(() => (tabs.find(entry => !entry.accent) ?? tabs[0])?.id ?? '');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const panelsRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,7 +77,7 @@ export function DomainRibbonBand({ tabs }: DomainRibbonBandProps) {
             type="button"
             role="tab"
             aria-selected={entry.id === active.id}
-            className={['ribbon-tab', entry.id === active.id ? 'is-active' : ''].filter(Boolean).join(' ')}
+            className={['ribbon-tab', entry.accent ? 'is-accent' : '', entry.id === active.id ? 'is-active' : ''].filter(Boolean).join(' ')}
             onClick={() => { setOpenMenu(null); setActiveId(entry.id); }}
           >
             {tabLabel(t, entry)}

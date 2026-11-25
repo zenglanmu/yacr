@@ -4,7 +4,7 @@
 //! session's export funnel (`cad_host::save`) asks the platform for a save target
 //! inside the user gesture and then writes the finished bytes to it. On the web
 //! there is no dialog to wait for, so this adapter **synthesizes the target**
-//! (`download://<name>`) from the name the session proposed, exactly like the
+//! (`download://<seq>/<name>`) from the name the session proposed, exactly like the
 //! `SyncSaveFiles` reference fake in `cad_host`'s tests. The funnel drains that
 //! event immediately and finishes the export inside the same gesture — which is
 //! what lets [`DownloadSink::publish`] run `Blob` + `<a download>` synchronously,
@@ -12,7 +12,7 @@
 //!
 //! | interaction | browser answer |
 //! |---|---|
-//! | `begin_save` | **Ok**: one [`FileEvent::SaveTarget`] with `display_name = default_name` and `opaque = download://<default_name>`; a blank name is refused |
+//! | `begin_save` | **Ok**: one [`FileEvent::SaveTarget`] with `display_name = default_name` and `opaque = download://<seq>/<default_name>`; a blank name is refused |
 //! | `write_atomic` | `sink.publish(display_name, bytes)` — a real download on wasm, an in-memory record on the host target |
 //! | `begin_open` / `begin_open_target` | [`crate::platform::UNSUPPORTED_FILESYSTEM`]: the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry |
 //! | `set_source` | bookkeeping only: a browser download may reuse the opened name, since there is no writable source file to protect |
@@ -20,6 +20,18 @@
 //!
 //! Nothing here fabricates a save the sink did not perform: a sink failure is
 //! returned as the real error and **no** download is recorded.
+//!
+//! # Every save is a new download
+//!
+//! A page has no writable file the session could re-open, so there is no
+//! in-place save: each `begin_save` mints a **fresh opaque handle**
+//! (`download://<seq>/<name>`). The host compares that handle with the source it
+//! recorded after the last open/save; a fresh one makes the write a Save As,
+//! which is exactly what a browser download is. Without the sequence, a second
+//! `SAVE` would present the same handle as the last save and the host's native
+//! in-place rule would try to re-read a file this carrier cannot read
+//! ([`cad_platform::PlatformFiles::read_target`] default refuses).
+
 //!
 //! # Two sinks, one contract
 //!
@@ -29,7 +41,7 @@
 //!   build [`PlatformDownload`] is the recording sink (there is no page to
 //!   download into); on wasm32 it is `DomDownload`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use cad_domain::{CadError, CadResult};
 use cad_platform::{FileEvent, FileTarget, PlatformFiles, SavePurpose};
@@ -72,6 +84,7 @@ pub fn download_mime(name: &str) -> &'static str {
         Some("dxf") => "application/dxf",
         Some("svg") => "image/svg+xml",
         Some("pdf") => "application/pdf",
+        Some("ymodel") => "application/x-yacr-ymodel",
         _ => "application/octet-stream",
     }
 }
@@ -86,6 +99,9 @@ pub struct BrowserFiles<S: DownloadSink> {
     events: RefCell<Vec<FileEvent>>,
     source: RefCell<Option<FileTarget>>,
     downloads: RefCell<Vec<DownloadRecord>>,
+    /// Monotonic handle counter: every `begin_save` is a new download (see the
+    /// module docs), so a repeated `SAVE` never reuses the last handle.
+    next_sequence: Cell<u64>,
 }
 
 impl<S: DownloadSink> BrowserFiles<S> {
@@ -95,6 +111,7 @@ impl<S: DownloadSink> BrowserFiles<S> {
             events: RefCell::new(Vec::new()),
             source: RefCell::new(None),
             downloads: RefCell::new(Vec::new()),
+            next_sequence: Cell::new(0),
         }
     }
 
@@ -142,21 +159,23 @@ impl<S: DownloadSink> PlatformFiles for BrowserFiles<S> {
 
     fn begin_save(&self, purpose: SavePurpose, default_name: &str) -> CadResult<()> {
         // The browser has no save picker and no format filter: the target is
-        // synthesized from the suggested name, which defaults to `.dxf`. There is
-        // no way to choose another extension in the web flow, so the connector
-        // Save As formats (.stl/.obj/.ply/.off/.ifc/.skp) are NOT IMPLEMENTED on
-        // web this round: they are not merely unverified.
+        // synthesized from the suggested name, which the session derives from the
+        // command (`SAVE` → `<stem>.ymodel`; `EXPORT`/`PLOT` → their own format).
+        // Each call mints a fresh handle because a download is never an in-place
+        // overwrite (see the module docs).
         if default_name.trim().is_empty() {
             return Err(CadError::InvalidInput(
                 "begin_save: default_name is empty; a browser download needs a real file name"
                     .to_string(),
             ));
         }
+        let sequence = self.next_sequence.get() + 1;
+        self.next_sequence.set(sequence);
         self.events.borrow_mut().push(FileEvent::SaveTarget {
             purpose,
             target: FileTarget {
                 display_name: default_name.to_string(),
-                opaque: format!("download://{default_name}"),
+                opaque: format!("download://{sequence}/{default_name}"),
             },
         });
         Ok(())

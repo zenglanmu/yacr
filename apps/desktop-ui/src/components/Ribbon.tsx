@@ -38,6 +38,7 @@ import { PANEL_DIALOG_MISSING_KEY } from '../limits.ts';
 import { NO_DOCUMENT_KEY, unavailableReasonKey } from '../commands/commands.ts';
 import { DOCUMENT_SCOPED_COMMANDS } from '../commands/gating.ts';
 import { standardViewAvailable, standardViewUnavailableReasonKey } from '../cad/view3d.ts';
+import { setViewAvailable, setViewUnavailableReasonKey } from '../cad/set-view.ts';
 import { ribbonBandOverflow, ribbonCueReserve, ribbonScrollTarget, sameOverflow } from '../ribbon/ribbon-overflow.ts';
 
 /** Which edges of the panel strip hide content (the cue state). */
@@ -56,6 +57,8 @@ interface UnavailableItem {
   readonly label?: string;
   readonly command?: string;
   readonly standardView?: string;
+  /** A fitted camera preset (`cad_set_view`); its own reason branch. */
+  readonly viewPreset?: string;
   /** The item's own "not wired" sentence; it wins over every generic reason. */
   readonly pendingKey?: string;
   /** A plugin-supplied literal version of that sentence. */
@@ -77,6 +80,9 @@ export function runItem(shell: ShellValue, item: RibbonItem) {
     return;
   }
   if (item.action) return shell.runAction(item.action);
+  // A fitted view preset carries a payload too (`cad_set_view { preset }`), so it
+  // has its own typed branch before the name-only command funnel.
+  if (item.viewPreset) return shell.runSetView(item.viewPreset);
   // A standard view carries a payload, so it never rides the name-only command
   // funnel: the shell sends it on `cad_standard_view` through its own typed
   // helper. Order matters — the typed branch is checked before `command`.
@@ -104,6 +110,9 @@ export function unavailable(t: Translator, item: UnavailableItem, shell: ShellVa
   if (item.standardView) {
     return t(standardViewUnavailableReasonKey(shell, item.standardView), { command: itemLabel(t, item) });
   }
+  if (item.viewPreset !== undefined) {
+    return t(setViewUnavailableReasonKey(shell, item.viewPreset), { command: itemLabel(t, item) });
+  }
   if (item.command !== undefined && DOCUMENT_SCOPED_COMMANDS.includes(item.command)
     && shell.status && !shell.loading && !shell.documentOpen) {
     return t(NO_DOCUMENT_KEY, { command: itemLabel(t, item) });
@@ -123,8 +132,9 @@ export function unavailable(t: Translator, item: UnavailableItem, shell: ShellVa
 export function itemEnabled(shell: ShellValue, item: RibbonItem): boolean {
   return item.action ? true
     : item.standardView ? standardViewAvailable(shell, item.standardView)
-      : item.command ? shell.canCommand(item.command)
-        : false;
+      : item.viewPreset ? setViewAvailable(shell, item.viewPreset)
+        : item.command ? shell.canCommand(item.command)
+          : false;
 }
 
 function ItemButton({ item }: { readonly item: RibbonItem }) {

@@ -27,7 +27,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_app::{StandardView, ToolParameter, ToolValue, ViewPlacement};
 use cad_ui_core::host_read::{HostReadAnswer, HostReadHost, HostReadRequest};
 use cad_ui_core::launch::LaunchOptions;
 use cad_ui_core::layout::LayoutTracker;
@@ -226,6 +226,9 @@ pub struct Shared {
     /// Bounded main-thread queue of typed standard-view requests: admitted by
     /// `cad_standard_view` and drained into `CadSession::standard_view`.
     pub cad_standard_views: VecDeque<StandardView>,
+    /// Bounded main-thread queue of typed camera placements (`cad_set_view`):
+    /// admitted by that channel and drained into `CadSession::set_view`.
+    pub cad_set_views: VecDeque<ViewPlacement>,
     /// Bounded main-thread queue of typed orbit deltas (the ViewCube's
     /// `cad_orbit { yaw, pitch }`): admitted by `cad_orbit` and drained into
     /// `CadSession::orbit`.
@@ -408,6 +411,7 @@ impl Shared {
             cad_selected_properties: Vec::new(),
             cad_selection_requests: VecDeque::new(),
             cad_standard_views: VecDeque::new(),
+            cad_set_views: VecDeque::new(),
             cad_orbits: VecDeque::new(),
             cad_pinches: VecDeque::new(),
             cad_setting_writes: VecDeque::new(),
@@ -475,6 +479,7 @@ impl Shared {
                 selected_properties: &mut self.cad_selected_properties,
                 selection_requests: &mut self.cad_selection_requests,
                 standard_views: &mut self.cad_standard_views,
+                set_views: &mut self.cad_set_views,
                 orbits: &mut self.cad_orbits,
                 setting_writes: &mut self.cad_setting_writes,
                 layer_writes: &mut self.cad_layer_writes,

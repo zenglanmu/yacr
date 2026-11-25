@@ -85,7 +85,8 @@ mod tests;
 pub use cad_desktop_shell::commands::{
     cad_close_popup, cad_command, cad_commands, cad_open_popup, cad_set_selected_property,
     cad_set_selected_text, cad_set_setting, cad_set_tool_parameter, cad_set_tool_text,
-    cad_settings, cad_standard_view, cad_status, probe_input, probe_status, CadCommandAck,
+    cad_set_view, cad_settings, cad_standard_view, cad_status, probe_input, probe_status,
+    CadCommandAck,
 };
 pub(crate) use cad_desktop_shell::state::lock;
 pub use cad_desktop_shell::state::new_shared;

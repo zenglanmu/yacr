@@ -425,6 +425,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         let (
             commands,
             mut standard_views,
+            mut set_views,
             mut orbits,
             setting_writes,
             mut layer_writes,
@@ -439,6 +440,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
+                std::mem::take(&mut state.cad_set_views),
                 std::mem::take(&mut state.cad_orbits),
                 std::mem::take(&mut state.cad_setting_writes),
                 std::mem::take(&mut state.cad_layer_writes),
@@ -452,6 +454,7 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
         };
         let queued = commands.len()
             + standard_views.len()
+            + set_views.len()
             + orbits.len()
             + setting_writes.len()
             + layer_writes.len()
@@ -518,6 +521,15 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                         |view| session.standard_view(view),
                     ) {
                         log::warn!("[probe] cad standard view rejected: {error}");
+                    }
+                    // Typed camera placements (`cad_set_view`): absolute poses or
+                    // fitted presets, applied through the same session funnel.
+                    for error in
+                        cad_desktop_shell::commands::drain_set_views(&mut set_views, |placement| {
+                            session.set_view(placement)
+                        })
+                    {
+                        eprintln!("[probe] cad set view rejected: {error}");
                     }
                     // Typed orbit deltas (the ViewCube's `cad_orbit`): applied in
                     // admission order right after the views, through the session's

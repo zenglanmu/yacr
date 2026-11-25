@@ -586,10 +586,10 @@ test('the extension check is case-insensitive and matches only the last dot', as
 
 test('the browser bundle advertises exactly its DWG/DXF tail plus .ymodel', () => {
   // `app-web` compiles `cad-app` with `default-features = false` and no
-  // `formats-*` feature, so DWG/DXF is all the wasm session can read. `.ymodel`
-  // stays listed so the session's own `unsupported-runtime: ymodel` refusal
-  // reaches the user instead of a page-level "not a drawing" (see the constant's
-  // doc comment). The list is compared case-insensitively on the selected name.
+  // `formats-*` feature, so DWG/DXF is all the wasm connector set can read.
+  // `.ymodel` is not a connector format: the session decodes it with its own
+  // `cad-store-zip` adapter, so the picker must keep listing it.
+  // The list is compared case-insensitively on the selected name.
   assert.deepEqual([...WEB_OPEN_EXTENSIONS], ['.ymodel', '.dwg', '.dxf']);
   for (const name of ['plan.dwg', 'PLAN.DWG', 'plan.v2.dxf', 'plan.DXF', 'plan.ymodel', 'PLAN.YMODEL']) {
     assert.equal(isDrawingFileName(name), true, name);

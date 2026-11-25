@@ -1,5 +1,6 @@
 {
   "ribbonOrder": [
+    "bim.file",
     "bim.architecture",
     "bim.structure",
     "bim.insert",
@@ -11,6 +12,10 @@
     "bim.manage"
   ],
   "tabs": {
+    "bim.file": [
+      "bim.file.actions",
+      "domain"
+    ],
     "bim.architecture": [
       "bim.build",
       "bim.rooms",
@@ -50,6 +55,7 @@
       "bim.link_models"
     ],
     "bim.view": [
+      "bim.views",
       "bim.graphics",
       "bim.navigate",
       "bim.standard_views",

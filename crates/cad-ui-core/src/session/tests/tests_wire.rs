@@ -20,7 +20,7 @@ use super::super::{
     API_SUBMIT_QUEUE_FULL, CAD_API_SUBMIT_CAP, CAD_LAYER_WRITE_CAP, CAD_ORBIT_CAP,
     CAD_SELECTED_TEXT_CAP, CAD_TOOL_PARAMETER_CAP,
 };
-use cad_app::{StandardView, ToolValue};
+use cad_app::{StandardView, ToolValue, ViewPlacement};
 
 /// A queue-sink harness: the desktop's bounded family with explicit gate inputs.
 struct Queues {
@@ -29,6 +29,7 @@ struct Queues {
     selected_texts: Vec<String>,
     selected_properties: Vec<(String, String)>,
     standard_views: std::collections::VecDeque<StandardView>,
+    set_views: std::collections::VecDeque<ViewPlacement>,
     orbits: std::collections::VecDeque<OrbitDelta>,
     setting_writes: std::collections::VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: std::collections::VecDeque<CadLayerWrite>,
@@ -49,6 +50,7 @@ impl Queues {
             selected_texts: Vec::new(),
             selected_properties: Vec::new(),
             standard_views: std::collections::VecDeque::new(),
+            set_views: std::collections::VecDeque::new(),
             orbits: std::collections::VecDeque::new(),
             setting_writes: std::collections::VecDeque::new(),
             layer_writes: std::collections::VecDeque::new(),
@@ -73,6 +75,7 @@ impl Queues {
                 selected_texts: &mut self.selected_texts,
                 selected_properties: &mut self.selected_properties,
                 standard_views: &mut self.standard_views,
+                set_views: &mut self.set_views,
                 orbits: &mut self.orbits,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
@@ -633,6 +636,10 @@ impl AdmissionTarget for NoSelectionSink {
     }
 
     fn standard_view(&mut self, _view: StandardView) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn set_view(&mut self, _placement: ViewPlacement) -> Result<(), String> {
         Ok(())
     }
 

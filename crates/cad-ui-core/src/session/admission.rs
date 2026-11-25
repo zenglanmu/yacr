@@ -30,9 +30,15 @@
 
 use std::collections::VecDeque;
 
-use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_app::{
+    Camera, Projection, StandardView, ToolParameter, ToolValue, ViewModeRequest, ViewPlacement,
+    ViewPreset,
+};
+use cad_domain::Point3;
 
-use crate::session::wire::{OrbitDelta, ORBIT_ANGLES_NOT_FINITE};
+use crate::session::wire::{
+    OrbitDelta, SetViewCameraArgs, SetViewProjectionArgs, ORBIT_ANGLES_NOT_FINITE,
+};
 use crate::session::{CadLayerWrite, CadSettingKey, CadSettingValue};
 use crate::shell::{CAD_COMMAND_CAP, POPUP_MODAL_OPEN};
 
@@ -510,6 +516,135 @@ pub fn drain_orbits(
     refusals
 }
 
+/// Bounded capacity of the `cad_set_view` queue.
+///
+/// It reuses the standard-view capacity so every typed view request shares one
+/// bound; the desktop queues and `dom-canvas` applies inline.
+pub const CAD_SET_VIEW_CAP: usize = CAD_STANDARD_VIEW_CAP;
+
+/// Parse one `cad_set_view` request into an accepted placement.
+///
+/// Exactly one of `preset`/`camera` is required; the preset name and the camera
+/// (finite points, non-coincident eye/target, valid projection, mode/projection
+/// agreement) are validated **before** anything is queued, so a malformed pose
+/// never reaches the owner thread. `2d` needs an orthographic projection and `3d`
+/// a perspective one — the 3D renderer is perspective-only.
+pub fn parse_set_view(
+    preset: Option<&str>,
+    camera: Option<SetViewCameraArgs>,
+) -> Result<ViewPlacement, String> {
+    match (preset, camera) {
+        (Some(name), None) => {
+            let preset = ViewPreset::parse(name).ok_or_else(|| {
+                let expected = ViewPreset::ALL
+                    .iter()
+                    .map(|entry| entry.key())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "view.set.unknown_preset: cad_set_view has no preset '{name}' (expected one                      of {expected})"
+                )
+            })?;
+            Ok(ViewPlacement::Preset(preset))
+        }
+        (None, Some(camera)) => {
+            let mode = match camera.mode.trim().to_ascii_lowercase().as_str() {
+                "2d" => ViewModeRequest::Plan,
+                "3d" => ViewModeRequest::ThreeD,
+                _ => {
+                    return Err(
+                        "view.set.unknown_mode: cad_set_view mode must be \"2d\" or \"3d\"".into(),
+                    )
+                }
+            };
+            let projection = match camera.projection {
+                SetViewProjectionArgs::Perspective {
+                    vertical_fov_radians,
+                } => Projection::perspective(vertical_fov_radians)
+                    .map_err(|error| format!("view.set.invalid_projection: {error}"))?,
+                SetViewProjectionArgs::Orthographic { scale } => Projection::orthographic(scale)
+                    .map_err(|error| format!("view.set.invalid_projection: {error}"))?,
+            };
+            let matches_mode = match mode {
+                ViewModeRequest::Plan => projection.is_orthographic(),
+                ViewModeRequest::ThreeD => !projection.is_orthographic(),
+            };
+            if !matches_mode {
+                return Err(match mode {
+                    ViewModeRequest::Plan => {
+                        "view.set.mode_projection_mismatch: a 2D placement needs an orthographic                          projection"
+                    }
+                    ViewModeRequest::ThreeD => {
+                        "view.set.mode_projection_mismatch: a 3D placement needs a perspective                          projection"
+                    }
+                }
+                .into());
+            }
+            let camera = Camera {
+                eye: point3(camera.eye),
+                target: point3(camera.target),
+                up: point3(camera.up),
+                projection,
+            };
+            camera
+                .validate()
+                .map_err(|error| format!("view.set.invalid_camera: {error}"))?;
+            Ok(ViewPlacement::Camera { camera, mode })
+        }
+        _ => Err(
+            "view.set.request_invalid: cad_set_view needs exactly one of preset or camera".into(),
+        ),
+    }
+}
+
+fn point3(value: [f64; 3]) -> Point3 {
+    Point3 {
+        x: value[0],
+        y: value[1],
+        z: value[2],
+    }
+}
+
+/// The gate of the set-view channel: modal popup, CAD mode, then the bound.
+pub fn check_set_view(cad_mode: bool, modal_open: bool, pending: usize) -> Result<(), String> {
+    if modal_open {
+        return Err(POPUP_MODAL_OPEN.into());
+    }
+    if !cad_mode {
+        return Err("CAD is disabled in probe mode".into());
+    }
+    if pending >= CAD_SET_VIEW_CAP {
+        return Err("CAD set-view queue is full".into());
+    }
+    Ok(())
+}
+
+/// Admit one typed placement into the bounded main-thread queue.
+pub fn admit_set_view(
+    queue: &mut VecDeque<ViewPlacement>,
+    cad_mode: bool,
+    modal_open: bool,
+    placement: ViewPlacement,
+) -> Result<(), String> {
+    check_set_view(cad_mode, modal_open, queue.len())?;
+    queue.push_back(placement);
+    Ok(())
+}
+
+/// Drain the set-view queue in admission order, applying each placement.
+pub fn drain_set_views(
+    queue: &mut VecDeque<ViewPlacement>,
+    mut apply: impl FnMut(ViewPlacement) -> Result<(), String>,
+) -> Vec<String> {
+    let mut refusals = Vec::new();
+    while let Some(placement) = queue.pop_front() {
+        if let Err(error) = apply(placement) {
+            refusals.push(error);
+        }
+    }
+    refusals
+}
+
 /// Bounded capacity of the typed settings queue.
 ///
 /// It reuses the CAD command queue's capacity so every admission shares one bound.
@@ -534,6 +669,8 @@ pub enum Channel {
     SelectedProperty,
     /// Typed standard views.
     StandardView,
+    /// Typed absolute/fitted camera placements (`cad_set_view`).
+    SetView,
     /// Typed orbit deltas (the ViewCube's yaw/pitch request).
     Orbit,
     /// Typed settings writes.

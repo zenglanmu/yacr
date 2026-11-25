@@ -22,6 +22,7 @@ import { draftingAcceleratorCommand } from './cad/cad.ts';
 import { awaitingToolText, setToolText } from './tools/text.ts';
 import { setSelectedText } from './tools/textedit.ts';
 import { submitStandardView } from './cad/view3d.ts';
+import { submitSetView } from './cad/set-view.ts';
 import { submitOrbit } from './cad/orbit.ts';
 import { isErrorReportVisible } from './errors/error-report.ts';
 import { bindBrowserDefaults, cadContextMenuState, isTextEntryTarget } from './defaults.ts';
@@ -90,9 +91,7 @@ function Shell() {
   const [error, setError] = useState('');
   const [command, setCommand] = useState('');
   const [commandResult, setCommandResult] = useState<CadCommandResult | null>(null);
-  // The command line's history log (`commands/use-command-history.ts`): admitted
-  // commands **and** refusal sentences. `commands` is its derived command-only
-  // list, which is what Up/Down and ranking may read.
+  // Admitted commands and refusal sentences; `commands` is its derived command-only list.
   const commandHistory = useCommandHistory();
   const [pending, setPending] = useState(false);
   const [ribbonTab, setRibbonTab] = useState('home');
@@ -871,6 +870,7 @@ function Shell() {
     // used to leave its line up for the rest of the session (a later `FIT` could
     // not clear it), which is the same sticky-error defect from the other side.
     runStandardView: view => { setError(''); void submitStandardView({ invoke, view, t, report: setError }); },
+    runSetView: preset => { setError(''); void submitSetView({ invoke, preset, t, report: setError }); },
     // One coalesced `cad_orbit` per animation frame; only a refusal reaches the banner.
     runOrbit: (yaw, pitch) => submitOrbit({ invoke, yaw, pitch, t, report: setError }),
     cancelImport: () => { void requestImportCancel(invoke, status); },

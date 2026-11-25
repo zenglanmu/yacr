@@ -47,6 +47,14 @@ serde_json.workspace = true
 # arrow still points app → cad, never back.
 cad-domain.workspace = true
 cad-db.workspace = true
+# The native `.ymodel` archive (`src/ymodel_archive.rs`, ADR-0037 D16): the store
+# is the only implementation of `cad_db::DocumentStore`, and `scripts/check-architecture.py`
+# lets **only** an `apps/app-*` carrier link it. The crate is pure Rust on purpose
+# (`zip` with no C features, `structured-zstd`, `flate2`'s rust backend), so the
+# same adapter the Linux carrier links also compiles into wasm. The archive is
+# installed through `BytesDocument::archive` before the first document is
+# delivered, which is what lets a page upload open a `.ymodel`.
+cad-store-zip.workspace = true
 # `default-features = false` keeps the browser artifact to the DWG/DXF lanes: the
 # `formats-*` adapters are linked only when a carrier enables them, and Cloudflare
 # Pages caps a single deployed file at 25 MiB. A **new shared crate between

@@ -19,7 +19,7 @@
 //!
 //! | contract | browser behaviour |
 //! |---|---|
-//! | [`PlatformFiles`] | **save/plot are real downloads** ([`crate::download`]): `begin_save` synthesizes a `download://<name>` target, `write_atomic` publishes the finished bytes through the carrier's [`DownloadSink`](crate::download::DownloadSink) — a DOM download on wasm32, a recording sink on the host target; **open** still refuses with [`UNSUPPORTED_FILESYSTEM`] because the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry; `set_source` is bookkeeping only and never gates a write |
+//! | [`PlatformFiles`] | **save/plot are real downloads** ([`crate::download`]): `begin_save` synthesizes a `download://<seq>/<name>` target, `write_atomic` publishes the finished bytes through the carrier's [`DownloadSink`](crate::download::DownloadSink) — a DOM download on wasm32, a recording sink on the host target; `SAVE` writes the native `.ymodel` container through [`crate::ymodel_archive`], `PLOT`/`EXPORT` their own formats; **open** still refuses with [`UNSUPPORTED_FILESYSTEM`] because the page's file picker owns selection and the bytes arrive through the session's `open_bytes` entry; `set_source` is bookkeeping only and never gates a write |
 //! | [`ConfigStore`] | in-memory only: readable for the rest of this session, **never** durable — a reload starts from `Absent` ([`MemoryConfigStore::PERSISTENT`] is `false`) |
 //! | [`SurfaceSource`] | the metrics the host feeds it (CSS logical size + scale), `None` before the first report |
 //! | [`HostResources`] | the committed font package is installed from memory when the page staged it ([`crate::fonts`]); a drawing that requests nothing is a real no-op success, a drawing that requests faces before any package was staged is refused with [`UNSUPPORTED_RESOURCES`] (never a silent empty success) |
@@ -44,13 +44,14 @@
 //! ## What is wired, and what is not
 //!
 //! * **Save and plot are wired.** The session's own export funnel
-//!   (`cad_host::save`) runs the lossy DXF export / vector plot and writes the
-//!   bytes through [`BrowserFiles`] in [`crate::download`]. `begin_save` synthesizes the
-//!   download target, so the whole export finishes inside the SAVE/PLOT click and
-//!   the browser sink can publish it as a real download
-//!   (`Blob` + `<a download>`). On a native build the same adapter records the
-//!   download in memory instead (there is no page); that is a recorded write, not
-//!   a silent success.
+//!   (`cad_host::save`) runs the native `.ymodel` save through
+//!   [`crate::ymodel_archive`], the lossy DXF export and the vector plot, and
+//!   writes the bytes through [`BrowserFiles`] in [`crate::download`].
+//!   `begin_save` synthesizes the download target, so the whole write finishes
+//!   inside the SAVE/PLOT click and the browser sink can publish it as a real
+//!   download (`Blob` + `<a download>`). On a native build the same adapter
+//!   records the download in memory instead (there is no page); that is a
+//!   recorded write, not a silent success.
 //! * **Open is not wired here.** A page has no picker this session can drive: the
 //!   file input is the page's DOM capability, and the chosen bytes arrive through
 //!   the session's `open_bytes` entry. `begin_open`/`begin_open_target` therefore

@@ -3869,6 +3869,39 @@ button, input, select { font: inherit; color: inherit; }
   border-left: 1px solid var(--line);
 }
 .concept-tray__section { border-bottom: 1px solid var(--line-soft); }
+/* Revit docks its palettes on the **left**, so the BIM profile places this same
+   column before the canvas (`DomainProfile.traySide`). Only the edge facing the
+   drawing flips, and the column stops reserving the right-edge dock's
+   `--navrail-w` strip: the dock no longer overlays the tray, it overlays the
+   drawing's right edge exactly as it already does in the drafting profile. */
+.concept-tray--left {
+  flex: 0 0 286px;
+  width: 286px;
+  padding-right: 0;
+  border-left: 0;
+  border-right: 1px solid var(--line);
+}
+/* The tray's title row and its one hide control. Both reference trays have a
+   title bar; hiding is the whole column, not a panel (each section keeps its own
+   `<details>` collapse). */
+.concept-tray__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  position: sticky; top: 0; z-index: 1;
+  min-height: 26px; padding: 0 6px 0 10px;
+  background: var(--chrome-2);
+  border-bottom: 1px solid var(--line);
+}
+.concept-tray__title {
+  font-size: 11px; font-weight: 600; letter-spacing: .3px; color: var(--text);
+}
+.concept-tray__hide {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid transparent; border-radius: 3px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.concept-tray__hide:hover { background: var(--hover); color: var(--text); }
+.concept-tray__hide:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
 .concept-tray__summary {
   display: flex;
   align-items: center;

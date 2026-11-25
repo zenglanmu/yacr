@@ -12,7 +12,8 @@ use cad_domain::{
 };
 
 use crate::{
-    AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView, WipeoutFrames,
+    AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView, ViewPlacement,
+    WipeoutFrames,
 };
 
 mod text_batch;
@@ -38,22 +39,21 @@ pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
     Layer(LayerId, bool),
-    /// Distinct existing layer ids and their temporary visibility values.
-    /// Empty batches and duplicate ids (including equal values) are invalid.
+    /// Distinct layer ids + temporary visibility; empty/duplicate ids are invalid.
     LayerVisibilities(Vec<(LayerId, bool)>),
     Space(SpaceId),
     StandardView(StandardView),
+    /// Absolute or host-fitted camera placement (`cad_set_view`; view state only).
+    SetView(ViewPlacement),
     Backend(BackendChoice),
     /// Start (or restart) a measurement tool with an explicit algorithm.
     MeasureTool(MeasurementToolKind),
-    /// Orbit the current view: yaw about world +Z, pitch about the view right
-    /// axis, both in radians. Preserves the eye-target distance (audit F13).
+    /// Orbit the view about its target: yaw/pitch radians, distance preserved.
     Orbit {
         yaw: f64,
         pitch: f64,
     },
-    /// Structured zoom: a positive factor plus the logical-pixel cursor that must
-    /// stay anchored (distinct from the legacy `Points`-payload zoom, which has none).
+    /// Structured zoom: a positive factor plus the anchored logical-pixel cursor.
     ZoomAt {
         factor: f64,
         cursor: [f64; 2],

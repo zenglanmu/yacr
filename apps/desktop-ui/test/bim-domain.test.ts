@@ -16,6 +16,7 @@ import { LOCAL_CHROME_COMMANDS } from '../src/commands/gating.ts';
 import { SHELL_ACTIONS } from '../src/ribbon/actions.ts';
 import { BIM_ACTION } from '../src/ribbon/bim-panel.ts';
 import { STANDARD_VIEW_KEYS } from '../src/cad/view3d.ts';
+import { SET_VIEW_PRESETS } from '../src/cad/set-view.ts';
 import { DOMAIN_PROFILES } from '../src/domains/domains.ts';
 import {
   registerDomainUi,
@@ -40,12 +41,30 @@ function allItems(tabs: readonly RibbonTab[]): readonly RibbonItem[] {
   return allPanels(tabs).flatMap(panel => [...panel.items]);
 }
 
-test('the nine ribbon tabs and their panel order are the reference order', async () => {
+test('the ten tabs (File + the nine reference tabs) and their panel order are the reference order', async () => {
   const expected = await fixture();
   assert.deepEqual(BIM_RIBBON_TABS.map(tab => tab.id), expected.ribbonOrder);
   for (const tab of BIM_RIBBON_TABS) {
     assert.deepEqual(tab.panels.map(panel => panel.id), expected.tabs[tab.id], `${tab.id} panel order drifted`);
   }
+});
+
+test('the File tab leads the band and reaches every file command', () => {
+  const file = BIM_RIBBON_TABS[0];
+  assert.equal(file.id, 'bim.file');
+  assert.equal(file.accent, true);
+  const items = file.panels.flatMap(panel => [...panel.items]);
+  assert.deepEqual(
+    items.map(item => item.command ?? item.action ?? null),
+    ['NEW', 'OPEN', 'SAVE', 'EXPORT', 'PLOT', 'CLOSE', SHELL_ACTIONS.options, SHELL_ACTIONS.domainSwitcher],
+  );
+});
+
+test('the View tab owns showing/hiding the tray', () => {
+  const view = BIM_RIBBON_TABS.find(tab => tab.id === 'bim.view');
+  const item = view?.panels.flatMap(panel => [...panel.items]).find(entry => entry.id === 'bim.domain_tray');
+  assert.equal(item?.action, SHELL_ACTIONS.domainTray);
+  assert.equal(item?.pendingKey, undefined);
 });
 
 test('the tray carries the documented panel list', async () => {
@@ -66,6 +85,7 @@ test('every item is either exactly one dispatch token or an explicit pending sen
     const tokens = [
       typeof item.command === 'string' ? item.command : null,
       typeof item.standardView === 'string' ? item.standardView : null,
+      typeof item.viewPreset === 'string' ? item.viewPreset : null,
       typeof item.action === 'string' ? item.action : null,
     ].filter(value => value !== null);
     const pending = typeof item.pendingKey === 'string';
@@ -79,6 +99,9 @@ test('every item is either exactly one dispatch token or an explicit pending sen
     }
     if (typeof item.standardView === 'string') {
       assert.ok(STANDARD_VIEW_KEYS.includes(item.standardView), `${item.id}: unknown standard view`);
+    }
+    if (typeof item.viewPreset === 'string') {
+      assert.ok((SET_VIEW_PRESETS as readonly string[]).includes(item.viewPreset), `${item.id}: unknown view preset`);
     }
     if (typeof item.action === 'string') {
       assert.ok(actions.has(item.action), `${item.id}: unknown action ${item.action}`);
@@ -123,6 +146,7 @@ test('the BIM profile is wired as a domain ribbon and mechanical stays the only 
     },
     { ribbon: true, surface: 'domain-ribbon', commandLine: false, placeholder: false },
   );
+  assert.equal(DOMAIN_PROFILES.bim.traySide, 'left', 'Revit docks its palettes on the left');
   assert.equal(DOMAIN_PROFILES.mechanical.placeholder, true);
 });
 

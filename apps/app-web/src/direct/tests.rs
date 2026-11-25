@@ -45,7 +45,7 @@ use std::cell::Cell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_app::{StandardView, ToolParameter, ToolValue, ViewPlacement};
 use cad_engine::render::{BackendPreference, RenderSessionHandle};
 use cad_host::{HostOptions, RequestClock, StartDocument};
 use cad_ui_core::session::wire::{self, CadCommandAck};
@@ -99,10 +99,7 @@ fn session() -> CadSession {
         platform.host_platform(cad_platform::HostCapabilities::default()),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        cad_ui_core::session::BytesDocument {
-            label: SYNTHETIC_LABEL,
-            bytes: SYNTHETIC,
-        },
+        cad_ui_core::session::BytesDocument::new(SYNTHETIC_LABEL, SYNTHETIC),
     )
     .expect("the synthetic fixture opens from bytes");
     session
@@ -123,6 +120,7 @@ struct Queues {
     selected_texts: Vec<String>,
     selected_properties: Vec<(String, String)>,
     standard_views: VecDeque<StandardView>,
+    set_views: VecDeque<ViewPlacement>,
     orbits: VecDeque<OrbitDelta>,
     setting_writes: VecDeque<(CadSettingKey, CadSettingValue)>,
     layer_writes: VecDeque<CadLayerWrite>,
@@ -147,6 +145,7 @@ impl Queues {
             selected_texts: Vec::new(),
             selected_properties: Vec::new(),
             standard_views: VecDeque::new(),
+            set_views: VecDeque::new(),
             orbits: VecDeque::new(),
             setting_writes: VecDeque::new(),
             layer_writes: VecDeque::new(),
@@ -171,6 +170,7 @@ impl Queues {
                 selected_texts: &mut self.selected_texts,
                 selected_properties: &mut self.selected_properties,
                 standard_views: &mut self.standard_views,
+                set_views: &mut self.set_views,
                 orbits: &mut self.orbits,
                 setting_writes: &mut self.setting_writes,
                 layer_writes: &mut self.layer_writes,
@@ -190,6 +190,7 @@ impl Queues {
             && self.selected_texts.is_empty()
             && self.selected_properties.is_empty()
             && self.standard_views.is_empty()
+            && self.set_views.is_empty()
             && self.orbits.is_empty()
             && self.setting_writes.is_empty()
             && self.layer_writes.is_empty()
@@ -223,6 +224,9 @@ impl Queues {
         }
         for view in &self.standard_views {
             session.standard_view(*view)?;
+        }
+        for placement in &self.set_views {
+            session.set_view(*placement)?;
         }
         for delta in std::mem::take(&mut self.orbits) {
             session.orbit(delta.yaw, delta.pitch)?;
@@ -391,6 +395,7 @@ fn compare(case: &str, name: &str, args: &str, gates: (bool, bool)) -> (Run, Run
 /// The per-command matrix lives in its own module so this file stays readable.
 mod bim;
 mod matrix;
+mod matrix_set_view;
 mod selection;
 mod settings_fonts;
 
@@ -538,9 +543,10 @@ fn the_wire_command_set_is_the_registrys_shared_set() {
     // capabilities: a browser carrier answers `cad_recent_files` /
     // `cad_recovery_files` with `supported: false` and refuses `cad_open_recent` /
     // `cad_open_recovery` by name, so none of them may reach this transport. The
-    // ymodel pair is the same story for the `.ymodel` archive (ADR-0040): a page
-    // document is not an archive, so both are refused by marker. The folder picker
-    // is refused for the same reason (a page has no local directory).
+    // ymodel pair asks about *external* resource embedding, which a page cannot
+    // resolve (its document archive itself is supported), so both are refused by
+    // marker. The folder picker is refused for the same reason (a page has no
+    // local directory).
     assert_eq!(
         cad_ui_core::session::TAURI_ONLY_WIRE_COMMAND_NAMES,
         &[
@@ -561,18 +567,19 @@ fn the_wire_command_set_is_the_registrys_shared_set() {
 /// The host-seam commands refuse with **their own** markers, with and without a
 /// live session.
 ///
-/// A browser document is not a `.ymodel` archive: there is no file to make
-/// self-contained, so the preview would describe resources no file could carry and
-/// the flag could never be written. A page also has no local directory to pick for
-/// the fonts row. The marker (not the generic "no such wire command") is what the
-/// chrome keys on, and what an operator reads in the log. In particular the picker
-/// must never answer `null`: that would read as "the user cancelled".
+/// The two ymodel embed commands are about external resources: a page has no
+/// local directory to resolve a font/xref/image from, so the save dialog's
+/// self-containment question is not offered (the archive itself is open/saveable
+/// on this carrier). A page also has no local directory to pick for the fonts
+/// row. The marker (not the generic "no such wire command") is what the chrome
+/// keys on, and what an operator reads in the log. In particular the picker must
+/// never answer `null`: that would read as "the user cancelled".
 #[test]
 fn the_host_seam_commands_refuse_with_their_own_markers() {
     for (name, marker) in [
         (
             cad_ui_core::session::YMODEL_PREVIEW_COMMAND,
-            cad_ui_core::session::UNSUPPORTED_YMODEL,
+            cad_ui_core::session::UNSUPPORTED_EMBED_RESOURCES,
         ),
         (
             cad_ui_core::session::EMBED_RESOURCES_COMMAND,

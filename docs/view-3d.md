@@ -197,6 +197,32 @@ exposes **no 3D control**:
   colour are not modelled, and two faces can still end up close in value when
   their orientations relative to the light are similar.
 
+## Absolute placement and fitted BIM views (`cad_set_view`, 2026-11-25)
+
+`cad_set_view` is the typed channel for a camera **placement** (ADR-0059). It
+accepts exactly one of:
+
+- `preset`: `overview` / `plan` / `front` / `back` / `left` / `right`. The host
+  frames the **active space** with the same bounds source `FIT` uses. `plan` is
+  the fitted 2D orthographic top view; `overview` and the four elevations are 3D
+  perspective observations (isometric / standard directions at the fitted
+  distance and target).
+- `camera`: absolute `eye`/`target`/`up` + `projection` + `mode` (`"2d"`/`"3d"`).
+  `2d` requires an orthographic projection, `3d` a perspective one (the 3D render
+  path is perspective-only). `2d` is the renderer's plan path: `target.xy` and
+  the orthographic `scale` are what it draws, while `eye`/`up` remain part of the
+  camera state; use `3d` for an arbitrary orientation. The camera is validated with the same
+  `Camera::validate`/`Projection` constructors every other transition uses.
+
+The request is parsed and validated before the bounded queue; the desktop drains
+it on the owner tick (`CadSession::set_view`) and `dom-canvas` applies it inline.
+A real change records one `ZOOM PREVIOUS` step; an identical placement is a
+no-op. It never writes the document, its revision, history or work plane.
+
+`cad_status.view` remains the authoritative read (`mode`, `projection`,
+`eye`, `target`, `up`); there is still no API that reads or writes a **section
+box**, FOV beyond the shared validation, or per-view graphics overrides.
+
 ## What is not verified here
 
 - **GPU execution has been observed** on a real adapter (Quadro P620, Vulkan)
@@ -218,8 +244,9 @@ exposes **no 3D control**:
   (`AcDb3dSolid`, 24 vertices / 12 triangles), a click on empty space returns
   **0** (so the hit is fresh, not a surviving selection), and a 2D control click
   selects the same entity.
-  Limits: `cad_status` exposes no 3D camera and no hovered-entity field, so a 3D
-  hover is observable only as `hoverPreview`/`snapKind`; picking targets the CPU
+  Limits: `cad_status.view` exposes the camera orientation, but there is no
+  hovered-entity field, so a 3D hover is observable only as
+  `hoverPreview`/`snapKind`; picking targets the CPU
   ray funnel, which is what the host uses — the GPU ID pass
   (`docs/picking-gpu-id-pass.md`) is a separate path.
 - **Perspective fitting on entry**: entering 3D now frames the document

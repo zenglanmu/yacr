@@ -236,15 +236,17 @@ test('the drawer offers the real ribbon model minus the two chrome-collapse swit
   for (const obsolete of [SHELL_ACTIONS.fileinfo, SHELL_ACTIONS.diagnostics]) {
     assert.equal(drawerItems.some(item => item.action === obsolete), false, `${obsolete} has no compact surface`);
   }
-  // The File tab keeps both panels: the utilities cluster still offers Audit,
-  // the recovery report, About, Options and the direct Plugins page after its
-  // palette and chrome switches are gone. Plugins is a dialog entry, so the
-  // compact layout keeps it too.
-  assert.deepEqual(mobileRibbonSections('file').map(section => section.id), ['file', 'utilities']);
+  // The File tab keeps both reference panels and the one-row domain entry: the
+  // utilities cluster still offers Audit, the recovery report, About, Options and
+  // the direct Plugins page after its palette and chrome switches are gone.
+  // Plugins is a dialog entry, so the compact layout keeps it too, and the domain
+  // switcher is reachable from the drawer as it is from the dock.
+  assert.deepEqual(mobileRibbonSections('file').map(section => section.id), ['file', 'utilities', 'domain']);
   assert.deepEqual(
-    mobileRibbonSections('file').at(-1).items.map(item => item.id),
+    mobileRibbonSections('file').at(-2).items.map(item => item.id),
     ['audit', 'recover', 'about', 'options', 'plugins'],
   );
+  assert.deepEqual(mobileRibbonSections('file').at(-1).items.map(item => item.id), ['DOMAIN']);
   // The View tab keeps its `palettes` panel only because STATUS is a router
   // command; the palette toggles, the chrome-collapse switches and the
   // workspace words are dropped from the interface panel, leaving the two

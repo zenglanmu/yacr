@@ -322,6 +322,7 @@ impl Application {
                 }
                 Ok(CommandOutcome::none())
             }
+            CommandId::SetView => self.set_view(session, &command),
             CommandId::StandardView => {
                 if let CommandPayload::StandardView(view) = command.payload {
                     // A standard view is a **discrete** view change: record the

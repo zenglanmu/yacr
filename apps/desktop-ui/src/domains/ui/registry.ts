@@ -68,7 +68,7 @@ function validItem(value: unknown): value is RibbonItem {
   if (value['pendingText'] !== undefined && !nonEmpty(value['pendingText'])) return false;
   // Exactly one dispatch token, or none for a labelled pending item that names
   // its own sentence. Two tokens would make dispatch order undefined.
-  const tokens = ['command', 'standardView', 'action'].filter(key => nonEmpty(value[key]));
+  const tokens = ['command', 'standardView', 'viewPreset', 'action'].filter(key => nonEmpty(value[key]));
   if (tokens.length > 1) return false;
   if (tokens.length === 0 && !nonEmpty(value['pendingKey'])) return false;
   if (value['variants'] !== undefined) {

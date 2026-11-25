@@ -334,7 +334,10 @@ impl Live {
             platform.host_platform(BROWSER_CAPABILITIES),
             render,
             Rc::clone(&clock),
-            BytesDocument { label, bytes },
+            // The carrier archive is part of the document descriptor so the host
+            // installs it before delivering the bytes: an uploaded `.ymodel` can
+            // be the *first* document, not just a replacement (ADR-0037 D16).
+            BytesDocument::new(label, bytes).with_archive(crate::ymodel_archive::ZipArchive::new()),
         )
         .map_err(|error| Failure::new(STEP_IMPORT, error.to_string()))?;
         let import_ms = (clock() - started).max(0.0);

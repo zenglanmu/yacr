@@ -20,8 +20,8 @@
   `cad-host`（保存时采集与缺失报告、恢复快照策略）、`apps/desktop-ui`（保存对话框开关与清单）、
   i18n。**`FORMAT_MINOR` 上限 4 → 5**（写入按文档取 4 或 5，见 D12）。
   **不改变**：`cad-db` 唯一权威、载体文档所有权、patch 禁令（仍只有 acadrust/rvt）、
-  `raw/` 语义（仍是"不认识就原样保留"，本构建不写入）、载体接线范围（仍只有 Linux 接线
-  `.ymodel`，其余载体 `unsupported-runtime: ymodel`）。
+  `raw/` 语义（仍是"不认识就原样保留"，本构建不写入）、载体接线范围（本 ADR 当时只有
+  Linux 接线 `.ymodel`；后续载体接线见 ADR-0060 及 `docs/compatibility.md`）。
 
 ---
 
@@ -280,7 +280,9 @@ listed 条目随之被 `ymodel.unsupported_minor` 拒绝（拒绝打开优于静
 - **不做字体子集化、不做字体授权校验**：授权由用户承担，UI 提示即可。
 - **不做加密/签名/口令**。
 - **不做跨载体接线**：Windows/macOS/Android/Web 打开/保存 `.ymodel` 仍以
-  `unsupported-runtime: ymodel` 拒绝。
+  `unsupported-runtime: ymodel` 拒绝。**（2026-11-25 更新）** 后续 ADR-0060 已把 Web/`dom-canvas`
+  的归档打开/保存接线；Web/X11 仍**不提供外部资源嵌入问题**（`unsupported-runtime:
+  embed_resources`），本 ADR 的内嵌资源语义不变。
 
 ### D15 — 写盘路径不做整块临时副本
 
@@ -358,4 +360,5 @@ CAD 命令行 `SETVAR` 不新增键：策略是保存流程的输入（D3 的文
 
 本轮只做**库层 + 宿主契约**。真实 DWG 跨机自包含、字体度量一致性、外部参照重新导入保真
 都需要用户提供样本，未运行即标 `NOT RUN`。跨载体（Windows/macOS/Android/Web）仍是
-`unsupported-runtime: ymodel`，不因本 ADR 改变。
+`unsupported-runtime: ymodel`，不因本 ADR 改变。**（2026-11-25 更新）** Web/`dom-canvas` 的
+归档打开/保存由 ADR-0060 接线；其外部资源嵌入问题仍不提供。

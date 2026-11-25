@@ -310,6 +310,7 @@ mod text_commands;
 mod txt2mtxt;
 mod utility;
 mod view_batch;
+mod view_set;
 
 mod view_camera;
 mod zoom_object;

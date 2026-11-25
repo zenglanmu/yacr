@@ -6,15 +6,12 @@
 //! in `cad-db` behind the host controller, every mutation goes through the host
 //! command/engine boundary, and the frontend sees only the derived state.
 //!
-//! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`,
-//! so it is created, driven (`tick`/`handle_input`/`command`) and dropped on the
-//! host main thread only. It is not `Send`/`Sync`.
-//! Scope: this module implements the CAD-facing slice only — status, commands, pointer/wheel input, canvas metrics, completion accounting and resource
-//! diagnostics. The per-host IPC wiring and the GPU presenter live in each host
-//! and call into this module.
-//! The composed [`HostPlatform`] must already report a surface
-//! ([`cad_platform::SurfaceSource::surface`]) when the session is built: an
-//! unmapped surface is an explicit `Cancelled`, never a fabricated canvas.
+//! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`, so
+//! it is created, driven and dropped on the host main thread only (`!Send`/`!Sync`).
+//! Scope: this module implements the CAD-facing slice only — status, commands,
+//! pointer/wheel input, metrics, completion accounting and resource diagnostics.
+//! Per-host IPC wiring and the GPU presenter live in each host and call here.
+//! The composed [`HostPlatform`] must report a surface when built; unmapped is `Cancelled`.
 mod action_recorder;
 mod admission;
 mod annot_arguments;
@@ -72,6 +69,7 @@ mod select_entities;
 mod select_filter;
 mod settings;
 // SHAPE/MINSERT/ADDSELECTED typed dispatch (grammar in `commands::shape_block`).
+mod set_view;
 mod shape_block_arguments;
 mod shell_settings;
 mod snap_unit;
@@ -87,6 +85,7 @@ mod util_arguments;
 pub mod vendor;
 mod view_arguments;
 pub mod wire;
+mod wire_types;
 mod ymodel_resources;
 mod zoom;
 use crate::protocol::ProbeInput;
@@ -115,12 +114,13 @@ use cad_app::interaction::{InteractionRequest, SelectionMode};
 use cad_app::CommandId;
 
 pub use self::admission::{
-    admit_layer_write, admit_orbit, admit_selected_property, admit_selected_text, admit_setting,
-    admit_standard_view, admit_tool_parameter, admit_tool_text, drain_layer_writes, drain_orbits,
-    drain_standard_views, parse_layer_property_write, parse_orbit, parse_property_write,
-    parse_selection_request, parse_standard_view, parse_tool_parameter, CAD_LAYER_WRITE_CAP,
-    CAD_ORBIT_CAP, CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SELECTION_CAP,
-    CAD_SETTING_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
+    admit_layer_write, admit_orbit, admit_selected_property, admit_selected_text, admit_set_view,
+    admit_setting, admit_standard_view, admit_tool_parameter, admit_tool_text, check_set_view,
+    drain_layer_writes, drain_orbits, drain_set_views, drain_standard_views,
+    parse_layer_property_write, parse_orbit, parse_property_write, parse_selection_request,
+    parse_set_view, parse_standard_view, parse_tool_parameter, CAD_LAYER_WRITE_CAP, CAD_ORBIT_CAP,
+    CAD_SELECTED_PROPERTY_CAP, CAD_SELECTED_TEXT_CAP, CAD_SELECTION_CAP, CAD_SETTING_CAP,
+    CAD_SET_VIEW_CAP, CAD_STANDARD_VIEW_CAP, CAD_TOOL_PARAMETER_CAP, CAD_TOOL_TEXT_CAP,
     SELECTION_EMPTY,
 };
 pub use self::annot_arguments::*;

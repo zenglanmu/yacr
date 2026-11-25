@@ -169,6 +169,7 @@ export interface ShellValue {
   readonly runCommand: (command: string) => void;
   /** Run one payload-carrying standard view (`cad_standard_view`). */
   readonly runStandardView: (view: string) => void;
+  readonly runSetView: (preset: string) => void;
   /**
    * Run one payload-carrying orbit (`cad_orbit { yaw, pitch }`, radians).
    *

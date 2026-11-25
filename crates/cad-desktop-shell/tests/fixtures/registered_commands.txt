@@ -36,6 +36,7 @@ cad_set_tool_parameter
 cad_set_tool_text
 cad_settings
 cad_standard_view
+cad_set_view
 cad_status
 cad_ymodel_resource_preview
 probe_input

@@ -40,6 +40,22 @@ export const SHELL_ACTIONS = Object.freeze({
    * every surface (band, menu, tray, compact drawer) shares one behaviour.
    */
   select: 'select',
+  /**
+   * Shows/hides the profile's `DomainTray` (the side is the profile's own
+   * `traySide`). Chrome-local like the palettes: no router command, no host
+   * payload. The reference apps both offer this (SketchUp: Window > Default Tray
+   * > Hide Tray; Revit: View > User Interface), and the tray's own header button
+   * runs the same action.
+   */
+  domainTray: 'domainTray',
+  /**
+   * Opens the application-domain switcher — the same popover the navigation
+   * dock's app button and the typed `DOMAIN` command open. BIM and concept have
+   * no command line, so without a menu/ribbon entry those profiles could not
+   * reach the switcher at all except through the dock icon; this is the
+   * in-profile path (BIM Manage > Settings, concept Window > Preferences).
+   */
+  domainSwitcher: 'domainSwitcher',
 });
 
 /** The shell actions that toggle a desktop palette window. */

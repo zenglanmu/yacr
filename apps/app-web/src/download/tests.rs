@@ -13,7 +13,7 @@ fn files() -> BrowserFiles<RecordingSink> {
 fn target(name: &str) -> FileTarget {
     FileTarget {
         display_name: name.to_string(),
-        opaque: format!("download://{name}"),
+        opaque: format!("download://1/{name}"),
     }
 }
 
@@ -33,7 +33,7 @@ fn begin_save_synthesizes_one_download_target_per_call() {
         FileEvent::SaveTarget { purpose, target } => {
             assert_eq!(*purpose, SavePurpose::SaveExport);
             assert_eq!(target.display_name, "drawing.dxf");
-            assert_eq!(target.opaque, "download://drawing.dxf");
+            assert_eq!(target.opaque, "download://1/drawing.dxf");
         }
         other => panic!("expected a SaveTarget, got {other:?}"),
     }
@@ -41,7 +41,10 @@ fn begin_save_synthesizes_one_download_target_per_call() {
         FileEvent::SaveTarget { purpose, target } => {
             assert_eq!(*purpose, SavePurpose::Plot);
             assert_eq!(target.display_name, "drawing.svg");
-            assert_eq!(target.opaque, "download://drawing.svg");
+            assert_eq!(
+                target.opaque, "download://2/drawing.svg",
+                "every download gets a fresh handle: a browser never saves in place"
+            );
         }
         other => panic!("expected a SaveTarget, got {other:?}"),
     }
@@ -157,6 +160,11 @@ fn the_download_mime_comes_from_the_extension() {
     assert_eq!(download_mime("drawing.dxf"), "application/dxf");
     assert_eq!(download_mime("PLOT.SVG"), "image/svg+xml");
     assert_eq!(download_mime("drawing.pdf"), "application/pdf");
+    assert_eq!(
+        download_mime("drawing.ymodel"),
+        "application/x-yacr-ymodel",
+        "the native archive keeps its private MIME"
+    );
     assert_eq!(download_mime("drawing.unknown"), "application/octet-stream");
     assert_eq!(download_mime("drawing"), "application/octet-stream");
 }

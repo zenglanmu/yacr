@@ -1,6 +1,6 @@
 {
   "menus": {
-    "file": ["concept.file"],
+    "file": ["concept.file", "domain"],
     "edit": ["concept.edit.basic", "concept.edit.selection", "concept.edit.groups"],
     "view": ["concept.view.interface", "concept.view.standard", "concept.view.display"],
     "camera": ["concept.camera.navigate", "concept.view.standard", "concept.camera.more"],
@@ -73,7 +73,6 @@
     "WALK",
     "LOOKAROUND",
     "MATCHPHOTO",
-    "DEFAULTTRAY",
     "MATERIALS",
     "OUTLINER",
     "EXTENSIONWAREHOUSE",

@@ -60,17 +60,31 @@ fn options() -> HostOptions {
 
 /// Open the synthetic fixture through the browser adapters. `capabilities` is
 /// what the carrier advertises, so a test can prove the projection is real.
+///
+/// The production carrier installs its `.ymodel` archive with the first document
+/// (`crate::live`), so these sessions do too unless a test asks otherwise.
 fn open(capabilities: HostCapabilities) -> (BrowserPlatform, CadSession) {
+    open_with_archive(capabilities, true)
+}
+
+/// [`open`] with the archive seam explicitly present or absent.
+fn open_with_archive(
+    capabilities: HostCapabilities,
+    archive: bool,
+) -> (BrowserPlatform, CadSession) {
     let platform = BrowserPlatform::new();
+    let document = BytesDocument::new(SYNTHETIC_LABEL, SYNTHETIC);
+    let document = if archive {
+        document.with_archive(crate::ymodel_archive::ZipArchive::new())
+    } else {
+        document
+    };
     let session = CadSession::from_bytes(
         options(),
         platform.host_platform(capabilities),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        BytesDocument {
-            label: SYNTHETIC_LABEL,
-            bytes: SYNTHETIC,
-        },
+        document,
     )
     .expect("the synthetic fixture opens from bytes through the browser adapters");
     (platform, session)
@@ -86,7 +100,7 @@ fn browser_files() -> BrowserFiles<RecordingSink> {
 fn download_target(name: &str) -> FileTarget {
     FileTarget {
         display_name: name.to_string(),
-        opaque: format!("download://{name}"),
+        opaque: format!("download://1/{name}"),
     }
 }
 
@@ -106,7 +120,7 @@ fn begin_save_synthesizes_a_download_target_for_the_purpose() {
         FileEvent::SaveTarget { purpose, target } => {
             assert_eq!(*purpose, SavePurpose::SaveExport);
             assert_eq!(target.display_name, "drawing.dxf");
-            assert_eq!(target.opaque, "download://drawing.dxf");
+            assert_eq!(target.opaque, "download://1/drawing.dxf");
         }
         other => panic!("expected a SaveTarget, got {other:?}"),
     }
@@ -114,7 +128,7 @@ fn begin_save_synthesizes_a_download_target_for_the_purpose() {
         FileEvent::SaveTarget { purpose, target } => {
             assert_eq!(*purpose, SavePurpose::Plot);
             assert_eq!(target.display_name, "drawing.svg");
-            assert_eq!(target.opaque, "download://drawing.svg");
+            assert_eq!(target.opaque, "download://2/drawing.svg");
         }
         other => panic!("expected a SaveTarget, got {other:?}"),
     }
@@ -302,10 +316,10 @@ fn a_real_new_command_installs_a_blank_untitled_document() {
 
 #[test]
 fn a_real_export_command_publishes_one_dxf_download() {
-    // The browser has no `.ymodel` archive, so SAVE refuses (ADR-0041 D1); the
-    // whole browser write path is EXPORT, end to end on the host: the export
-    // funnel runs inside the command (the synchronous-target rule) and the
-    // finished DXF reaches the download sink.
+    // The browser's write path end to end on the host: the export funnel runs
+    // inside the command (the synchronous-target rule) and the finished DXF
+    // reaches the download sink. SAVE is the separate `.ymodel` path (see the
+    // archive tests below).
     let platform = BrowserPlatform::new();
     platform.surface().report([800.0, 600.0], 1.0);
     let session = CadSession::from_bytes(
@@ -313,10 +327,7 @@ fn a_real_export_command_publishes_one_dxf_download() {
         platform.host_platform(BROWSER_CAPABILITIES),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        BytesDocument {
-            label: SYNTHETIC_LABEL,
-            bytes: SYNTHETIC,
-        },
+        BytesDocument::new(SYNTHETIC_LABEL, SYNTHETIC),
     )
     .expect("the synthetic fixture opens through the browser adapters");
     session
@@ -353,10 +364,7 @@ fn a_real_plot_command_publishes_one_svg_download() {
         platform.host_platform(BROWSER_CAPABILITIES),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        BytesDocument {
-            label: "a4-layout.dwg",
-            bytes: &bytes,
-        },
+        BytesDocument::new("a4-layout.dwg", &bytes),
     )
     .expect("the plot fixture opens through the browser adapters");
     session.command("PLOT").expect("PLOT is admitted");
@@ -793,10 +801,7 @@ fn the_bytes_entry_refuses_a_contradictory_or_unnamed_document() {
         platform.host_platform(HostCapabilities::default()),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        BytesDocument {
-            label: SYNTHETIC_LABEL,
-            bytes: SYNTHETIC,
-        },
+        BytesDocument::new(SYNTHETIC_LABEL, SYNTHETIC),
     );
     assert!(
         matches!(refused, Err(CadError::InvalidInput(_))),
@@ -808,10 +813,7 @@ fn the_bytes_entry_refuses_a_contradictory_or_unnamed_document() {
         platform.host_platform(HostCapabilities::default()),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        BytesDocument {
-            label: "   ",
-            bytes: SYNTHETIC,
-        },
+        BytesDocument::new("   ", SYNTHETIC),
     );
     assert!(
         matches!(refused, Err(CadError::InvalidInput(_))),
@@ -829,10 +831,7 @@ fn an_unparseable_document_fails_the_bytes_entry_explicitly() {
         platform.host_platform(HostCapabilities::default()),
         RenderSessionHandle::new(BackendPreference::WebGl2),
         monotonic_clock(),
-        BytesDocument {
-            label: "garbage.dwg",
-            bytes: b"this is not a DWG file",
-        },
+        BytesDocument::new("garbage.dwg", b"this is not a DWG file"),
     );
     assert!(
         refused.is_err(),
@@ -841,11 +840,11 @@ fn an_unparseable_document_fails_the_bytes_entry_explicitly() {
 }
 
 #[test]
-fn save_refuses_without_a_ymodel_archive_and_export_is_the_write_path() {
-    // ADR-0041 D1/D2 + the carrier rule: the browser has no `.ymodel` archive, so
-    // SAVE must refuse with the stable marker (never a silent DXF fallback), and
-    // the explicit EXPORT command is the only write path left.
-    let (platform, session) = open(BROWSER_CAPABILITIES);
+fn save_without_an_archive_still_refuses_by_name_and_writes_nothing() {
+    // ADR-0041 D1/D2 + the carrier rule: a session with no `.ymodel` archive must
+    // refuse SAVE with the stable marker (never a silent DXF fallback). The
+    // production carrier installs one, but the seam's absence stays explicit.
+    let (platform, session) = open_with_archive(BROWSER_CAPABILITIES, false);
     platform.surface().report([800.0, 600.0], 1.0);
     session
         .set_canvas_metrics([800.0, 600.0], 1.0)
@@ -853,7 +852,7 @@ fn save_refuses_without_a_ymodel_archive_and_export_is_the_write_path() {
 
     let error = session
         .command("SAVE")
-        .expect_err("SAVE is the native archive save; the browser has none");
+        .expect_err("SAVE is the native archive save; this session has no adapter");
     assert!(
         error.contains(cad_ui_core::session::UNSUPPORTED_YMODEL),
         "the refusal carries the stable marker: {error}"
@@ -865,11 +864,88 @@ fn save_refuses_without_a_ymodel_archive_and_export_is_the_write_path() {
 
     session
         .command("EXPORT")
-        .expect("EXPORT is the browser's explicit write path");
-    let downloads = platform.downloads();
-    assert_eq!(downloads.len(), 1, "EXPORT publishes the download");
+        .expect("EXPORT is always the explicit lossy write path");
     assert_eq!(
-        downloads[0].name, "synthetic-four-lines.dxf",
-        "the default export target is a DXF name"
+        platform.downloads().len(),
+        1,
+        "EXPORT still publishes its download"
     );
+}
+
+#[test]
+fn save_with_the_archive_downloads_a_reopenable_ymodel() {
+    // The production carrier's SAVE: the session encodes the native archive in
+    // memory (`ZipArchive` over `cad-store-zip`) and the browser adapter publishes
+    // it. A second SAVE downloads again — a browser write never replaces a file in
+    // place — and the downloaded bytes open as a document in a fresh session.
+    let (platform, session) = open(BROWSER_CAPABILITIES);
+    platform.surface().report([800.0, 600.0], 1.0);
+    session
+        .set_canvas_metrics([800.0, 600.0], 1.0)
+        .expect("the reported surface accepts the canvas metrics");
+
+    session.command("SAVE").expect("SAVE is admitted");
+    let downloads = platform.downloads();
+    assert_eq!(downloads.len(), 1, "one SAVE publishes one download");
+    assert_eq!(
+        downloads[0].name, "synthetic-four-lines.ymodel",
+        "SAVE writes the native archive, named from the source stem"
+    );
+    let published = platform.files().sink().published();
+    assert_eq!(published.len(), 1);
+    let archive = published[0].1.clone();
+    assert!(
+        archive.starts_with(b"PK\x03\x04"),
+        "the download is a zip container (.ymodel), not a text drawing"
+    );
+    assert!(
+        archive.len() > 1024,
+        "the archive carries the document, not an empty file: {} bytes",
+        archive.len()
+    );
+
+    // A second SAVE is a second download: the browser never saves in place, so the
+    // synthesized handle must not repeat the one recorded by the first save.
+    session
+        .command("SAVE")
+        .expect("a repeated SAVE must not be mistaken for an in-place overwrite");
+    assert_eq!(
+        platform.downloads().len(),
+        2,
+        "each SAVE publishes a fresh download"
+    );
+    assert_eq!(platform.downloads()[1].name, "synthetic-four-lines.ymodel");
+
+    // Reopen the first download as the **first** document of a new session: the
+    // archive is installed before the bytes are delivered (a page upload before
+    // `start`), so this must not refuse for want of an adapter.
+    let reopened = open_ymodel("synthetic-four-lines.ymodel", &archive);
+    let snapshot = reopened.snapshot(None, None, 0);
+    assert_eq!(
+        snapshot.document_label.as_deref(),
+        Some("synthetic-four-lines.ymodel")
+    );
+    assert_eq!(
+        snapshot.entity_count,
+        Some(4),
+        "the four fixture LINEs survive the archive round trip"
+    );
+}
+
+/// A fresh session whose **first** document is the given `.ymodel` bytes.
+fn open_ymodel(label: &str, bytes: &[u8]) -> CadSession {
+    let platform = BrowserPlatform::new();
+    platform.surface().report([800.0, 600.0], 1.0);
+    let session = CadSession::from_bytes(
+        options(),
+        platform.host_platform(BROWSER_CAPABILITIES),
+        RenderSessionHandle::new(BackendPreference::WebGl2),
+        monotonic_clock(),
+        BytesDocument::new(label, bytes).with_archive(crate::ymodel_archive::ZipArchive::new()),
+    )
+    .expect("the archive opens as the first document");
+    session
+        .set_canvas_metrics([800.0, 600.0], 1.0)
+        .expect("the reported surface accepts the canvas metrics");
+    session
 }

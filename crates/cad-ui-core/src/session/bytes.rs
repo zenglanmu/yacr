@@ -19,7 +19,7 @@ use std::sync::Arc;
 use cad_domain::{CadError, CadResult};
 use cad_engine::render::RenderSessionHandle;
 use cad_host::{HostCore, HostOptions, HostPlatform, RequestClock};
-use cad_platform::FileTarget;
+use cad_platform::{DocumentArchive, FileTarget};
 
 use super::CadSession;
 
@@ -29,12 +29,37 @@ use super::CadSession;
 /// both the status `documentLabel` and the `FileTarget` display name, and it is
 /// **never** treated as a path — a browser has no directory to resolve a sibling
 /// `fonts/`/`images/` package from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `archive` is the carrier's `.ymodel` container adapter (ADR-0037 D16). It is
+/// installed on the host core **before** the bytes are delivered, so a carrier
+/// whose first document is itself an archive (a page upload) decodes it instead
+/// of refusing the `.ymodel` target for want of an adapter. `None` keeps the
+/// host's explicit `unsupported-runtime: ymodel` refusal.
+#[derive(Clone)]
 pub struct BytesDocument<'a> {
     /// Source label shown by the status line (must not be blank).
     pub label: &'a str,
     /// The raw drawing bytes.
     pub bytes: &'a [u8],
+    /// The carrier's native document archive, installed before the delivery.
+    pub archive: Option<Arc<dyn DocumentArchive>>,
+}
+
+impl<'a> BytesDocument<'a> {
+    /// A document with no archive adapter (the host refuses a `.ymodel` target).
+    pub fn new(label: &'a str, bytes: &'a [u8]) -> Self {
+        Self {
+            label,
+            bytes,
+            archive: None,
+        }
+    }
+
+    /// The same document with the carrier's `.ymodel` adapter installed first.
+    pub fn with_archive(mut self, archive: Arc<dyn DocumentArchive>) -> Self {
+        self.archive = Some(archive);
+        self
+    }
 }
 
 impl CadSession {
@@ -55,6 +80,11 @@ impl CadSession {
     ///    funnel ([`cad_host::HostCore::deliver_external_open`]): a real parse
     ///    failure returns `Err` and leaves the previous document alone; nothing
     ///    is turned into an empty success.
+    ///
+    /// The carrier archive in [`BytesDocument::archive`] is installed **before**
+    /// that delivery: the same bytes may be the native `.ymodel` container, and
+    /// the host must be able to decode the first document instead of refusing it
+    /// for want of an adapter.
     ///
     /// `options.drawing` must be `None`: naming a path here would be a second,
     /// contradictory document source, so it is refused explicitly instead of one
@@ -86,6 +116,10 @@ impl CadSession {
         // Before any queued request: without an installed clock the pump refuses
         // pending work rather than inventing an elapsed time.
         core.set_request_clock(clock)?;
+        // The archive seam is installed before the bytes are delivered, so a
+        // carrier whose first document is the native container (a page upload)
+        // can decode it. No archive keeps the host's named refusal.
+        core.set_document_archive(document.archive.clone());
         // Startup config diagnostics are retained on the core, not fatal.
         let _startup_diagnostics = core.load_startup();
         // A strategy that cannot resolve a resource refuses explicitly, so a real
@@ -202,10 +236,7 @@ mod tests {
             platform,
             RenderSessionHandle::new(BackendPreference::WebGl2),
             mono_clock(),
-            BytesDocument {
-                label: SYNTHETIC_LABEL,
-                bytes: SYNTHETIC,
-            },
+            BytesDocument::new(SYNTHETIC_LABEL, SYNTHETIC),
         )
         .expect("the synthetic fixture opens from bytes")
     }

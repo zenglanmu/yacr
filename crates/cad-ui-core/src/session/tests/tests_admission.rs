@@ -658,3 +658,182 @@ fn drained_orbits_apply_in_order_and_collect_refusals() {
     assert_eq!(refusals, vec!["orbit.refused: test refusal".to_string()]);
     assert!(queue.is_empty());
 }
+
+#[test]
+fn set_view_wire_parses_one_preset_or_one_validated_camera() {
+    use crate::session::wire::{SetViewCameraArgs, SetViewProjectionArgs};
+    use cad_app::{ViewModeRequest, ViewPlacement, ViewPreset};
+
+    for preset in ViewPreset::ALL {
+        assert_eq!(
+            parse_set_view(Some(preset.key()), None),
+            Ok(ViewPlacement::Preset(preset)),
+            "{}",
+            preset.key()
+        );
+    }
+    assert_eq!(
+        parse_set_view(Some(" OVERVIEW "), None),
+        Ok(ViewPlacement::Preset(ViewPreset::Overview))
+    );
+
+    let error = parse_set_view(Some("diagonal"), None).unwrap_err();
+    assert!(error.starts_with("view.set.unknown_preset"), "{error}");
+    let error = parse_set_view(Some(""), None).unwrap_err();
+    assert!(error.starts_with("view.set.unknown_preset"), "{error}");
+
+    let perspective = SetViewCameraArgs {
+        eye: [0.0, -10.0, 10.0],
+        target: [0.0, 0.0, 0.0],
+        up: [0.0, 0.0, 1.0],
+        projection: SetViewProjectionArgs::Perspective {
+            vertical_fov_radians: std::f64::consts::FRAC_PI_4,
+        },
+        mode: "3d".into(),
+    };
+    let Ok(ViewPlacement::Camera { camera, mode }) =
+        parse_set_view(None, Some(perspective.clone()))
+    else {
+        panic!("a valid 3d camera must parse");
+    };
+    assert_eq!(mode, ViewModeRequest::ThreeD);
+    assert_eq!(
+        camera.eye,
+        cad_domain::Point3 {
+            x: 0.0,
+            y: -10.0,
+            z: 10.0
+        }
+    );
+    assert!(!camera.projection.is_orthographic());
+
+    let orthographic = SetViewCameraArgs {
+        eye: [0.0, 0.0, 10.0],
+        target: [0.0, 0.0, 0.0],
+        up: [0.0, 1.0, 0.0],
+        projection: SetViewProjectionArgs::Orthographic { scale: 1.0 },
+        mode: "2d".into(),
+    };
+    assert!(matches!(
+        parse_set_view(None, Some(orthographic.clone())),
+        Ok(ViewPlacement::Camera {
+            mode: ViewModeRequest::Plan,
+            ..
+        })
+    ));
+
+    let mismatch = SetViewCameraArgs {
+        mode: "2d".into(),
+        ..perspective.clone()
+    };
+    let error = parse_set_view(None, Some(mismatch)).unwrap_err();
+    assert!(
+        error.starts_with("view.set.mode_projection_mismatch"),
+        "{error}"
+    );
+
+    let mismatch = SetViewCameraArgs {
+        mode: "3d".into(),
+        ..orthographic.clone()
+    };
+    let error = parse_set_view(None, Some(mismatch)).unwrap_err();
+    assert!(
+        error.starts_with("view.set.mode_projection_mismatch"),
+        "{error}"
+    );
+
+    let unknown_mode = SetViewCameraArgs {
+        mode: "orbit".into(),
+        ..perspective.clone()
+    };
+    let error = parse_set_view(None, Some(unknown_mode)).unwrap_err();
+    assert!(error.starts_with("view.set.unknown_mode"), "{error}");
+
+    let non_finite = SetViewCameraArgs {
+        eye: [f64::NAN, 0.0, 1.0],
+        ..perspective.clone()
+    };
+    let error = parse_set_view(None, Some(non_finite)).unwrap_err();
+    assert!(error.starts_with("view.set.invalid_camera"), "{error}");
+
+    let coincident = SetViewCameraArgs {
+        eye: [0.0, 0.0, 0.0],
+        ..perspective.clone()
+    };
+    let error = parse_set_view(None, Some(coincident)).unwrap_err();
+    assert!(error.starts_with("view.set.invalid_camera"), "{error}");
+
+    let invalid_projection = SetViewCameraArgs {
+        projection: SetViewProjectionArgs::Perspective {
+            vertical_fov_radians: f64::NAN,
+        },
+        ..perspective.clone()
+    };
+    let error = parse_set_view(None, Some(invalid_projection)).unwrap_err();
+    assert!(error.starts_with("view.set.invalid_projection"), "{error}");
+
+    assert!(parse_set_view(None, None)
+        .unwrap_err()
+        .starts_with("view.set.request_invalid"));
+    assert!(parse_set_view(Some("plan"), Some(orthographic))
+        .unwrap_err()
+        .starts_with("view.set.request_invalid"));
+}
+
+#[test]
+fn set_view_admission_is_bounded_and_refuses_probe_mode_and_the_modal_gate() {
+    use cad_app::{ViewPlacement, ViewPreset};
+    let placement = ViewPlacement::Preset(ViewPreset::Plan);
+    let mut queue: VecDeque<ViewPlacement> = VecDeque::new();
+    assert_eq!(
+        admit_set_view(&mut queue, false, false, placement).unwrap_err(),
+        "CAD is disabled in probe mode"
+    );
+    assert!(queue.is_empty());
+    assert_eq!(
+        admit_set_view(&mut queue, true, true, placement).unwrap_err(),
+        POPUP_MODAL_OPEN
+    );
+    assert!(queue.is_empty());
+
+    admit_set_view(&mut queue, true, false, placement).unwrap();
+    for _ in 1..CAD_SET_VIEW_CAP {
+        admit_set_view(&mut queue, true, false, placement).unwrap();
+    }
+    assert_eq!(
+        admit_set_view(&mut queue, true, false, placement).unwrap_err(),
+        "CAD set-view queue is full"
+    );
+    // The modal gate is still checked first when the queue is also full.
+    assert_eq!(
+        admit_set_view(&mut queue, true, true, placement).unwrap_err(),
+        POPUP_MODAL_OPEN
+    );
+
+    let mut applied = Vec::new();
+    let refusals = drain_set_views(&mut queue, |placement| {
+        applied.push(placement);
+        Ok(())
+    });
+    assert!(refusals.is_empty());
+    assert!(queue.is_empty());
+    assert_eq!(applied.len(), CAD_SET_VIEW_CAP);
+}
+
+#[test]
+fn setview_names_the_missing_payload_on_the_text_funnel() {
+    use super::test_support::{session, FakeFiles};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    // `SETVIEW` is a selector only so the vocabulary contract has a name for
+    // `CommandId::SetView`; the typed `cad_set_view` channel is the real entry.
+    let session = session(Rc::new(FakeFiles {
+        events: RefCell::new(Vec::new()),
+    }));
+    let error = session.command("SETVIEW").unwrap_err();
+    assert!(
+        error.contains("SetView needs a placement payload"),
+        "{error}"
+    );
+}

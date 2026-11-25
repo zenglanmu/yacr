@@ -13,9 +13,11 @@
 //!
 //! A carrier with no `.ymodel` archive refuses both by name
 //! (`unsupported-runtime: ymodel`): the flag could never be written and the
-//! preview would list resources no file can carry. The Web/`dom-canvas` adapter
-//! refuses the setter with `unsupported-runtime: embed_resources` because that is
-//! the command it was asked to run.
+//! preview would list resources no file can carry. A carrier that has the archive
+//! but cannot resolve external files (Web/`dom-canvas`) refuses both with
+//! `unsupported-runtime: embed_resources`: the document's own already-embedded
+//! resources are not in question, but the save dialog's "pack external files too?"
+//! choice is not available there.
 //!
 //! The wire shape is what the save dialog already parses (`save-embed.ts`):
 //!
@@ -42,7 +44,8 @@ pub const EMBED_RESOURCES_COMMAND: &str = "cad_set_embed_resources";
 /// The refusal of a carrier whose document is not a `.ymodel` archive.
 pub const UNSUPPORTED_YMODEL: &str = "unsupported-runtime: ymodel";
 
-/// The refusal of the setter on a carrier that has no archive to write.
+/// The refusal of the self-containment pair on a carrier that cannot resolve
+/// external files (or has no archive to carry them).
 pub const UNSUPPORTED_EMBED_RESOURCES: &str = "unsupported-runtime: embed_resources";
 
 /// One external resource a save would embed.

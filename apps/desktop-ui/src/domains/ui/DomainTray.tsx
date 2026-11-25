@@ -15,15 +15,16 @@
 //     list and the writes;
 //   * Instructor names the active tool and its real next step;
 //   * `pending` names the missing panel instead of drawing an empty one.
-import React, { useState } from 'react';
+import React, { useSyncExternalStore, useState } from 'react';
 import { useI18n, useShell } from '../../context.ts';
+import { Icon } from '../../icons.tsx';
 import { blocksOf } from '../../cad/cad-status.ts';
 import { toolLabelKey } from '../../commands/commands.ts';
 import { toolStepPromptKey } from '../../cad/cad.ts';
 import { propertyRowLabel } from '../../properties/property-labels.ts';
 import { ThemeToggle } from '../../components/ThemeToggle.tsx';
 import { BIM_ACTION } from '../../ribbon/bim-panel.ts';
-import { currentDomain } from '../store.ts';
+import { currentDomain, domainStoreSnapshot, subscribeDomainStore, toggleTray } from '../store.ts';
 import { useDomainUi } from './use-ui-layout.ts';
 import type { TrayPanel } from './slots.ts';
 
@@ -170,14 +171,50 @@ function Section({ panel }: { readonly panel: TrayPanel }) {
   );
 }
 
-export function DomainTray() {
+export interface DomainTrayProps {
+  /**
+   * The side the chrome placed this tray on. The profile owns the choice
+   * (`DomainProfile.traySide`): `bim` follows Revit's left dock, `concept` keeps
+   * SketchUp's right tray. The component only flips the edge that faces the
+   * drawing and stops reserving the right-edge navigation dock's column when it
+   * sits on the left.
+   */
+  readonly side: 'left' | 'right';
+}
+
+export function DomainTray({ side }: DomainTrayProps) {
   const { t } = useI18n();
   const { status } = useShell();
+  const hidden = useSyncExternalStore(
+    subscribeDomainStore,
+    () => domainStoreSnapshot().trayHidden,
+    () => domainStoreSnapshot().trayHidden,
+  );
   const domain = currentDomain(status);
   const layout = useDomainUi(domain);
-  if (!layout.tray || layout.tray.length === 0) return null;
+  if (hidden || !layout.tray || layout.tray.length === 0) return null;
   return (
-    <aside className="concept-tray" aria-label={t('domain.tray_label')}>
+    <aside
+      className={['concept-tray', side === 'left' ? 'concept-tray--left' : ''].filter(Boolean).join(' ')}
+      aria-label={t('domain.tray_label')}
+    >
+      {/* A real title row with the one hide control, the way both reference
+          trays have a title bar: the tray is chrome, so the user can put it away
+          and bring it back from the profile's own View surface
+          (`SHELL_ACTIONS.domainTray`). Sections below keep their own
+          collapse; this hides the whole column. */}
+      <div className="concept-tray__head">
+        <span className="concept-tray__title">{t('domain.tray_label')}</span>
+        <button
+          type="button"
+          className="concept-tray__hide"
+          aria-label={t('domain.tray_hide')}
+          title={t('domain.tray_hide')}
+          onClick={toggleTray}
+        >
+          <Icon name="close" size={13} />
+        </button>
+      </div>
       {layout.tray.map(panel => <Section key={panel.id} panel={panel} />)}
     </aside>
   );

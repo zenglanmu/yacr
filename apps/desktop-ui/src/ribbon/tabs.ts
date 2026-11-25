@@ -10,6 +10,7 @@
 // bottom-of-file `ribbonTab()` keeps `shell.ribbonTab` resolution in one place,
 // and an unknown id (a profile switch, an old saved state) falls back to Home.
 import type { RibbonTab } from './ribbon-model.ts';
+import { DOMAIN_PANEL } from './domain-entry.ts';
 import {
   ADDINS_PLUGINS_PANEL,
   ADDINS_VENDOR_PANEL,
@@ -66,7 +67,7 @@ export const RIBBON_TABS: readonly RibbonTab[] = Object.freeze<RibbonTab[]>([
     id: 'file',
     labelKey: 'ribbon.file',
     accent: true,
-    panels: [FILE_PANEL, FILE_UTILITIES_PANEL],
+    panels: [FILE_PANEL, FILE_UTILITIES_PANEL, DOMAIN_PANEL],
   },
   {
     id: 'home',

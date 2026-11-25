@@ -121,6 +121,9 @@ token 以 `domain.unknown` 具名拒绝；文件信息面板显示只读域行�
   梁柱支撑、基础、钢筋、房间、空间、标高/轴网、地形、工作共享、复制/监视等无内核的 Revit 工具
   是 `RibbonPendingItem`（`bim.pending.kernel`）。项目浏览器与 Revit 式明细表没有数据源，
   保持 pending 面板；Revit 的上下文“修改”选项卡不建模。
+- BIM 视图/camera placement 走 ADR-0059 的 typed `cad_set_view`（绝对位姿或宿主拟合预设），
+  BIM“视图”面板 6 个 item 用新的 `viewPreset` 派发族；`dom-canvas` 3D 预设沿用既有
+  `hostProfile.orbit === false` 的声明禁用，`plan` 仍可用。
 - 托盘只有一个槽且在右侧；Revit 的左侧停靠是位置近似，面板顺序与含义按参考，不声称停靠一致。
   紧凑布局把已注册的 BIM 面板折入现有 `MobileRibbonDrawer`。
 - **未实现/未验证**：BIM 构件内核、视图/图纸树、族编辑器、工作共享；真实窗口/GPU/像素与

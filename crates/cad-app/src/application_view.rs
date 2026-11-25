@@ -497,6 +497,148 @@ impl Application {
         Ok(CommandOutcome::none())
     }
 
+    /// Apply one `cad_set_view` placement.
+    ///
+    /// Two forms share one rule set:
+    ///
+    /// * a **preset** is framed from the active space bounds (`overview` and the
+    ///   four elevations are 3D perspective observations; `plan` is the 2D
+    ///   orthographic top view);
+    /// * an **absolute camera** is applied as given after the same validation
+    ///   every other camera transition uses. `mode` must agree with the
+    ///   projection (2D ⇒ orthographic, 3D ⇒ perspective, because the 3D renderer
+    ///   is perspective-only).
+    ///
+    /// A real change records one `ZOOM PREVIOUS` step; an identical placement is
+    /// a no-op and records none. The document, its revision, history and work
+    /// plane are untouched.
+    pub(crate) fn set_view(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::SetView(placement) = command.payload else {
+            return Err(CadError::InvalidInput(
+                "SetView needs a placement payload".into(),
+            ));
+        };
+        let (logical_size, current_camera, current_mode) = {
+            let viewport = self
+                .workspace
+                .viewports
+                .get(&command.viewport)
+                .ok_or_else(|| CadError::InvalidInput("unknown viewport".into()))?;
+            (viewport.logical_size, viewport.camera, viewport.view_mode)
+        };
+        let (camera, mode, code) = match placement {
+            ViewPlacement::Preset(preset) => self.fitted_view_placement(
+                session,
+                preset,
+                logical_size,
+                current_camera,
+                current_mode,
+            )?,
+            ViewPlacement::Camera { camera, mode } => {
+                camera.validate().map_err(|error| {
+                    CadError::InvalidInput(format!("view.set.invalid_camera: {error}"))
+                })?;
+                match (mode, camera.projection.is_orthographic()) {
+                    (ViewModeRequest::Plan, true) | (ViewModeRequest::ThreeD, false) => {}
+                    (ViewModeRequest::Plan, false) => {
+                        return Err(CadError::InvalidInput(
+                            "view.set.mode_projection_mismatch: a 2D placement needs an                              orthographic projection"
+                                .into(),
+                        ))
+                    }
+                    (ViewModeRequest::ThreeD, true) => {
+                        return Err(CadError::InvalidInput(
+                            "view.set.mode_projection_mismatch: a 3D placement needs a                              perspective projection"
+                                .into(),
+                        ))
+                    }
+                }
+                let view_mode = match mode {
+                    ViewModeRequest::Plan => ViewMode2d3d::TwoD { saved: camera },
+                    ViewModeRequest::ThreeD => ViewMode2d3d::ThreeD {
+                        saved_2d: current_mode.saved_2d_camera(),
+                    },
+                };
+                (camera, view_mode, "view.set.camera")
+            }
+        };
+        let viewport = self.viewport_mut(command)?;
+        if viewport.camera == camera && viewport.view_mode == mode {
+            return Ok(CommandOutcome::none());
+        }
+        // One discrete view change = one `ZOOM PREVIOUS` step.
+        viewport.push_view_snapshot();
+        viewport.camera = camera;
+        viewport.view_mode = mode;
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: code.into(),
+                message: code.into(),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
+    /// Resolve one fitted preset into a camera and its observation mode.
+    ///
+    /// The active space is the one `FIT` frames (model bounds, or the sheet in
+    /// paper space). An empty space is a named refusal, not a fallback camera.
+    fn fitted_view_placement(
+        &self,
+        session: &SessionState,
+        preset: ViewPreset,
+        logical_size: [f64; 2],
+        current: Camera,
+        current_mode: ViewMode2d3d,
+    ) -> CadResult<(Camera, ViewMode2d3d, &'static str)> {
+        let Some((min, max)) = self.active_space_rect(session)? else {
+            return Err(CadError::InvalidInput(
+                "view.set.empty: the active space has no measurable extent".into(),
+            ));
+        };
+        if preset == ViewPreset::Plan {
+            let (centre, scale) = Self::framing_rect(min, max, logical_size, FIT_MARGIN);
+            let camera = Self::plan_camera(centre, scale, current.eye.z);
+            return Ok((
+                camera,
+                ViewMode2d3d::TwoD { saved: camera },
+                "view.set.plan",
+            ));
+        }
+        let view = preset.standard_view();
+        // `enter_3d` supplies the fitted target and distance at the documented
+        // 3D FOV; the preset then only replaces the eye direction and up hint,
+        // keeping that framing.
+        let fitted = current.enter_3d(Some((min, max)), camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?;
+        let camera = Camera {
+            eye: camera::add(
+                fitted.target,
+                camera::scale3(view.eye_offset(), fitted.distance()),
+            ),
+            target: fitted.target,
+            up: view.up_hint(),
+            projection: fitted.projection,
+        };
+        camera
+            .validate()
+            .map_err(|error| CadError::InvalidInput(format!("view.set.invalid_camera: {error}")))?;
+        Ok((
+            camera,
+            ViewMode2d3d::ThreeD {
+                saved_2d: current_mode.saved_2d_camera(),
+            },
+            "view.set.preset",
+        ))
+    }
+
     /// Apply a named standard view to the current target.
     ///
     /// The plan (top) view is the canonical 2D view: it restores the 2D camera

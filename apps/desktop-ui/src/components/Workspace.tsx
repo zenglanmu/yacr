@@ -53,6 +53,8 @@ import { closeRecorderPanel } from '../recorder/panel.ts';
 import { useRecorderPanelOpen } from '../recorder/use-recorder-panel.ts';
 import { DomainToolbar } from '../domains/ui/DomainToolbar.tsx';
 import { DomainTray } from '../domains/ui/DomainTray.tsx';
+import { DOMAIN_PROFILES } from '../domains/domains.ts';
+import { renderedDomain } from '../domains/store.ts';
 import { ConceptShortcuts } from '../domains/concept/ConceptShortcuts.tsx';
 
 export function Workspace() {
@@ -128,6 +130,12 @@ export function Workspace() {
   // registers none (drafting, the placeholders) renders nothing. The compact
   // layout keeps the one-drawer model for now (`MobileRibbonDrawer` folds the
   // concept tool groups); the desktop columns are the reference carrier.
+  // The tray side is the profile's own fact, not a component guess: `bim`
+  // follows Revit, which docks Properties and the Project Browser on the left;
+  // `concept` keeps SketchUp's right-hand default tray. A profile with no tray
+  // slot renders `null` either way, so the value is inert for drafting/the
+  // placeholder.
+  const traySide = DOMAIN_PROFILES[renderedDomain(shell.status)].traySide;
   const slotsDesktop = !shell.mobile;
   return (
     <div className="region region--workspace workspace app-region">
@@ -135,6 +143,11 @@ export function Workspace() {
         {showStart ? <StartPanel /> : null}
       </div>
       {slotsDesktop ? <DomainToolbar /> : null}
+      {/* The profile owns which edge the tray takes: `bim` renders it before the
+          canvas (Revit's left dock), `concept` after it (SketchUp's right default
+          tray). One component either way — only the flex order and the border
+          edge differ. */}
+      {slotsDesktop && traySide === 'left' ? <DomainTray side="left" /> : null}
       <div className="workspace__canvas">
         {/* dom-canvas only: the in-DOM pixel carrier. It fills exactly the rect
             the host reports for `.native-input`, paints underneath it (later
@@ -217,7 +230,7 @@ export function Workspace() {
           ) : null}
         </div>
       </div>
-      {slotsDesktop ? <DomainTray /> : null}
+      {slotsDesktop && traySide === 'right' ? <DomainTray side="right" /> : null}
       {/* The compact BIM sheet: the same panel as a bottom sheet, because the
           compact layout hides `.palette-layer`. Its backdrop is a real button
           (a press closes the sheet) and the panel owns Escape while focused. */}

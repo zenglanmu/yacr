@@ -1,4 +1,4 @@
-// The chrome's domain state: the document's domain (host-reported) plus the two
+// The chrome's domain state: the document's domain (host-reported) plus the
 // session-only pieces the chrome owns.
 //
 // 1. **Preview** — with no document, the switcher may show another profile. It
@@ -6,6 +6,11 @@
 //    moment a document reports a domain (ADR-0053 D2).
 // 2. **Switcher visibility** — a popover flag, so the `DOMAIN` command and the
 //    dock button open the same surface.
+// 3. **Tray visibility** — whether the right-hand `DomainTray` is drawn. The
+//    reference applications both let the user hide their docked panel tray
+//    (SketchUp: Window > Default Tray > Hide Tray; Revit: View > User Interface),
+//    so this is a chrome preference, not a document fact: one flag for the one
+//    tray slot, session-only like a palette's geometry, restored on reload.
 //
 // A small external store (`subscribe` + an immutable snapshot) so the dock, the
 // surface card and the command path read one source through
@@ -21,11 +26,13 @@ export interface DomainSnapshot {
   readonly preview: DomainId | null;
   /** Whether the switcher popover is open. */
   readonly switcherOpen: boolean;
+  /** Whether the right-hand domain tray is hidden (the reference's "hide tray"). */
+  readonly trayHidden: boolean;
   /** Bumped when a preview is explicitly chosen, so a repeated choice re-applies. */
   readonly revision: number;
 }
 
-const CLOSED: DomainSnapshot = Object.freeze({ preview: null, switcherOpen: false, revision: 0 });
+const CLOSED: DomainSnapshot = Object.freeze({ preview: null, switcherOpen: false, trayHidden: false, revision: 0 });
 
 let snapshot: DomainSnapshot = CLOSED;
 const LISTENERS = new Set<() => void>();
@@ -96,6 +103,22 @@ export function setSwitcherOpen(open: boolean): void {
 /** Flip the switcher popover (`DOMAIN` with no argument). */
 export function toggleSwitcher(): void {
   publish({ switcherOpen: !snapshot.switcherOpen });
+}
+
+/** Whether the right-hand tray is currently hidden. */
+export function trayHidden(): boolean {
+  return snapshot.trayHidden;
+}
+
+/** Show or hide the right-hand tray (the profile's `Default Tray` / panels). */
+export function setTrayHidden(hidden: boolean): void {
+  if (snapshot.trayHidden === hidden) return;
+  publish({ trayHidden: hidden });
+}
+
+/** Flip the right-hand tray (`SHELL_ACTIONS.domainTray`). */
+export function toggleTray(): void {
+  publish({ trayHidden: !snapshot.trayHidden });
 }
 
 /** Reset for tests. */

@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use cad_desktop_shell::commands::{drain_orbits, drain_standard_views};
+use cad_desktop_shell::commands::{drain_orbits, drain_set_views, drain_standard_views};
 use cad_ui_core::shell::{clear_host_error, note_host_error, HostErrorKind};
 
 use super::super::layers;
@@ -28,6 +28,7 @@ pub(super) fn apply_batch(
         let (
             commands,
             mut standard_views,
+            mut set_views,
             mut orbits,
             setting_writes,
             layer_writes,
@@ -43,6 +44,7 @@ pub(super) fn apply_batch(
             (
                 std::mem::take(&mut state.shell.cad_commands),
                 std::mem::take(&mut state.cad_standard_views),
+                std::mem::take(&mut state.cad_set_views),
                 std::mem::take(&mut state.cad_orbits),
                 std::mem::take(&mut state.cad_setting_writes),
                 std::mem::take(&mut state.cad_layer_writes),
@@ -56,6 +58,7 @@ pub(super) fn apply_batch(
         };
         let queued = commands.len()
             + standard_views.len()
+            + set_views.len()
             + orbits.len()
             + setting_writes.len()
             + layer_writes.len()
@@ -117,6 +120,13 @@ pub(super) fn apply_batch(
                         session.standard_view(view)
                     }) {
                         eprintln!("[probe] cad standard view rejected: {error}");
+                    }
+                    // Typed camera placements (`cad_set_view`): absolute poses or
+                    // fitted presets, applied through the same session funnel.
+                    for error in
+                        drain_set_views(&mut set_views, |placement| session.set_view(placement))
+                    {
+                        eprintln!("[probe] cad set view rejected: {error}");
                     }
                     // Typed orbit deltas (the ViewCube's `cad_orbit`), in admission order.
                     for error in drain_orbits(&mut orbits, |d| session.orbit(d.yaw, d.pitch)) {

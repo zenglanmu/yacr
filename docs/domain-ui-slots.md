@@ -14,15 +14,22 @@
 | `ribbon` | `RibbonTab[]`（一个 tab = 一个 ribbon 选项卡） | 顶部 `DomainRibbonBand`（`bim`） |
 | `menu` | `RibbonTab[]`（一个 tab = 一个顶层菜单） | 顶部 `DomainMenuBar`（`concept`）或折叠 ribbon 的菜单栏（`cad2d`） |
 | `toolbar` | `RibbonPanel[]`（一个 panel = 一个工具组） | 左侧 `DomainToolbar`（`concept` 的 Large Tool Set） |
-| `tray` | `TrayPanel[]`（内置 body 的声明式面板） | 右侧 `DomainTray`（`concept` 的默认托盘、`bim` 的属性/浏览托盘） |
+| `tray` | `TrayPanel[]`（内置 body 的声明式面板） | `DomainTray`，侧别由 profile 的 `traySide` 决定（`bim` 左 / `concept` 右）；`SHELL_ACTIONS.domainTray` 显示/隐藏整列，托盘标题行的关闭按钮走同一转换 |
 
 `ribbon` 与 `menu` 的数据形状相同（都是 `RibbonTab[]`），但渲染器不同：`ribbon` 是保留
 92px 面板带的真实功能区，`menu` 是下拉菜单栏。`cad2d` 的 profile 用内建 `Ribbon`，不读取槽；
 只有 `surface: 'domain-ribbon'` 的域才从槽渲染。
 
+托盘槽的数据与侧别无关：同一份 `TrayPanel[]` 在左、右两侧渲染同样的面板与 body。侧别是
+profile 的表现事实（`DomainProfile.traySide`，`bim` 左 / `concept` 右），`Workspace` 据此决定
+`DomainTray` 放在 `.workspace__canvas` 之前还是之后；托盘组件只按 `side` 翻转朝向画布的边框，
+并在左侧时不再为右缘导航坞预留 `--navrail-w`。
+
 槽不引入新的派发通路：每个可点项仍是 `RibbonItem`，经
 `itemEnabled` / `unavailable` / `runItem` → `shell.canCommand` → `cad_command` 或
-`runAction`。没有命令、也没有 `pendingKey` 的项在注册时就会被拒绝。
+`shell.runStandardView` / `shell.runSetView` 或 `runAction`。`viewPreset` 是
+`cad_set_view { preset }` 的派发族（`bim` 的“BIM 视图”面板）；没有派发 token、也没有
+`pendingKey` 的项在注册时就会被拒绝。
 
 ## 2. 域注册
 

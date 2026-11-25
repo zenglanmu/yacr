@@ -32,8 +32,9 @@
 //    picker) and the selected file is validated by extension instead — see
 //    `pickDrawingFile`/`openThroughHost`. That gate advertises exactly what the
 //    wasm bundle is compiled with: the DWG/DXF connector tail (`cad-app`'s
-//    `formats-*` features stay off) plus `.ymodel`, which the session refuses by
-//    its own name. Every other format is refused by the registry with
+//    `formats-*` features stay off) plus `.ymodel`, which the session decodes
+//    through its own archive adapter (`apps/app-web/src/ymodel_archive.rs`), not
+//    through an importer. Every other format is refused by the registry with
 //    `unsupported-runtime: import.<id>`, and this page must not pretend the
 //    bundle can read one.
 //
@@ -253,10 +254,10 @@ export const WEB_HOST_COMMANDS: readonly string[] = [WEB_OPEN_COMMAND];
  * `webOpenExtensions` and the file-association gate compares the two.
  *
  * `.ymodel` is kept deliberately. It is Yacr's native zip+JSON document, not a
- * connector format, and the wasm session has no archive adapter: the session
- * refuses it by name (`unsupported-runtime: ymodel`). Filtering it out here would
- * replace that precise refusal with a page-level "not a drawing", so it stays
- * listed and reaches the session.
+ * connector format, and the wasm session decodes it through its own archive
+ * adapter (`apps/app-web/src/ymodel_archive.rs`) — the same `cad-store-zip`
+ * container every native carrier links. Filtering it out here would make the
+ * page claim it cannot even attempt Yacr's own document.
  *
  * Every other format (STEP, IFC, RVT, SKP, glTF, the mesh formats, DGN, …) is
  * refused here before a byte is read — the picker must not advertise a format

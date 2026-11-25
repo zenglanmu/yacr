@@ -194,11 +194,15 @@ test('consecutive panel submenus are one visual block', async () => {
   // Home opens with two sibling panel submenus: Draw then Modify, one block.
   assert.deepEqual(entries.slice(0, 2).map(entry => entry.kind), ['panel', 'panel']);
   assert.equal(panelStartsGroup(entries, 1), false, 'two sibling submenus keep the block open');
-  // The File tab is a section followed by a panel: that boundary still rules.
+  // The File tab is a section, the utilities submenu, then the one-row domain
+  // section; the section/submenu boundary rules, the trailing row keeps the block
+  // open because it follows a submenu.
   const fileTab = RIBBON_TABS.find(tab => tab.id === 'file');
   const fileEntries = ribbonMenuEntriesFor(fileTab, true);
-  assert.deepEqual(fileEntries.map(entry => entry.kind), ['section', 'panel']);
+  assert.deepEqual(fileEntries.map(entry => entry.kind), ['section', 'panel', 'section']);
   assert.equal(panelStartsGroup(fileEntries, 1), true);
+  assert.equal(panelStartsGroup(fileEntries, 2), false,
+    'the application-domain row follows the utilities submenu block');
 
   // The renderer asks the shared rule instead of hard-coding `startsGroup: true`.
   const source = await readModule('components/RibbonMenuBar.tsx');

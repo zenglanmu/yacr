@@ -53,6 +53,16 @@ export interface DomainProfile {
    * the reference application's tools.
    */
   readonly placeholder: boolean;
+  /**
+   * Which side the profile's registered `tray` slot renders on.
+   *
+   * `bim` follows Revit, which docks the Properties palette and the Project
+   * Browser on the **left**; `concept` keeps SketchUp's right-hand default
+   * tray. A profile that registers no tray (`cad2d`, the placeholder) never
+   * asks, so the value is inert there. This is presentation only — the slot
+   * data, the panel order and the bodies are the same on either side.
+   */
+  readonly traySide: 'left' | 'right';
 }
 
 const profile = (
@@ -61,6 +71,7 @@ const profile = (
   commandLine: boolean,
   placeholder: boolean,
   surface: 'ribbon' | 'menu' | 'domain-ribbon' = 'ribbon',
+  traySide: 'left' | 'right' = 'right',
 ): DomainProfile => Object.freeze({
   id,
   labelKey: `domain.name.${id}`,
@@ -69,19 +80,21 @@ const profile = (
   surface,
   commandLine,
   placeholder,
+  traySide,
 });
 
 /** The four profiles, frozen by token. */
 export const DOMAIN_PROFILES: Readonly<Record<DomainId, DomainProfile>> = Object.freeze({
   cad2d: profile('cad2d', true, true, false, 'ribbon'),
-  // BIM is wired as a Revit-style ribbon band plus a right-hand properties /
-  // browser tray. It has no command line: like Revit, the value entry points are
-  // the ribbon and the panel fields, not a typed prompt.
-  bim: profile('bim', true, false, false, 'domain-ribbon'),
+  // BIM is wired as a Revit-style ribbon band plus a left-hand properties /
+  // browser tray, because Revit docks both on the left. It has no command line:
+  // like Revit, the value entry points are the ribbon and the panel fields, not
+  // a typed prompt.
+  bim: profile('bim', true, false, false, 'domain-ribbon', 'left'),
   // Concept is wired as a SketchUp-style menubar + left tool column + right
   // tray. It has no command line: its value entry is the Measurements surface
   // in the status bar, as in the reference application.
-  concept: profile('concept', true, false, false, 'menu'),
+  concept: profile('concept', true, false, false, 'menu', 'right'),
   mechanical: profile('mechanical', false, false, true),
 });
 

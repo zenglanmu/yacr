@@ -11,6 +11,7 @@ import type { RibbonItem, RibbonPanel, RibbonTab } from '../../ribbon/ribbon-mod
 import type { RibbonPendingItem } from '../../ribbon/ribbon-model.ts';
 import { STANDARD_VIEWS } from '../../cad/view3d.ts';
 import { CIRCLE_ITEM, POLYGON_ITEM } from '../../ribbon/variants.ts';
+import { DOMAIN_PANEL } from '../../ribbon/domain-entry.ts';
 import { SHELL_ACTIONS } from '../../ribbon/actions.ts';
 
 function panel(id: string, titleKey: string, items: readonly RibbonItem[]): RibbonPanel {
@@ -152,7 +153,10 @@ const WINDOW_INFO = panel('concept.window.info', 'concept.section.info', [
 ]);
 
 const WINDOW_PREFERENCES = panel('concept.window.preferences', 'concept.section.preferences', [
-  pending('DEFAULTTRAY', 'concept.tool.default_tray', 'palette', 'concept.pending.tray_menu'),
+  // SketchUp's Window > Default Tray owns the tray's visibility. This chrome has
+  // one tray slot for every profile, so the row toggles it (the tray's own
+  // header runs the same `SHELL_ACTIONS.domainTray`).
+  { id: 'DEFAULTTRAY', labelKey: 'concept.tool.default_tray', icon: 'palette', action: SHELL_ACTIONS.domainTray },
   { id: 'OPTIONS', labelKey: 'file.options', icon: 'settings', action: SHELL_ACTIONS.options },
   { id: 'PLUGINS', labelKey: 'file.plugins', icon: 'settings', action: SHELL_ACTIONS.plugins },
 ]);
@@ -175,7 +179,7 @@ const HELP = panel('concept.help.about', 'concept.section.about', [
 
 /** The nine official top-level menus, in the documented order. */
 export const CONCEPT_MENUS: readonly RibbonTab[] = Object.freeze([
-  tab('file', 'concept.menu.file', [FILE]),
+  tab('file', 'concept.menu.file', [FILE, DOMAIN_PANEL]),
   tab('edit', 'concept.menu.edit', [EDIT_BASIC, EDIT_SELECTION, EDIT_GROUPS]),
   tab('view', 'concept.menu.view', [VIEW_INTERFACE, VIEW_STANDARD, VIEW_DISPLAY]),
   tab('camera', 'concept.menu.camera', [CAMERA_NAVIGATE, VIEW_STANDARD, CAMERA_MORE]),

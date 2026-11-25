@@ -62,13 +62,14 @@ interface RibbonItemBase {
   readonly pendingText?: string;
 }
 
-/** One item's dispatch token: exactly one of the three families. */
-export type RibbonItemKind = 'command' | 'standardView' | 'action';
+/** One item's dispatch token: exactly one of the four families. */
+export type RibbonItemKind = 'command' | 'standardView' | 'setView' | 'action';
 
 /** A payload-free router command, admitted through `cad_command`. */
 export interface RibbonCommandItem extends RibbonItemBase {
   readonly command: string;
   readonly standardView?: never;
+  readonly viewPreset?: never;
   readonly action?: never;
 }
 
@@ -76,6 +77,21 @@ export interface RibbonCommandItem extends RibbonItemBase {
 export interface RibbonStandardViewItem extends RibbonItemBase {
   readonly standardView: string;
   readonly command?: never;
+  readonly viewPreset?: never;
+  readonly action?: never;
+}
+
+/**
+ * One fitted camera placement, sent on `cad_set_view { preset }`.
+ *
+ * The host resolves the preset against the active-space bounds; the chrome never
+ * knows those bounds. `overview`/`front`/`back`/`left`/`right` are 3D
+ * observations, `plan` is the fitted 2D top view.
+ */
+export interface RibbonSetViewItem extends RibbonItemBase {
+  readonly viewPreset: string;
+  readonly command?: never;
+  readonly standardView?: never;
   readonly action?: never;
 }
 
@@ -84,6 +100,7 @@ export interface RibbonActionItem extends RibbonItemBase {
   readonly action: string;
   readonly command?: never;
   readonly standardView?: never;
+  readonly viewPreset?: never;
 }
 
 /**
@@ -97,6 +114,7 @@ export interface RibbonActionItem extends RibbonItemBase {
 export interface RibbonPendingItem extends RibbonItemBase {
   readonly command?: never;
   readonly standardView?: never;
+  readonly viewPreset?: never;
   readonly action?: never;
   readonly pendingKey: string;
 }
@@ -104,11 +122,16 @@ export interface RibbonPendingItem extends RibbonItemBase {
 /**
  * One ribbon button.
  *
- * The three dispatch tokens are a union rather than three optional fields: an
- * item that carried two of them would have no defined order, and `Ribbon.jsx`'s
- * dispatch checks one family at a time.
+ * The four dispatch tokens are a union rather than optional fields: an item that
+ * carried two of them would have no defined order, and the dispatch checks one
+ * family at a time.
  */
-export type RibbonItem = RibbonCommandItem | RibbonStandardViewItem | RibbonActionItem | RibbonPendingItem;
+export type RibbonItem =
+  | RibbonCommandItem
+  | RibbonStandardViewItem
+  | RibbonSetViewItem
+  | RibbonActionItem
+  | RibbonPendingItem;
 
 /** One panel of a tab. */
 export interface RibbonPanel {

@@ -250,6 +250,21 @@ impl Application {
         }
     }
 
+    /// The active space's world rectangle, or `None` when it has no extent.
+    ///
+    /// The `cad_set_view` presets frame the same space `FIT` frames (model bounds
+    /// in model space, the sheet in paper space). This exposes that one source to
+    /// the preset path instead of re-deriving bounds and letting the two drift.
+    pub(crate) fn active_space_rect(
+        &self,
+        session: &SessionState,
+    ) -> CadResult<Option<(Point3, Point3)>> {
+        Ok(match self.active_space_frame(session)? {
+            ActiveSpaceFrame::Rect { min, max } => Some((min, max)),
+            ActiveSpaceFrame::EmptyModel | ActiveSpaceFrame::EmptyLayout(_) => None,
+        })
+    }
+
     /// Fit the active space, optionally recording a `ZOOM PREVIOUS` step.
     ///
     /// `record_history` is the one difference between the `FIT` command (a

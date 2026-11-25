@@ -181,7 +181,7 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   归档拒绝用稳定标记
   `ymodel.*`（`unsupported_version` / `unsupported_minor` / `invalid_document` / `conflict` /
   `foreign_entries_unreadable` / 写出侧 `unrepresentable_model`）；**目前没有进程退出码映射**（ADR-0037 D13 的 `8` 只是计划）。
-  L0 源字节直通与 L1 不动点**都还没有证据**。保存是**显式保存 + 原子替换**；Phase 2 起
+  L0 源字节直通与 L1 不动点**都还没有证据**。保存是**显式保存 + 原子替换**（Web 例外：每次保存是新的浏览器下载，没有原地覆盖，也没有 `.bak`）；Phase 2 起
   保存以文档**自身**的上一个归档为 base，未触及分片按压缩字节 raw-copy、脏分片重编码，
   `ChangeScope` 由宿主累积（命令 / interaction / plugin commit / engine funnel），打开/New/Close
   与成功保存后清空。**新增写入路径必须填 `ChangeScope`**，否则保存会复制旧分片（库层测试不会
@@ -250,15 +250,19 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   `__YACR_RUNTIME__=android` 把 CAD 命令送到 wasm。
 - 应用域（ADR-0053）：`application_domain` 是**文档属性**（`document.json`，minor 13），profile 在
   `src/domains/`（纯数据 + store + `domains/ui/` 数据槽）。`cad2d`、`bim`、`concept` 已接线；
-  `bim` 是 Revit 式域 ribbon（`ribbon` 槽）+右侧属性/浏览托盘且无命令行，`concept` 是菜单栏+左工具栏+
+  `bim` 是 Revit 式域 ribbon（`ribbon` 槽）+左侧属性/浏览托盘且无命令行，`concept` 是菜单栏+左工具栏+
   右托盘，`cad2d` 是 ribbon+命令行。`mechanical` 及未知 token
   **回退到 `cad2d` 界面**（`renderedDomain()`），画面顶部提示条命名请求的域，文档域值与数据不变；
   不得把参考软件的原生工具摆成可点假按钮。插件公开面是 `@yacr/plugin-api` 的
-  `api.ui.register`（声明式贡献 + 字面标签 + `deactivate` 自动卸载，client-local 无描述符行），
-  宿主侧落到 `registerPluginUi` 同一合并路径，命令仍过共享准入。有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性
+  `api.ui.register`（声明式贡献 + 字面标签 + `deactivate` 自动卸载，client-local 无描述符行）；
+  宿主侧落到 `registerPluginUi` 同一合并路径，命令仍过共享准入。
+  有文档时切域写文档（`cad_set_application_domain`），无文档只预览；命令可用性
   仍由文档能力决定，profile 只决定摆放与主题（`html[data-domain]` 取 `renderedDomain`）。
   `DOMAIN` 是 **chrome-local**：裸命令开切换器、`DOMAIN <id>` 写文档或预览（无 router 命令）；
   `cad2d` 的参考面板只接线已实现命令（视口/坐标/内容/注释缩放），无实现的参考面板保持 `pending`。
+  BIM 视图用 typed `cad_set_view`（绝对 eye/target/up/projection 或宿主按活动空间拟合的
+  `overview`/`plan`/四立面），BIM“视图”面板的 6 个预设走它；`dom-canvas` 的 3D 预设按
+  `hostProfile.orbit=false` 禁用，`plan`（2D）仍可用。插件 API 不暴露相机。
 - 移动端不是第二套 UI：同一 React 树，只按宽度切换。单源是
   `src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`（含端点）。
 - 三份产物**不得互相覆盖**：桌面 `apps/desktop-ui/dist`、Web `apps/app-web/dist-ui`、
@@ -299,14 +303,16 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 | Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；`.ymodel` 保存/打开已接线（COM `IFileSaveDialog` + 临时文件→`ReplaceFileW` 原子替换 + `.bak` + `%APPDATA%\yacr\recovery` 恢复快照）；**当前证据**为编译门禁（含 `--target x86_64-pc-windows-msvc` 类型检查）+ Wine 拒绝合同（缺 WebView2 → 退出码 5）；真实 Windows 运行/对话框/NTFS `.bak` **NOT VERIFIED**（PENDING user real-Windows spike） |
 | macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；`.ymodel` 保存/打开已接线（`NSSavePanel` + 临时文件→`rename` 原子替换 + `.bak` + `~/Library/Application Support/yacr/recovery`）；**当前证据**为编译/类型检查（mac target，AppKit 调用经桩编译器校验）；真实 macOS 运行/面板点击/APFS `.bak`/层序/DPI/像素一律 **NOT VERIFIED** |
 | Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + **`.ymodel` 保存/打开已接线**（SAF 写非原子；`.bak` 仅在 provider 支持时创建，否则 `save.no_backup`），其它格式走 `EXPORT`；恢复快照装在 `filesDir/recovery`。维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；上述新链路只有编译/契约证据，设备运行 NOT VERIFIED；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED** |
-| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传；**`SAVE` 无归档适配器，按 `unsupported-runtime: ymodel` 拒绝**，写文件走 `EXPORT`（**浏览器 bundle 只编了 DWG/DXF 连接器：裸 `EXPORT` 的实际落盘仍是 `.dxf`（源为 `.dwg` 也回退 `.dxf`），显式 `EXPORT DWG` 写实验性 DWG；其它格式按 `unsupported-runtime: export.<id>` 拒绝**）/`PLOT` 的浏览器下载（SVG/PDF）；**连接器按载体编译**（`cad-app` 的 `formats-*`）：该 bundle 其余格式按 `unsupported-runtime: import.<id>` / `export.<id>` 显式拒绝，不静默回退；Linux X11/XWayland 的 `dom-canvas` 走 `app-web` 的 `full-formats`，格式集不受此裁剪；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
+| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传（`.ymodel` 由 wasm 侧 `ZipArchive` over `cad-store-zip` 解码，不经过 importer）；**`SAVE` 已在 wasm 会话内编码 `.ymodel` 并作为浏览器下载（`Blob` + `<a download>`）落盘**，每次保存都是新下载（`download://<seq>/<name>` 句柄，不做原地覆盖、无 `.bak`/恢复快照）；`EXPORT`/`PLOT` 走同一下载通道（**浏览器 bundle 只编了 DWG/DXF 连接器：裸 `EXPORT` 的实际落盘仍是 `.dxf`（源为 `.dwg` 也回退 `.dxf`），显式 `EXPORT DWG` 写实验性 DWG；其它格式按 `unsupported-runtime: export.<id>` 拒绝**）；外部资源嵌入问题在 Web/X11 `dom-canvas` 不提供（`unsupported-runtime: embed_resources`，页面读不到本地目录），但已打开归档里的内嵌资源仍随文档存在；**连接器按载体编译**（`cad-app` 的 `formats-*`）：该 bundle 其余格式按 `unsupported-runtime: import.<id>` / `export.<id>` 显式拒绝，不静默回退；Linux X11/XWayland 的 `dom-canvas` 走 `app-web` 的 `full-formats`，格式集不受此裁剪；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
 | CLI `cad-cli-tools` | 保留，headless 开图/出图（PNG/SVG/PDF） |
 
-`ymodel` 原生读写的载体状态：**Linux、Android、Windows、macOS 已接线**（Linux：`apps/app-linux/src/ymodel_archive.rs`
+`ymodel` 原生读写的载体状态：**Linux、Android、Windows、macOS、Web 已接线**（Linux：`apps/app-linux/src/ymodel_archive.rs`
 → `CadSession::set_document_archive`；Android：`apps/app-android/src-tauri/src/ymodel_archive.rs` + SAF 写入 +
 `filesDir/recovery` 恢复快照）；Windows：`apps/app-windows/src/ymodel_archive.rs` + COM 保存对话框 + `%APPDATA%` 恢复；macOS：
-`apps/app-macos/src/ymodel_archive.rs` + `NSSavePanel` + Application Support 恢复；**Web 仍 NOT IMPLEMENTED**，
-打开/另存 `.ymodel` 以 `unsupported-runtime: ymodel` 显式拒绝，不得改成静默导出别的格式。Android 的 SAF 写入**不是原子替换**：
+`apps/app-macos/src/ymodel_archive.rs` + `NSSavePanel` + Application Support 恢复；Web/`dom-canvas`：
+`apps/app-web/src/ymodel_archive.rs` 经 `BytesDocument::archive` **在首个文档投递前**安装，打开走页面上传、
+保存是浏览器下载（每次 `begin_save` 新句柄，非原地覆盖；无 `.bak`/恢复快照，外部资源嵌入问题不提供）。
+Android 的 SAF 写入**不是原子替换**：
 上一版副本只在 provider 支持创建同名 `.bak` 文档时才有，否则成功覆盖后以 `save.no_backup` 明示。
 
 外部资源打包（ADR-0040，`document.json.embed_resources` → `resources/{font,xref,image}/<key>`）

@@ -24,8 +24,16 @@ import {
   renderedDomain,
   resetDomainStore,
   setSwitcherOpen,
+  setTrayHidden,
   toggleSwitcher,
+  toggleTray,
+  trayHidden,
 } from '../src/domains/store.ts';
+import { PANEL_ACTIONS } from '../src/chrome/panel-actions.ts';
+import { RIBBON_TABS } from '../src/ribbon/ribbon-model.ts';
+import { SHELL_ACTIONS } from '../src/ribbon/actions.ts';
+import { BIM_RIBBON_TABS } from '../src/domains/bim/ribbon.ts';
+import { CONCEPT_MENUS } from '../src/domains/concept/menus.ts';
 
 test('a status token is read verbatim and anything else stays drafting', () => {
   for (const id of DOMAIN_IDS) assert.equal(normalizeDomain(id), id);
@@ -49,6 +57,7 @@ test('drafting, BIM and concept are wired; mechanical stays an explicit placehol
     },
     { ribbon: true, surface: 'ribbon', commandLine: true, placeholder: false },
   );
+  assert.equal(DOMAIN_PROFILES.cad2d.traySide, 'right', 'drafting registers no tray slot');
   // Concept is a SketchUp-style menubar + tool column + tray, not a ribbon and
   // not a command-line profile; its value entry is the Measurements surface.
   assert.deepEqual(
@@ -60,8 +69,11 @@ test('drafting, BIM and concept are wired; mechanical stays an explicit placehol
     },
     { ribbon: true, surface: 'menu', commandLine: false, placeholder: false },
   );
+  // SketchUp docks its default tray on the right.
+  assert.equal(DOMAIN_PROFILES.concept.traySide, 'right');
   // BIM is a Revit-style ribbon band from the domain `ribbon` slot plus its
-  // right-hand tray; it is not the drafting ribbon and has no command line.
+  // left-hand tray (Revit docks Properties/Project Browser on the left); it is
+  // not the drafting ribbon and has no command line.
   assert.deepEqual(
     {
       ribbon: DOMAIN_PROFILES.bim.ribbon,
@@ -71,6 +83,7 @@ test('drafting, BIM and concept are wired; mechanical stays an explicit placehol
     },
     { ribbon: true, surface: 'domain-ribbon', commandLine: false, placeholder: false },
   );
+  assert.equal(DOMAIN_PROFILES.bim.traySide, 'left');
   for (const id of ['mechanical']) {
     const profile = DOMAIN_PROFILES[id];
     assert.equal(profile.ribbon, false, `${id} must not show the drafting ribbon`);
@@ -154,6 +167,26 @@ test('the switcher flag is one shared surface', () => {
   assert.equal(domainStoreSnapshot().switcherOpen, false);
 });
 
+test('the tray flag is one shared surface and resets with the store', () => {
+  resetDomainStore();
+  assert.equal(domainStoreSnapshot().trayHidden, false);
+  assert.equal(trayHidden(), false);
+  toggleTray();
+  assert.equal(trayHidden(), true);
+  toggleTray();
+  assert.equal(trayHidden(), false);
+  setTrayHidden(true);
+  assert.equal(trayHidden(), true);
+  // Idempotent: setting the same value publishes nothing new.
+  setTrayHidden(true);
+  assert.equal(domainStoreSnapshot().trayHidden, true);
+  resetDomainStore();
+  assert.equal(trayHidden(), false);
+  // The ribbon/menu action table dispatches the same transition (no branch was
+  // added to `App.tsx`).
+  assert.equal(PANEL_ACTIONS.domainTray, toggleTray);
+});
+
 test('the write seam reports acceptance and the host refusal verbatim', async () => {
   const accepted = await writeDomain(async () => ({ accepted: true }), 'bim');
   assert.deepEqual(accepted, { kind: 'accepted' });
@@ -175,6 +208,36 @@ test('the chrome regions and theme read the rendered (fallback) domain', async (
   const surface = await readModule('components/DomainSurface.tsx');
   assert.ok(surface.includes("'domain.fallback_title'"), 'the fallback is disclosed, not silent');
   assert.ok(surface.includes('unknownDomainToken'), 'an unknown token is named');
+});
+
+test('the workspace places the tray on the profile-side of the canvas', async () => {
+  const workspace = await readModule('components/Workspace.tsx');
+  assert.match(workspace, /DOMAIN_PROFILES\[renderedDomain\(shell\.status\)\]\.traySide/);
+  const left = workspace.indexOf("traySide === 'left'");
+  const canvas = workspace.indexOf('className="workspace__canvas"');
+  const right = workspace.indexOf("traySide === 'right'");
+  assert.ok(left > 0 && left < canvas, 'the left tray renders before the canvas (Revit)');
+  assert.ok(right > canvas, 'the right tray renders after the canvas (SketchUp)');
+  assert.ok(workspace.includes('<DomainTray side="left" />'));
+  assert.ok(workspace.includes('<DomainTray side="right" />'));
+});
+
+test('every profile puts the domain switcher under File, one row each', () => {
+  const profiles = [
+    { name: 'cad2d', tabs: RIBBON_TABS },
+    { name: 'bim', tabs: BIM_RIBBON_TABS },
+    { name: 'concept', tabs: CONCEPT_MENUS },
+  ];
+  for (const { name, tabs } of profiles) {
+    const file = tabs.find(tab => tab.panels.some(panel => panel.id === 'domain'));
+    assert.ok(file, `${name} has the shared domain panel`);
+    assert.equal(file, tabs[0], `${name} keeps it on the File surface`);
+    const rows = file.panels
+      .flatMap(panel => [...panel.items])
+      .filter(item => item.action === SHELL_ACTIONS.domainSwitcher);
+    assert.equal(rows.length, 1, `${name} has exactly one switcher row`);
+    assert.equal(rows[0].labelKey, 'domain.switcher_label');
+  }
 });
 
 test('the stylesheet keys a token block on every non-drafting domain', async () => {

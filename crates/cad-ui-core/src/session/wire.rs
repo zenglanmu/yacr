@@ -48,7 +48,7 @@
 
 use std::collections::VecDeque;
 
-use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_app::{StandardView, ToolParameter, ToolValue, ViewPlacement};
 use cad_domain::EntityId;
 
 use crate::popup::PopupAck;
@@ -98,60 +98,11 @@ pub const SELECT_UNAVAILABLE: &str = "unsupported-runtime: cad_select_entities";
 
 pub use super::admission::APPLICATION_DOMAIN_UNAVAILABLE;
 
-/// Admission result of a queued/applied command: **accepted**, not completed.
-///
-/// `{accepted:true}` is the whole promise: on the desktop it means *queued* onto
-/// the owner thread, and on a synchronous sink it means *applied*. The real
-/// outcome surfaces through `cad_status.error`. It lives here (rather than in the
-/// Tauri layer) so both hosts answer the identical wire shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct CadCommandAck {
-    /// Always `true` for an admitted command; it never reports completion.
-    pub accepted: bool,
-}
-
-impl CadCommandAck {
-    /// The only acknowledgement this layer produces.
-    pub fn accepted() -> Self {
-        Self { accepted: true }
-    }
-}
-
-/// One AutoCAD-style abbreviation the router accepts, as the chrome consumes it.
-///
-/// `command` is the canonical selector the alias normalizes onto (never another
-/// alias), so a frontend can display the target without re-resolving anything.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CadCommandAlias {
-    /// The typed abbreviation, e.g. `L`.
-    pub alias: String,
-    /// The canonical selector it resolves to, e.g. `LINE`.
-    pub command: String,
-}
-
-/// The stable refusal of a `cad_orbit` request whose angles are not finite.
-///
-/// Shared by the wire parser ([`super::admission::parse_orbit`]) and every host, so
-/// a NaN/infinite delta is refused by name instead of corrupting the camera.
-pub const ORBIT_ANGLES_NOT_FINITE: &str =
-    "orbit.angles_not_finite: cad_orbit needs finite yaw and pitch";
-
-/// One typed orbit request: yaw/pitch deltas in radians, both finite.
-///
-/// Reached from the dedicated `cad_orbit` wire command (the WebView ViewCube), never
-/// parsed out of the name-only `cad_command` funnel. It is carried verbatim — no
-/// clamp and no default — because the application's orbit is a relative gesture and
-/// a clamped delta would silently change the requested camera.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct OrbitDelta {
-    /// Rotation about world +Z, radians.
-    pub yaw: f64,
-    /// Rotation about the view right axis, radians.
-    pub pitch: f64,
-}
-
 pub use super::admission::Channel;
+pub use super::wire_types::{CadCommandAck, CadCommandAlias, OrbitDelta, ORBIT_ANGLES_NOT_FINITE};
+// The `cad_set_view` wire shape and seam live in a sibling module (size gate);
+// re-exported so the registry and both transports keep naming `wire::…`.
+pub use super::set_view::{set_view, SetViewCameraArgs, SetViewProjectionArgs};
 
 /// The **sink seam**: how one host stores or applies an already-admitted request.
 ///
@@ -210,6 +161,9 @@ pub trait AdmissionTarget {
 
     /// Store or apply one typed standard view.
     fn standard_view(&mut self, view: StandardView) -> Result<(), String>;
+
+    /// Store or apply one typed camera placement (`cad_set_view`).
+    fn set_view(&mut self, placement: ViewPlacement) -> Result<(), String>;
 
     /// Store or apply one typed orbit delta.
     fn orbit(&mut self, delta: OrbitDelta) -> Result<(), String>;
@@ -350,6 +304,8 @@ pub struct QueueFamily<'a> {
     pub selected_properties: &'a mut Vec<(String, String)>,
     /// `cad_standard_views`.
     pub standard_views: &'a mut VecDeque<StandardView>,
+    /// `cad_set_views` — typed absolute/fitted camera placements.
+    pub set_views: &'a mut VecDeque<ViewPlacement>,
     /// `cad_orbits`.
     pub orbits: &'a mut VecDeque<OrbitDelta>,
     /// `cad_setting_writes`.
@@ -417,6 +373,7 @@ impl AdmissionTarget for QueueSink<'_> {
             Channel::SelectedText => self.queues.selected_texts.len(),
             Channel::SelectedProperty => self.queues.selected_properties.len(),
             Channel::StandardView => self.queues.standard_views.len(),
+            Channel::SetView => self.queues.set_views.len(),
             Channel::Orbit => self.queues.orbits.len(),
             Channel::Setting => self.queues.setting_writes.len(),
             Channel::LayerWrite => self.queues.layer_writes.len(),
@@ -456,6 +413,11 @@ impl AdmissionTarget for QueueSink<'_> {
 
     fn standard_view(&mut self, view: StandardView) -> Result<(), String> {
         self.queues.standard_views.push_back(view);
+        Ok(())
+    }
+
+    fn set_view(&mut self, placement: ViewPlacement) -> Result<(), String> {
+        self.queues.set_views.push_back(placement);
         Ok(())
     }
 

@@ -147,6 +147,7 @@ pub const NATIVE_SESSION_COMMANDS: &[&str] = &[
     "cad_set_selected_text",
     "cad_set_selected_property",
     "cad_standard_view",
+    "cad_set_view",
     "cad_set_setting",
     "cad_layers",
     "cad_fonts",

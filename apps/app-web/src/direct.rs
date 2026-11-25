@@ -55,7 +55,7 @@
 //! from shared data — they are pure — and refuses every other known command with
 //! [`NO_SESSION`], never with a fabricated acknowledgement.
 
-use cad_app::{StandardView, ToolParameter, ToolValue};
+use cad_app::{StandardView, ToolParameter, ToolValue, ViewPlacement};
 use cad_ui_core::session::wire::{self, AdmissionTarget, ControlReads, PopupTarget};
 use cad_ui_core::session::{
     CadApiResults, CadApiSnapshot, CadApiSubmission, CadFonts, CadLayerWrite, CadLayers,
@@ -83,13 +83,14 @@ pub fn unsupported_runtime(name: &str) -> String {
 
 /// The host-seam commands this carrier refuses **by marker**.
 ///
-/// A browser document is not a `.ymodel` archive: there is no file to make
-/// self-contained, so the preview would list resources no file could carry and the
-/// policy flag could never be written. Both archive names are refused with their
-/// stable markers (`unsupported-runtime: ymodel` / `unsupported-runtime:
-/// embed_resources`) rather than the generic "no such wire command": the save
-/// chrome keys on the marker to skip the embed question entirely, and a generic
-/// miss would look like a transport bug to whoever reads the log.
+/// The two `.ymodel` embed commands are about *external* resources (ADRs 0040):
+/// a save can only pack files the carrier can read, and a page has no directory
+/// to resolve a font/xref/image path from. The archive itself is supported now
+/// ([`crate::ymodel_archive`]); what this carrier cannot offer is the
+/// self-containment question, so both names keep the same stable marker
+/// (`unsupported-runtime: embed_resources`) instead of the generic "no such wire
+/// command". The save chrome keys on a refusal to skip the question entirely,
+/// and a generic miss would look like a transport bug to whoever reads the log.
 ///
 /// `cad_pick_directory` is the same story for the Options > Files row: a page has
 /// no local filesystem, so a directory it cannot read is refused as
@@ -98,10 +99,8 @@ pub fn unsupported_runtime(name: &str) -> String {
 /// user cancelled").
 pub fn refuse_host_seam_command(name: &str) -> Option<String> {
     match name {
-        cad_ui_core::session::YMODEL_PREVIEW_COMMAND => {
-            Some(cad_ui_core::session::UNSUPPORTED_YMODEL.to_string())
-        }
-        cad_ui_core::session::EMBED_RESOURCES_COMMAND => {
+        cad_ui_core::session::YMODEL_PREVIEW_COMMAND
+        | cad_ui_core::session::EMBED_RESOURCES_COMMAND => {
             Some(cad_ui_core::session::UNSUPPORTED_EMBED_RESOURCES.to_string())
         }
         cad_ui_core::session::PICK_DIRECTORY_COMMAND => {
@@ -233,6 +232,11 @@ impl AdmissionTarget for DirectSink<'_> {
 
     fn standard_view(&mut self, view: StandardView) -> Result<(), String> {
         let outcome = self.session.standard_view(view);
+        self.applied(outcome)
+    }
+
+    fn set_view(&mut self, placement: ViewPlacement) -> Result<(), String> {
+        let outcome = self.session.set_view(placement);
         self.applied(outcome)
     }
 

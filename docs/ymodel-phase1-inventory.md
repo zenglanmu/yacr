@@ -194,8 +194,9 @@ pins the regression directly.
    reach it. It needs a real module split before more rows land there.
 4. `L0` source bytes are not written yet (`raw/source-*.bin`), so the passthrough predicate is
    correct but unsatisfiable. L1 fixed points and performance numbers are **NOT RUN**.
-5. Only the Linux carrier has an archive adapter; Windows/macOS/Android/Web refuse
-   `.ymodel` by name and need their own `DocumentArchive` implementations (the Web one also needs
-   the chunked sink path, which `write_atomic`'s whole-buffer shape cannot express).
+5. Archive adapters now exist on Linux, Windows, macOS, Android and Web (`apps/app-*/…/ymodel_archive.rs`).
+   Windows/macOS/Android runtime behaviour remains **NOT VERIFIED**; the Web adapter (2026-11-25,
+   ADR-0060) encodes into the browser download and installs before the first document, with
+   browser-level open/save **NOT RUN**.
 6. `Revision` is `u64` while ids are `u128`; the store range-checks both, and `DbObject.revision`
    is always `Revision(0)` today (it is not the element's persisted revision).

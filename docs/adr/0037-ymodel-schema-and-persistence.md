@@ -396,6 +396,9 @@ textures/<key>                -- 文档自有基色纹理，STORED（minor 3，A
 
 ### D16 载体
 
+> 2026-11-25：Web/`dom-canvas` 的实现采用 ADR-0060（`ZipArchive` over `cad-store-zip`，
+> `SAVE` = 浏览器下载；未实现 FSA 原地写）。
+
 文档所有权与字节源/汇分开：store 是纯 Rust，**谁持有 `cad-db` 谁就能持久化**。
 
 | 载体 | 文档所有者 | 打开 | 保存 |

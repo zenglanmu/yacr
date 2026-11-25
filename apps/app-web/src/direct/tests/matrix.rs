@@ -430,6 +430,7 @@ fn every_wire_command_answers_identically_on_both_paths() {
     // under the physical-line gate; they are driven through the same harness.
     for (case, name, args, gates) in cases
         .iter()
+        .chain(super::matrix_set_view::SET_VIEW_CASES.iter())
         .chain(super::selection::SELECTION_CASES.iter())
         .chain(api::OBJECT_READ_CASES.iter())
     {
