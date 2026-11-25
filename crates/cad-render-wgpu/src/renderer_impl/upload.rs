@@ -1,6 +1,25 @@
 use super::*;
 
 impl Renderer {
+    /// Flush the queue's pending `write_buffer` staging.
+    ///
+    /// wgpu keeps every `Queue::write_buffer` in its pending-writes staging
+    /// until a submission. A progressive full-scene upload stages the whole
+    /// scene across many owner ticks before the single commit, so without an
+    /// intermediate submit the host retains one staged copy of every uploaded
+    /// byte until the first frame — a peak proportional to the scene, not to one
+    /// chunked piece.
+    ///
+    /// An empty submit performs no GPU work: it is the documented point where
+    /// wgpu flushes (and recycles) its staging buffers. Callers use this between
+    /// bounded staging slices so the peak stays O(piece), exactly like the
+    /// materialisation it stages.
+    pub fn flush_upload_writes(&self) {
+        if let Some(queue) = self.queue.as_ref() {
+            queue.submit(std::iter::empty());
+        }
+    }
+
     /// The single run-free-suffix predicate shared by every commit fast path (A1
     /// keeps the base draw plan/facts, A2 skips GC, A3 skips the pulled rebuild).
     ///

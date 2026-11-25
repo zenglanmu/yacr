@@ -290,6 +290,14 @@ impl CadRenderRuntime {
             pending.offset = end;
             slices += 1;
         }
+        // wgpu holds every `write_buffer` in its pending-writes staging until a
+        // submission. A full-scene upload is staged across many ticks before its
+        // single commit, so flush the bounded slices staged in this pass: the
+        // host peak stays O(slices), not O(whole scene). The empty submit
+        // performs no GPU work (see `Renderer::flush_upload_writes`).
+        if slices > 0 {
+            renderer.flush_upload_writes();
+        }
         if self
             .pending_upload
             .as_ref()

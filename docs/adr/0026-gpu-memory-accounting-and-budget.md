@@ -42,6 +42,9 @@ peak 记录真实的"旧常驻 + 新 staging 同时驻留"瞬态。
     `view.gpuStorage.disabled`（默认 **true**，选项行“Disable GPU storage”）：默认不分配加速的
     顶点级存储副本（universal 路径），关闭它才允许有能力的设备构建 pulled 加速组织；draw tier
     每设备只选一次，所以该写入在下次设备 attach 生效。
+  - 同轮：渐进上传在每个 tick 的 bounded slices 之后用空 `Queue::submit` flush wgpu 的 pending
+    writes，否则 staging 会保留整场景副本到首次 commit。`complex-test.dwg` 实测进程树峰值 RSS
+    从 4.07 GB 降到 3.22 GB（GPU 记账仍 1.07 GB）。
 - 解析顺序：`explicit_bytes`（`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`，`0`=取消上限） **>**
   `percent × VRAM` **>** **无上限**。
 - **探测不到显存就不做预算**（用户 2026-10-24 决定）：不再有 3 GiB 估算兜底。此时

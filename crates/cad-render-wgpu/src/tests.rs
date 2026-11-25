@@ -4,6 +4,20 @@ use super::*;
 use crate::renderer_impl::light_with_background_flag;
 
 #[test]
+fn flushing_upload_writes_without_a_device_is_a_noop() {
+    // The progressive-upload flush is called between staging slices. Before a
+    // device exists there is no queue to flush (and no pending write), so the
+    // call must be inert rather than panic or fabricate a submission.
+    for preference in [
+        BackendPreference::Auto,
+        BackendPreference::WebGpu,
+        BackendPreference::WebGl2,
+    ] {
+        Renderer::new(preference).flush_upload_writes();
+    }
+}
+
+#[test]
 fn uninitialized_renderer_reports_no_active_backend() {
     // A preference is not an activated backend. Before the host supplies a
     // device there is no actual backend and no capabilities (audit B02).
