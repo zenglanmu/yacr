@@ -438,7 +438,9 @@ fn hover_after_submission_is_not_regressed_by_the_published_scene() {
         .current_prepared_scene()
         .expect("published scene")
         .base
-        .batches()
+        .resident_batches()
+        .expect("resident payload")
+        .iter()
         .flat_map(|batch| batch.sources.iter())
         .find(|reference| reference.sub_element.is_none())
         .cloned()

@@ -127,6 +127,8 @@ impl GtkOverlayOwner {
             wayland: None,
             pending_reason: None,
             session: None,
+            last_uploads_started: 0,
+            last_cpu_payload_releases: 0,
             last_cad_frame: None,
             last_frame_stages: None,
             gpu_time,

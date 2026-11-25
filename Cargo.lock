@@ -192,6 +192,7 @@ dependencies = [
  "gdkwayland-sys",
  "gdkx11",
  "gtk",
+ "libc",
  "pkg-config",
  "pollster",
  "raw-window-handle",

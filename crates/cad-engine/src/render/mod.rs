@@ -48,6 +48,7 @@ mod session_display;
 mod session_gpu;
 mod session_impl;
 mod session_msaa;
+mod session_ready;
 pub use diagnostics::{RenderDiagnostics, RenderGateReason};
 
 fn backend_kind(actual: ActiveBackend) -> ActiveBackendKind {
@@ -728,6 +729,58 @@ fn prepare_synchronously(state: &mut State) -> CadResult<()> {
         &state.overlays,
         state.images.clone(),
         state.latest_edit.as_ref(),
+    )?;
+    publish_controller(state, candidate, token);
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn prepare_full_base_synchronously(state: &mut State) -> CadResult<()> {
+    state.observe_drawing();
+    // A rebuilt base must be a new base revision even when every scene input is
+    // unchanged: otherwise the runtime would skip the re-upload of a scene whose
+    // CPU payload was released, or classify it as a flags-only publication.
+    state.published_base_identity = None;
+    let input = preparation_input(state);
+    let mut candidate = state.controller.clone();
+    candidate.force_full_base_next_prepare();
+    candidate.set_vendor_representations(input.vendor.clone());
+    candidate.set_display_settings(input.display);
+    candidate.prepare_shared_with_overlays_and_images_and_edit(
+        input.drawing.clone(),
+        input.document,
+        input.fonts.clone(),
+        &input.layers,
+        input.space,
+        &input.overlays,
+        input.images.clone(),
+        // A forced rebuild ignores an incremental receipt: the receipt is bound
+        // to the released allocations.
+        None,
+    )?;
+    publish_controller(state, candidate, input.token);
+    state.preparation.mark_synchronous(&input);
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn prepare_full_base_synchronously(state: &mut State) -> CadResult<()> {
+    state.observe_drawing();
+    state.published_base_identity = None;
+    let token = state.content_revision;
+    let mut candidate = state.controller.clone();
+    candidate.force_full_base_next_prepare();
+    candidate.set_vendor_representations(state.vendor.clone());
+    candidate.set_display_settings(state.display);
+    candidate.prepare_shared_with_overlays_and_images_and_edit(
+        state.incoming.borrow().clone(),
+        state.view.document,
+        state.fonts.clone(),
+        &state.layers,
+        state.view.space,
+        &state.overlays,
+        state.images.clone(),
+        None,
     )?;
     publish_controller(state, candidate, token);
     Ok(())

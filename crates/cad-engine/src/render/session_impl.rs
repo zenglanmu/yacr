@@ -827,41 +827,6 @@ impl RenderSessionHandle {
         state.runtime.fail(preference, reason.into(), lost);
     }
 
-    pub fn apply_ready_updates(&self) -> CadResult<()> {
-        let mut state = self.0.borrow_mut();
-        state.observe_drawing();
-        if let Some(ready) = current_ready_scene(&state).cloned() {
-            return state.runtime.apply_ready_updates(Some(&ready));
-        }
-        // Gate-stale scene (newer overlay inputs are still preparing): its
-        // geometry must not be uploaded, so the superseded in-flight upload is
-        // dropped exactly as before. Its `entity_flags`, however, are the
-        // synchronously re-resolved current set, so that delta is still pushed —
-        // the hover/selection tint then never reverts to an older set and never
-        // waits for the next publication while the cursor moves.
-        state.runtime.apply_ready_updates(None)?;
-        let catch_up = state
-            .controller
-            .ready
-            .as_ref()
-            .filter(|ready| state.runtime.base_fully_resident(ready.base_revision))
-            .map(|ready| {
-                (
-                    ready.base_revision,
-                    ready.entity_flags.clone(),
-                    ready.flags_revision,
-                )
-            });
-        match catch_up {
-            Some((base_revision, flags, flags_revision)) => {
-                state
-                    .runtime
-                    .apply_flags_catch_up(base_revision, &flags, flags_revision)
-            }
-            None => Ok(()),
-        }
-    }
-
     pub fn render(
         &self,
         logical: [f64; 2],
@@ -942,6 +907,14 @@ impl RenderSessionHandle {
     /// The current device epoch (increments on every successful attach).
     pub fn device_epoch(&self) -> u64 {
         self.0.borrow().runtime.device_epoch()
+    }
+    /// Uploads started from scratch (host memory-policy trigger; not UI data).
+    pub fn uploads_started(&self) -> u64 {
+        self.0.borrow().runtime.uploads_started()
+    }
+    /// Committed CPU base payload releases (host memory-policy trigger).
+    pub fn cpu_payload_releases(&self) -> u64 {
+        self.0.borrow().runtime.cpu_payload_releases
     }
     pub fn frames_rendered(&self) -> u64 {
         self.0.borrow().runtime.frames_rendered

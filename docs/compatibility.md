@@ -1382,9 +1382,11 @@ orbitSensitivityPercent/msaaMode，另有 `theme`/`navbarVisible`/`navvcubeDispl
 的可接受范围收窄为 **10..=80**（默认 80，越界拒绝不裁剪；CLI 的 `--gpu-budget-percent` 仍是渲染器
 自身的 10..=100 专家入口）。**证据边界**：tier 选择、宿主设置/快照/持久化契约与前端的模型测试；
 真实 GPU（Linux `native-below`，P620，`fixtures/complex-test.dwg`，2026-11-25）已跑通默认 universal
-路径：`budget_percent=80`、`cap=3,435,973,836 B`、渲染器记账 1.07 GB；分段上传每个 tick flush 后
-进程树峰值 RSS 3.22 GB（此前为 4.07 GB，差值是 wgpu 待写 staging 的整场景副本），无 present 错误；
-accelerated↔universal 切换、性能与 Windows/macOS/Android/Web 载体仍 **NOT RUN / NOT VERIFIED**。**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
+路径：`budget_percent=80`、`cap=3,435,973,836 B`、渲染器记账 1.07 GB；分段上传每 tick flush、提交后
+释放 CPU payload（`cpu_payload_bytes_released=548,732,592`）并由 Linux/glibc 归还空闲堆后，进程树
+峰值 RSS **2.47 GB**、稳态 **1.55 GB**（此前分别为 4.07 / 3.38 GB），无 present 错误；
+accelerated↔universal 切换、设备丢失重建、性能与 Windows/macOS/Android/Web 载体仍
+**NOT RUN / NOT VERIFIED**。**语言默认**按 `显式选择 > 宿主注入 > navigator > 英文`
 （`zh-TW/zh-Hant` 无对应目录 ⇒ **英文**，不静默给简体）；**显示**：模型/图纸背景色 `#rrggbb`
 （sRGB→linear 在配置→渲染器接缝，真机核对 0.5 读回 188、遮罩内部同值）与十字光标 1..100%
 （默认 5、以光标为中心对称、按视图尺寸计算；100% 位级不变），均**即时**生效。

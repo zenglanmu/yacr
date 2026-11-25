@@ -186,7 +186,11 @@ fn classification_admits_a_geometry_update_and_keeps_the_resident_base() {
         vec![range.start],
         "the stretch is published as one in-place overwrite at the resident slot"
     );
-    let stretched = ready.base.materialized(range).remove(0);
+    let stretched = ready
+        .base
+        .materialized(range)
+        .expect("resident payload")
+        .remove(0);
     assert_eq!(
         f64::from(stretched.vertices[1][0]) + stretched.local_origin.x,
         50.0,
@@ -347,7 +351,11 @@ fn a_style_colour_update_keeps_the_resident_base_and_recolours_the_batch() {
         let range = controller
             .entity_batch_range(EntityId(2))
             .expect("entity 2 owns a resident batch");
-        let batch = ready.base.materialized(range.clone()).remove(0);
+        let batch = ready
+            .base
+            .materialized(range.clone())
+            .expect("resident payload")
+            .remove(0);
         (
             ready.base.clone(),
             ready.base_revision,
@@ -392,18 +400,33 @@ fn a_style_colour_update_keeps_the_resident_base_and_recolours_the_batch() {
         vec![range.start],
         "the recolour is published as one in-place overwrite"
     );
-    let recoloured = ready.base.materialized(range.clone()).remove(0);
+    let recoloured = ready
+        .base
+        .materialized(range.clone())
+        .expect("resident payload")
+        .remove(0);
     assert_eq!(
         recoloured.color,
         [1.0, 0.0, 0.0],
         "the overwrite really re-colours the resident batch"
     );
     // Every other entity's batches are untouched.
-    for (index, batch) in ready.base.batches().enumerate() {
+    for (index, batch) in ready
+        .base
+        .resident_batches()
+        .expect("resident payload")
+        .into_iter()
+        .enumerate()
+    {
         if index == range.start {
             continue;
         }
-        let before_batch = base.batches().nth(index).expect("same batch count");
+        let before_batch = base
+            .resident_batches()
+            .expect("resident payload")
+            .into_iter()
+            .nth(index)
+            .expect("same batch count");
         assert_eq!(batch, before_batch, "batch {index} must be unchanged");
     }
 }
@@ -504,7 +527,11 @@ fn a_style_linetype_change_that_changes_the_footprint_falls_back_to_a_full_rebui
         dashed_range.len() > range.len(),
         "the dashes are separate resident batches ({dashed_range:?} vs {range:?})"
     );
-    let dashed = ready.base.materialized(dashed_range).remove(0);
+    let dashed = ready
+        .base
+        .materialized(dashed_range)
+        .expect("resident payload")
+        .remove(0);
     assert!(
         !dashed.linetype.elements.is_empty(),
         "the rebuilt base really carries the dash pattern"
@@ -582,7 +609,8 @@ fn transform_update_keeps_the_resident_base_and_moves_the_batch_in_place() {
         .as_ref()
         .unwrap()
         .base
-        .materialized(range.clone());
+        .materialized(range.clone())
+        .expect("resident payload");
     assert_eq!(moved_before.len(), 1);
     // The world start of the line before the move.
     let world_x = |batch: &RenderBatch| batch.local_origin.x + f64::from(batch.vertices[0][0]);
@@ -623,7 +651,10 @@ fn transform_update_keeps_the_resident_base_and_moves_the_batch_in_place() {
         vec![range.start],
         "the move is published as one in-place overwrite at the resident slot"
     );
-    let moved_after = ready.base.materialized(range.clone());
+    let moved_after = ready
+        .base
+        .materialized(range.clone())
+        .expect("resident payload");
     assert_eq!(moved_after.len(), 1);
     assert_eq!(
         world_x(&moved_after[0]),
@@ -634,11 +665,22 @@ fn transform_update_keeps_the_resident_base_and_moves_the_batch_in_place() {
     assert_eq!(moved_after[0].sources, moved_before[0].sources);
     assert_eq!(moved_after[0].topology, moved_before[0].topology);
     // Every other entity's batches are untouched.
-    for (index, batch) in ready.base.batches().enumerate() {
+    for (index, batch) in ready
+        .base
+        .resident_batches()
+        .expect("resident payload")
+        .into_iter()
+        .enumerate()
+    {
         if index == range.start {
             continue;
         }
-        let before_batch = base.batches().nth(index).expect("same batch count");
+        let before_batch = base
+            .resident_batches()
+            .expect("resident payload")
+            .into_iter()
+            .nth(index)
+            .expect("same batch count");
         assert_eq!(batch, before_batch, "batch {index} must be unchanged");
     }
 
@@ -693,7 +735,11 @@ fn an_update_that_does_not_fit_falls_back_to_a_full_rebuild() {
         Some(range.clone()),
         "the rebuilt index records the entity again"
     );
-    let batch = ready.base.materialized(range).remove(0);
+    let batch = ready
+        .base
+        .materialized(range)
+        .expect("resident payload")
+        .remove(0);
     assert_eq!(
         batch.local_origin.x + f64::from(batch.vertices[0][0]),
         50.0,
@@ -763,6 +809,7 @@ fn a_circle_transform_update_keeps_the_resident_conic_base() {
         .unwrap()
         .base
         .materialized(range.clone())
+        .expect("resident payload")
         .remove(0);
     assert_eq!(
         before_batch.topology,
@@ -809,7 +856,11 @@ fn a_circle_transform_update_keeps_the_resident_conic_base() {
         vec![range.start],
         "the circle move is published as one in-place overwrite"
     );
-    let moved = ready.base.materialized(range).remove(0);
+    let moved = ready
+        .base
+        .materialized(range)
+        .expect("resident payload")
+        .remove(0);
     assert_eq!(moved.topology, before_batch.topology);
     assert_eq!(moved.conics.len(), 1, "the conic count is unchanged");
     assert_eq!(

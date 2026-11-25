@@ -108,7 +108,9 @@ fn image_frame_batches(controller: &CadSceneController) -> usize {
     };
     scene
         .base
-        .batches()
+        .resident_batches()
+        .expect("resident payload")
+        .into_iter()
         .filter(|batch| {
             batch.topology == cad_scene::RenderTopology::Lines
                 && batch

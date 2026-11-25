@@ -550,9 +550,9 @@ fn publication_recomputes_flags_from_the_latest_overlay_inputs() {
     session.prepare().unwrap();
 
     let published = session.current_prepared_scene().expect("published scene");
-    let mut whole_entities = published
-        .base
-        .batches()
+    let base_batches = published.base.resident_batches().expect("resident payload");
+    let mut whole_entities = base_batches
+        .iter()
         .flat_map(|batch| batch.sources.iter())
         .filter(|reference| reference.sub_element.is_none())
         .cloned();

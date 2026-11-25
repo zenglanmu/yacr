@@ -216,7 +216,10 @@ fn incremental_line_commit_matches_full_fixture() {
         "append-fixture full_reference_ms={:.3}",
         started.elapsed().as_secs_f64() * 1000.0
     );
-    assert_eq!(ready.base.to_delta().added, full.added);
+    assert_eq!(
+        ready.base.to_delta().expect("resident payload").added,
+        full.added
+    );
     assert_eq!(ready.base.images(), full.images);
     assert_eq!(ready.base.masks(), full.masks);
 }

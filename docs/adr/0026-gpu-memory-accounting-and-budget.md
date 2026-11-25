@@ -45,6 +45,8 @@ peak 记录真实的"旧常驻 + 新 staging 同时驻留"瞬态。
   - 同轮：渐进上传在每个 tick 的 bounded slices 之后用空 `Queue::submit` flush wgpu 的 pending
     writes，否则 staging 会保留整场景副本到首次 commit。`complex-test.dwg` 实测进程树峰值 RSS
     从 4.07 GB 降到 3.22 GB（GPU 记账仍 1.07 GB）。
+  - 同轮：提交后释放 CPU `ResidentScene` 几何并在 Linux/glibc 归还空闲堆（ADR-0057），同一
+    实测峰值 **2.47 GB**、稳态 **1.55 GB**。
 - 解析顺序：`explicit_bytes`（`--gpu-budget-mb` / `YACR_GPU_BUDGET_MB`，`0`=取消上限） **>**
   `percent × VRAM` **>** **无上限**。
 - **探测不到显存就不做预算**（用户 2026-10-24 决定）：不再有 3 GiB 估算兜底。此时

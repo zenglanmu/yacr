@@ -298,6 +298,43 @@ pub struct RenderBatch {
 }
 
 impl RenderBatch {
+    /// A metadata-only copy: every geometry payload is dropped, every scalar and
+    /// style field is kept.
+    ///
+    /// A resident scene may release this CPU geometry once the GPU owns a
+    /// committed upload. What survives is exactly what non-upload readers need:
+    /// counts/topology/origin, style and draw order, the texture/PBR keys
+    /// (`mesh_texture_keys`), and the pick-source metadata is **dropped** because
+    /// the renderer's `PickTable` already owns it after upload. Geometry readers
+    /// must never treat this copy as an empty batch; the scene marks the payload
+    /// released and refuses a re-materialisation explicitly.
+    pub fn metadata_only(&self) -> Self {
+        Self {
+            local_origin: self.local_origin,
+            topology: self.topology,
+            vertices: Vec::new(),
+            normals: Vec::new(),
+            colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: self.texture.clone(),
+            pbr: self.pbr.clone(),
+            indices: Vec::new(),
+            edges: Vec::new(),
+            text_glyph: self.text_glyph,
+            conics: Vec::new(),
+            mirrored: self.mirrored,
+            alpha: self.alpha,
+            color: self.color,
+            color_unresolved: self.color_unresolved,
+            lineweight: self.lineweight,
+            lineweight_unresolved: self.lineweight_unresolved,
+            linetype: self.linetype.clone(),
+            linetype_unresolved: self.linetype_unresolved,
+            sources: Vec::new(),
+            draw_order: self.draw_order,
+        }
+    }
+
     pub fn triangle_count(&self) -> usize {
         if self.topology != RenderTopology::Mesh {
             0

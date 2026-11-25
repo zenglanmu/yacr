@@ -8,6 +8,14 @@ use cad_render_wgpu::{
 };
 use std::sync::Arc;
 
+/// Stable internal token for "the CPU base payload was released after the GPU
+/// commit, so this publication needs a forced full rebuild".
+///
+/// It never reaches a user: [`RenderSessionHandle::apply_ready_updates`] catches
+/// it, rebuilds the base from the live inputs and retries once. The token exists
+/// so the retry cannot be confused with a genuine invariant failure.
+pub(crate) const MISSING_CPU_PAYLOAD: &str = "render.base_payload_released";
+
 /// The physical size of the CAD render target for a logical (CSS) content size
 /// and window scale factor, in device pixels.
 ///
@@ -242,6 +250,10 @@ pub struct RuntimeDiagnostics {
     pub navigation_lod: bool,
     /// Cumulative frames the renderer actually produced (`frames_rendered`).
     pub frames_rendered: u64,
+    /// Cumulative CPU base payload releases after a committed GPU upload.
+    pub cpu_payload_releases: u64,
+    /// Approximate CPU bytes released by those payload releases.
+    pub cpu_payload_bytes_released: u64,
     /// Uploads started from scratch (no prior pending upload).
     pub uploads_started: u64,
     /// Pending uploads **reset** because the ready scene revision changed.
@@ -491,6 +503,10 @@ pub struct CadRenderRuntime {
     /// detect transitions for [`Self::gpu_warning`] (never written per frame).
     last_pulled_state: Option<PulledState>,
     pub frames_rendered: u64,
+    /// Cumulative CPU base payload releases after a committed GPU upload.
+    pub cpu_payload_releases: u64,
+    /// Approximate CPU bytes released by those payload releases.
+    pub cpu_payload_bytes_released: u64,
     pending_upload: Option<PendingUpload>,
     pub presented_revision: Option<u64>,
     /// Cumulative overlay-suffix commits (suffix-only uploads). A camera-only
@@ -567,6 +583,8 @@ impl Default for CadRenderRuntime {
             gpu_warning: None,
             last_pulled_state: None,
             frames_rendered: 0,
+            cpu_payload_releases: 0,
+            cpu_payload_bytes_released: 0,
             pending_upload: None,
             presented_revision: None,
             overlay_suffix_commits: 0,
@@ -702,6 +720,11 @@ pub(crate) fn gpu_warning_transition(
 }
 
 impl CadRenderRuntime {
+    /// Uploads started from scratch (read-only memory-policy/diagnostic fact).
+    pub fn uploads_started(&self) -> u64 {
+        self.uploads_started
+    }
+
     /// The effective diagnostic: the real failure first, then the sticky GPU
     /// warning. The warning never overwrites a real render/controller diagnostic.
     pub fn diagnostic(&self) -> Option<String> {
@@ -715,6 +738,70 @@ impl CadRenderRuntime {
     /// pulled organisation is usable or no renderer has reported yet.
     pub fn gpu_warning(&self) -> Option<String> {
         self.gpu_warning.clone()
+    }
+
+    /// Whether applying `ready` needs a **full** CPU base stage (an unadmitted
+    /// append, a device re-attach, or a refused in-place overwrite).
+    ///
+    /// Mirrors [`admit_base_append`]/[`overwrite_admission`] so the released
+    /// payload check runs before any renderer mutation. An admitted append needs
+    /// only its freshly built tail, so a released prefix is not an error.
+    fn base_stage_needs_full_payload(&self, ready: &PreparedScene) -> bool {
+        let base_changed = self.applied_base != Some(ready.base_revision);
+        if base_changed {
+            return admit_base_append(
+                matches!(self.lifecycle, RenderLifecycle::Ready { .. }),
+                self.applied_base,
+                ready.base_revision,
+                self.applied_base_scene.as_ref(),
+                ready.base_append.as_ref(),
+                self.base_batches,
+                ready.base.batch_len(),
+            )
+            .is_none();
+        }
+        !ready.overwrites.is_empty()
+            && matches!(
+                overwrite_admission(
+                    true,
+                    false,
+                    self.pending_upload.is_some(),
+                    self.applied_revision,
+                ),
+                OverwriteAdmission::FullRestage
+            )
+    }
+
+    /// Drop a partially staged upload before a forced base rebuild.
+    ///
+    /// The partial pieces stage into `PreparedUpload` and would otherwise be
+    /// published after the rebuild with the old scene identity.
+    pub fn abort_pending_upload(&mut self) {
+        self.pending_upload = None;
+    }
+
+    /// Release the committed base's CPU geometry once the GPU owns it.
+    ///
+    /// Gated on a ready device, a committed scene, and no in-flight upload. The
+    /// release is visible to every clone because the scene's `BatchSet`s are
+    /// shared; identity and append admission do not change. Returns the
+    /// approximate bytes released (`None` when nothing was released).
+    pub fn release_committed_base_payload(&mut self) -> Option<usize> {
+        if !matches!(self.lifecycle, RenderLifecycle::Ready { .. })
+            || self.pending_upload.is_some()
+            || self.applied_revision.is_none()
+            || self.applied_base.is_none()
+        {
+            return None;
+        }
+        let released = self.applied_base_scene.as_ref()?.release_payload();
+        if released > 0 {
+            self.cpu_payload_releases = self.cpu_payload_releases.saturating_add(1);
+            self.cpu_payload_bytes_released = self
+                .cpu_payload_bytes_released
+                .saturating_add(released as u64);
+        }
+        (released > 0).then_some(released)
     }
 }
 

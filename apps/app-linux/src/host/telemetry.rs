@@ -77,7 +77,7 @@ pub(super) fn log_render_diagnostics(
         })
         .unwrap_or_else(|| "-".to_string());
     eprintln!(
-        "[probe] pan-wait gate={:?} lifecycle={} input_rev={} requested_token={} prepared_token={:?} prepared_identity={:?} view_rev={} ready_rev={:?} ready_base={:?} applied_rev={:?} applied_base={:?} resident_batches={} prep_busy={} upload={} upload_base_changed={:?} uploads_started={} upload_rev_resets={} ready_none_clears={} last_upload_reset={:?} grid_refresh_pending={} grid_refresh={} nav_pause={} hide_text={} suffix_commits={} pulled_reuses={} pulled_rebuilds={} pulled_suffix_skips={} gc_skipped={} draw_plan_rebuilds={} order_reuses={} order_rebuilds={} frames_rendered={} gpu_warning={:?} status={:?}",
+        "[probe] pan-wait gate={:?} lifecycle={} input_rev={} requested_token={} prepared_token={:?} prepared_identity={:?} view_rev={} ready_rev={:?} ready_base={:?} applied_rev={:?} applied_base={:?} resident_batches={} prep_busy={} upload={} upload_base_changed={:?} uploads_started={} upload_rev_resets={} ready_none_clears={} last_upload_reset={:?} grid_refresh_pending={} grid_refresh={} nav_pause={} hide_text={} suffix_commits={} pulled_reuses={} pulled_rebuilds={} pulled_suffix_skips={} gc_skipped={} draw_plan_rebuilds={} order_reuses={} order_rebuilds={} frames_rendered={} cpu_payload_releases={} cpu_payload_bytes_released={} gpu_warning={:?} status={:?}",
         diagnostics.gate,
         diagnostics.lifecycle,
         diagnostics.input_revision,
@@ -110,6 +110,8 @@ pub(super) fn log_render_diagnostics(
         runtime.progressive_order_reuses,
         runtime.progressive_order_rebuilds,
         runtime.frames_rendered,
+        runtime.cpu_payload_releases,
+        runtime.cpu_payload_bytes_released,
         runtime.gpu_warning,
         diagnostics.result_status,
     );

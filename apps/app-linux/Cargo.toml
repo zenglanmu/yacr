@@ -20,6 +20,7 @@ path = "src/main.rs"
 # The binary returns an explicit NOT IMPLEMENTED error elsewhere (`src/entry.rs`).
 [target.'cfg(target_os = "linux")'.dependencies]
 tauri.workspace = true
+libc = "0.2"
 cad-render-wgpu.workspace = true
 raw-window-handle.workspace = true
 serde.workspace = true

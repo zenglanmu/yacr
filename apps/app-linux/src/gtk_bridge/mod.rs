@@ -130,6 +130,10 @@ pub struct GtkOverlayOwner {
     pending_reason: Option<String>,
     /// The CAD render session bound to this owner (cheap `Rc` clone), if any.
     session: Option<RenderSessionHandle>,
+    /// Last observed upload/release counters, for the one-shot glibc trim after
+    /// the representation is built and after the CPU payload release.
+    last_uploads_started: u64,
+    last_cpu_payload_releases: u64,
     /// Metadata of the last actually presented CAD frame (telemetry only).
     last_cad_frame: Option<CadFrameObservation>,
     /// Stage wall-times of the last `frame_cad` call (telemetry only).

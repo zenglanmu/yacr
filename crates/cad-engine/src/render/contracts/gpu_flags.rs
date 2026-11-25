@@ -123,7 +123,9 @@ fn pending_overlay_window_keeps_the_retained_entity_flags_and_suffix() {
         let document = ready.base.stamp().document;
         let entity = ready
             .base
-            .batches()
+            .resident_batches()
+            .expect("resident payload")
+            .into_iter()
             .find_map(|batch| batch.sources.first().map(|source| source.entity))
             .expect("a resident base entity");
         SelectionRef {
@@ -224,7 +226,9 @@ fn hover_changes_push_only_flags_and_never_drop_the_current_scene() {
         .current_prepared_scene()
         .expect("published scene")
         .base
-        .batches()
+        .resident_batches()
+        .expect("resident payload")
+        .iter()
         .flat_map(|batch| batch.sources.iter())
         .find(|reference| reference.sub_element.is_none())
         .cloned()

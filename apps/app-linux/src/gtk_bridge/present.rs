@@ -167,6 +167,19 @@ impl GtkOverlayOwner {
             return Err(format!("apply_ready_updates failed: {error:?}"));
         }
         let apply_us = apply_started.elapsed().as_micros() as u64;
+        // The engine has built/published the scene and may have started its
+        // upload or released the committed CPU payload. Both are one-shot
+        // memory events; return the freed heap to the OS at the event, never
+        // per frame. (Linux/glibc only; other carriers are no-ops here.)
+        let uploads_started = session.uploads_started();
+        let cpu_payload_releases = session.cpu_payload_releases();
+        if uploads_started != self.last_uploads_started
+            || cpu_payload_releases != self.last_cpu_payload_releases
+        {
+            self.last_uploads_started = uploads_started;
+            self.last_cpu_payload_releases = cpu_payload_releases;
+            crate::platform::trim_free_heap();
+        }
         let render_started = std::time::Instant::now();
         let presented = match session.render(logical, scale) {
             Ok(presented) => presented,

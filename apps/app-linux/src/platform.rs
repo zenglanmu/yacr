@@ -699,6 +699,24 @@ fn portal_choose(labels: &UseOpenDialogLabels, initial: Option<&Path>) -> FileCh
     }
 }
 
+/// Return free glibc heap pages to the OS after a large release.
+///
+/// The scene representation and its import scratch are many small allocations;
+/// `free` alone leaves them in the arena, so the RSS high-water mark would not
+/// reflect the engine's explicit CPU-payload release. Called only at an upload
+/// start and after a committed payload release, never per frame. Non-glibc
+/// targets are a no-op; their allocator policy is not claimed here.
+pub(crate) fn trim_free_heap() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        // SAFETY: `malloc_trim` is a process-wide glibc call with no
+        // preconditions; it only returns already-free pages to the OS.
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "platform/tests.rs"]
 mod tests;

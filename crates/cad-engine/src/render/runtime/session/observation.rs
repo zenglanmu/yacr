@@ -173,6 +173,8 @@ impl CadRenderRuntime {
                 .map_or(0, |renderer| renderer.draw_plan_rebuilds()),
             navigation_lod: self.renderer.as_ref().is_some_and(Renderer::navigation_lod),
             frames_rendered: self.frames_rendered,
+            cpu_payload_releases: self.cpu_payload_releases,
+            cpu_payload_bytes_released: self.cpu_payload_bytes_released,
             uploads_started: self.uploads_started,
             upload_revision_resets: self.upload_revision_resets,
             ready_none_clears: self.ready_none_clears,

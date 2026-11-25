@@ -20,6 +20,7 @@ mod edit_tests;
 mod entity_index;
 mod overlay;
 mod prepared;
+mod release;
 pub use prepared::PreparedScene;
 use prepared::{appendable_delta, SceneVersion};
 mod resident;
@@ -101,6 +102,13 @@ pub struct CadSceneController {
     /// them. Reset by every full base build.
     retired: BTreeSet<EntityId>,
     model_max_order: Option<i64>,
+    /// Consume the next preparation as a forced full base build, bypassing the
+    /// append/update/retire shortcuts.
+    ///
+    /// Set only by the engine's released-payload rebuild funnel: after the CPU
+    /// geometry is released, a device loss or a refused overwrite must rebuild
+    /// from the live inputs, never reuse the GpuOnly resident scene.
+    force_full_base: bool,
     #[cfg(test)]
     fail_after_point_staging: bool,
     /// Test-only: treat the next in-place display update as not fitting, so the
@@ -299,6 +307,17 @@ impl CadSceneController {
         space: SpaceSelection,
         overlays: &OverlayInputs,
     ) -> CadResult<()> {
+        if std::mem::take(&mut self.force_full_base) {
+            // A forced rebuild must not reuse the released resident scene or any
+            // incremental receipt bound to it. Clearing the base makes
+            // `version_changed` true and takes the one `full_base` arm below.
+            self.edit = None;
+            self.base = None;
+            self.base_append = None;
+            self.entity_batches = EntityBatchIndex::default();
+            self.retired.clear();
+            self.model_max_order = None;
+        }
         let version = doc.map(|db| SceneVersion {
             identity: self
                 .shared_document
@@ -454,38 +473,6 @@ impl CadSceneController {
         } else {
             self.base_append.clone()
         };
-        // The one full base build: the `base_changed` arm and the append-decline
-        // fallback must produce exactly the same CPU scene. It also reports the
-        // per-entity ownership of `added`, which becomes the new index wholesale
-        // (a rebuild never patches the previous one).
-        let full_base =
-            |doc: Option<&DrawingDatabase>| -> CadResult<(SceneDelta, EntityBatchIndex)> {
-                match doc {
-                    Some(db) => {
-                        let (delta, ranges) =
-                            assembly::build_scene_with_space_and_images_and_vendor_indexed(
-                                db,
-                                stamp.clone(),
-                                fonts.clone(),
-                                self.images.clone(),
-                                layers,
-                                space,
-                                self.vendor.as_deref(),
-                                self.display,
-                            )?;
-                        Ok((delta, EntityBatchIndex::from_ranges(ranges)))
-                    }
-                    None => Ok((
-                        SceneDelta {
-                            stamp: stamp.clone(),
-                            added: vec![],
-                            images: vec![],
-                            masks: vec![],
-                        },
-                        EntityBatchIndex::default(),
-                    )),
-                }
-            };
         // An append is provisional until the freshly built per-entity delta is
         // known to be appendable; a declined append rebuilds the whole base and
         // publishes no append proof.
@@ -537,14 +524,14 @@ impl CadSceneController {
                 } else {
                     append_declined = true;
                     rebuilt = true;
-                    let (delta, index) = full_base(doc)?;
+                    let (delta, index) = self.full_base(doc, &stamp, &fonts, layers, space)?;
                     (ResidentScene::from_owned(delta), index, Vec::new())
                 }
             } else if base_changed {
                 // This also covers the undo trap (a re-inserted retired id declines
                 // the append) and a retire that crossed the compaction threshold.
                 rebuilt = true;
-                let (delta, index) = full_base(doc)?;
+                let (delta, index) = self.full_base(doc, &stamp, &fonts, layers, space)?;
                 (ResidentScene::from_owned(delta), index, Vec::new())
             } else {
                 // Nothing structural changed, a delete-only commit kept the base, or

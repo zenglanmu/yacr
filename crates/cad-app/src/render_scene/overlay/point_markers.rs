@@ -723,7 +723,9 @@ mod tests {
         assert!(
             scene
                 .base
-                .batches()
+                .resident_batches()
+                .expect("resident payload")
+                .into_iter()
                 .all(|batch| batch.vertices.len() != 2 || batch.vertices[0] != batch.vertices[1]),
             "the base scene must not carry a zero-length POINT segment"
         );

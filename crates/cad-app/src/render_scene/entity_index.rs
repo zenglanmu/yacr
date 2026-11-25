@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(controller.entity_batch_index_len(), 3);
 
         let base = &controller.ready.as_ref().unwrap().base;
-        let added: Vec<_> = base.batches().collect();
+        let added: Vec<_> = base.resident_batches().expect("resident payload");
         let mut ranges = Vec::new();
         for id in [EntityId(1), EntityId(2), EntityId(3)] {
             let range = controller
@@ -260,7 +260,8 @@ mod tests {
             .expect("the inserted entity owns the appended suffix");
         assert!(range.end > range.start, "the inserted line draws");
         assert_eq!(range, old_added_len..ready.base.batch_len());
-        for batch in ready.base.batches().skip(range.start).take(range.len()) {
+        let resident = ready.base.resident_batches().expect("resident payload");
+        for batch in resident.iter().skip(range.start).take(range.len()) {
             assert!(batch.sources.iter().any(|source| source.entity == inserted));
         }
     }
@@ -322,15 +323,14 @@ mod tests {
         assert_eq!(controller.entity_batch_index_len(), 1);
         assert!(controller.entity_batch_range(EntityId(2)).is_none());
         let range = controller.entity_batch_range(EntityId(1)).unwrap();
-        for batch in controller
+        let resident = controller
             .ready
             .as_ref()
             .unwrap()
             .base
-            .batches()
-            .skip(range.start)
-            .take(range.len())
-        {
+            .resident_batches()
+            .expect("resident payload");
+        for batch in resident.iter().skip(range.start).take(range.len()) {
             assert!(batch
                 .sources
                 .iter()

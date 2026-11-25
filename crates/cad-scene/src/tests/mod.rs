@@ -126,3 +126,50 @@ fn unit_points() -> Vec<Point3> {
         },
     ]
 }
+
+#[test]
+fn metadata_only_drops_geometry_and_keeps_style_and_texture_keys() {
+    let mut cache = SceneCache::new(SceneBudget::default());
+    let representation = line_representation(
+        7,
+        vec![
+            Point3 {
+                x: 1.0,
+                y: 2.0,
+                z: 0.0,
+            },
+            Point3 {
+                x: 3.0,
+                y: 4.0,
+                z: 0.0,
+            },
+        ],
+    );
+    let mut batch = cache
+        .build_compact(&representation, stamp())
+        .expect("a line representation builds")
+        .added
+        .remove(0);
+    batch.texture = Some(cad_resources::ResourceKey("tex".into()));
+    let origin = batch.local_origin;
+    let draw_order = batch.draw_order;
+    let color = batch.color;
+    let alpha = batch.alpha;
+    let texture = batch.texture.clone();
+    assert_eq!(batch.vertices.len(), 2);
+    assert_eq!(batch.sources.len(), 1);
+
+    let metadata = batch.metadata_only();
+    assert!(metadata.vertices.is_empty());
+    assert!(metadata.normals.is_empty());
+    assert!(metadata.edges.is_empty());
+    assert!(metadata.indices.is_empty());
+    assert!(metadata.conics.is_empty());
+    assert!(metadata.sources.is_empty());
+    assert_eq!(metadata.local_origin, origin);
+    assert_eq!(metadata.topology, RenderTopology::Lines);
+    assert_eq!(metadata.draw_order, draw_order);
+    assert_eq!(metadata.color, color);
+    assert_eq!(metadata.alpha, alpha);
+    assert_eq!(metadata.texture, texture);
+}

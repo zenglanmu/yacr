@@ -106,7 +106,10 @@ fn line_append_matches_full_assembly_and_retains_predecessor_across_overlay() {
     assert!(append.predecessor.same_as(&predecessor));
     assert_eq!(append.keep_batches, predecessor.batch_len());
     let full = build_scene(&after, ready.base.stamp().clone()).unwrap();
-    assert_eq!(ready.base.to_delta().added, full.added);
+    assert_eq!(
+        ready.base.to_delta().expect("resident payload").added,
+        full.added
+    );
     assert_eq!(ready.base.images(), full.images);
     assert_eq!(ready.base.masks(), full.masks);
     let mut overlays = OverlayInputs::default();
@@ -154,7 +157,7 @@ fn line_append_rejects_wrong_predecessor_and_font_changes() {
         let ready = controller.ready.as_ref().unwrap();
         assert!(ready.base_append.is_none());
         assert_eq!(
-            ready.base.to_delta().added,
+            ready.base.to_delta().expect("resident payload").added,
             build_scene(&after, ready.base.stamp().clone())
                 .unwrap()
                 .added
@@ -207,12 +210,21 @@ fn non_line_single_entity_inserts_take_the_append_path() {
         let ready = controller.ready.as_ref().unwrap();
         assert!(ready.base_append.is_some(), "{label}: append proof");
         assert!(
-            !ready.base.to_delta().added.is_empty(),
+            !ready
+                .base
+                .to_delta()
+                .expect("resident payload")
+                .added
+                .is_empty(),
             "{label}: the entity draws"
         );
         let full = build_scene_with_fonts(&after, ready.base.stamp().clone(), Some(fonts.clone()))
             .unwrap();
-        assert_eq!(ready.base.to_delta().added, full.added, "{label}: batches");
+        assert_eq!(
+            ready.base.to_delta().expect("resident payload").added,
+            full.added,
+            "{label}: batches"
+        );
         assert_eq!(ready.base.images(), full.images, "{label}: images");
         assert_eq!(ready.base.masks(), full.masks, "{label}: masks");
     }
@@ -484,7 +496,10 @@ fn declined_append_rescans_point_markers_like_a_full_rebuild() {
         !full.masks.is_empty(),
         "the block's wipeout member is what declined the append"
     );
-    assert_eq!(ready.base.to_delta().added, full.added);
+    assert_eq!(
+        ready.base.to_delta().expect("resident payload").added,
+        full.added
+    );
     assert_eq!(ready.base.images(), full.images);
     assert_eq!(ready.base.masks(), full.masks);
 }
@@ -643,7 +658,7 @@ fn published_base_not_last_adopted_document_authorizes_append() {
     let ready = controller.ready.as_ref().unwrap();
     assert!(ready.base_append.is_none());
     assert_eq!(
-        ready.base.to_delta().added,
+        ready.base.to_delta().expect("resident payload").added,
         build_scene(&after, ready.base.stamp().clone())
             .unwrap()
             .added
@@ -667,7 +682,14 @@ fn published_base_not_last_adopted_document_authorizes_append() {
     prepare(&mut controller, third.clone(), Some(&third_receipt));
     assert!(controller.ready.as_ref().unwrap().base_append.is_none());
     assert_eq!(
-        controller.ready.as_ref().unwrap().base.to_delta().added,
+        controller
+            .ready
+            .as_ref()
+            .unwrap()
+            .base
+            .to_delta()
+            .expect("resident payload")
+            .added,
         build_scene(
             &third,
             controller.ready.as_ref().unwrap().base.stamp().clone()
@@ -696,7 +718,7 @@ fn sequential_appends_bind_each_immediate_predecessor() {
             .predecessor
             .same_as(&previous));
         assert_eq!(
-            ready.base.to_delta().added,
+            ready.base.to_delta().expect("resident payload").added,
             build_scene(&after, ready.base.stamp().clone())
                 .unwrap()
                 .added
@@ -743,9 +765,12 @@ fn hidden_line_appends_zero_batches_and_resource_changes_fall_back() {
         .unwrap();
     let ready = controller.ready.as_ref().unwrap();
     assert!(ready.base_append.is_some());
-    assert_eq!(ready.base.to_delta().added.len(), count);
     assert_eq!(
-        ready.base.to_delta().added,
+        ready.base.to_delta().expect("resident payload").added.len(),
+        count
+    );
+    assert_eq!(
+        ready.base.to_delta().expect("resident payload").added,
         build_scene_with_overrides(&after, ready.base.stamp().clone(), None, &hidden)
             .unwrap()
             .added
@@ -858,19 +883,26 @@ fn styled_dashed_line_uses_the_full_provider_and_compaction_path() {
     prepare(&mut controller, after.clone(), Some(&receipt));
     let ready = controller.ready.as_ref().unwrap();
     assert!(ready.base_append.is_some());
-    assert!(!ready.base.to_delta().added.is_empty());
+    assert!(!ready
+        .base
+        .to_delta()
+        .expect("resident payload")
+        .added
+        .is_empty());
     assert!(ready
         .base
         .to_delta()
+        .expect("resident payload")
         .added
         .iter()
         .all(|batch| batch.alpha == 0.5));
     assert!(ready
         .base
-        .batches()
+        .metadata()
+        .into_iter()
         .all(|batch| !batch.linetype.elements.is_empty()));
     assert_eq!(
-        ready.base.to_delta().added,
+        ready.base.to_delta().expect("resident payload").added,
         build_scene(&after, ready.base.stamp().clone())
             .unwrap()
             .added

@@ -6,6 +6,10 @@ use super::super::staging::stage_piece;
 use super::super::*;
 use super::Instant;
 
+fn missing_cpu_payload_error() -> CadError {
+    CadError::Invariant(super::super::MISSING_CPU_PAYLOAD.into())
+}
+
 impl CadRenderRuntime {
     pub fn apply_ready_updates(&mut self, ready: Option<&PreparedScene>) -> CadResult<()> {
         if !matches!(self.lifecycle, RenderLifecycle::Ready { .. }) {
@@ -18,6 +22,16 @@ impl CadRenderRuntime {
             }
             return Ok(());
         };
+        // A full base stage needs the CPU geometry. Check **before** any flags or
+        // in-place overwrite is applied: the session rebuilds the base from the
+        // live inputs and retries once, so no renderer mutation can be stranded
+        // by the retry. An admitted append needs only its fresh tail and is not
+        // covered here; `materialized` is the safety net for that range.
+        if self.base_stage_needs_full_payload(ready) && !ready.base.has_cpu_payload() {
+            return Err(CadError::Invariant(
+                super::super::MISSING_CPU_PAYLOAD.into(),
+            ));
+        }
         // Flags-first delta over the committed geometry. A flags-only preview
         // publication keeps the scene revision, so this must be evaluated
         // BEFORE the `applied_revision == Some(ready.revision)` early return:
@@ -222,11 +236,11 @@ impl CadRenderRuntime {
             let start = pending.offset;
             let mut end = start;
             let mut vertices = 0usize;
-            let mut advance = |batch: &cad_scene::RenderBatch| -> bool {
+            let mut advance = |count: usize| -> bool {
                 if end - start >= 256 {
                     return false;
                 }
-                let next = vertices.saturating_add(batch.vertices.len());
+                let next = vertices.saturating_add(count);
                 if end > start && next > 262_144 {
                     return false;
                 }
@@ -236,15 +250,19 @@ impl CadRenderRuntime {
             };
             match pending.group {
                 0 => {
-                    for batch in pending.scene.base.batches().skip(start) {
-                        if !advance(batch) {
+                    // Counts come from the payload-free `vertex_count`, so a
+                    // released CPU base can still be sliced (and then rejected
+                    // explicitly by `materialized` if this is a full re-stage).
+                    for index in start..batches_len {
+                        let count = pending.scene.base.vertex_count(index).unwrap_or(0);
+                        if !advance(count) {
                             break;
                         }
                     }
                 }
                 _ => {
                     for batch in pending.scene.highlight.added.iter().skip(start) {
-                        if !advance(batch) {
+                        if !advance(batch.vertices.len()) {
                             break;
                         }
                     }
@@ -268,7 +286,11 @@ impl CadRenderRuntime {
             let mut piece = None;
             match pending.group {
                 0 => {
-                    let batches = pending.scene.base.materialized(start..end);
+                    let batches = pending
+                        .scene
+                        .base
+                        .materialized(start..end)
+                        .map_err(|_| missing_cpu_payload_error())?;
                     stage_piece(0, renderer, &batches, &mut piece)?;
                 }
                 _ => stage_piece(
@@ -394,8 +416,11 @@ impl CadRenderRuntime {
             // (`<hex>.png|.jpg`) identify the mesh textures, and a textured batch
             // whose key failed is additionally drawn untextured (never with a
             // placeholder) and surfaced by `Renderer::mesh_texture_fallbacks`.
-            let mesh_report = renderer
-                .upload_mesh_textures(&cad_scene::mesh_texture_keys(ready.base.batches()), cache)?;
+            let mesh_metadata = ready.base.metadata();
+            let mesh_report = renderer.upload_mesh_textures(
+                &cad_scene::mesh_texture_keys(mesh_metadata.iter().map(|batch| batch.as_ref())),
+                cache,
+            )?;
             let mut unresolved = report.unresolved.clone();
             unresolved.extend(mesh_report.unresolved.iter().cloned());
             if let Some(reason) = report.diagnostic().or_else(|| mesh_report.diagnostic()) {

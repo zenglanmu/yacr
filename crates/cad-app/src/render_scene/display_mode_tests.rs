@@ -85,13 +85,15 @@ fn solid_hatch() -> cad_domain::SemanticGeometry {
 }
 
 fn mesh_batches(base: &ResidentScene) -> usize {
-    base.batches()
+    base.metadata()
+        .into_iter()
         .filter(|batch| batch.topology == cad_scene::RenderTopology::Mesh)
         .count()
 }
 
 fn line_batches(base: &ResidentScene) -> usize {
-    base.batches()
+    base.metadata()
+        .into_iter()
         .filter(|batch| batch.topology == cad_scene::RenderTopology::Lines)
         .count()
 }
@@ -136,7 +138,9 @@ fn fill_off_rebuilds_the_base_and_swaps_the_hatch_fill_for_its_outline() {
     // primitive changed, so the boundary batch carries the hatch's corners in
     // both.
     let corners = |base: &ResidentScene| -> usize {
-        base.batches()
+        base.resident_batches()
+            .expect("resident payload")
+            .into_iter()
             .filter(|batch| batch.topology == cad_scene::RenderTopology::Lines)
             .map(|batch| batch.vertices.len())
             .sum()
@@ -220,7 +224,7 @@ fn qtext_rebuilds_the_base_and_replaces_glyph_batches() {
     );
     assert_eq!(quick.base.batch_len(), 1, "one placeholder rectangle");
     assert_eq!(mesh_batches(&quick.base), 0, "no glyph face survives");
-    let batch = quick.base.batches().next().unwrap();
+    let batch = quick.base.resident_batches().expect("resident payload")[0].clone();
     assert_eq!(batch.topology, cad_scene::RenderTopology::Lines);
     // A `Lines` batch carries independent endpoint pairs, so the rectangle's
     // four sides are eight vertices.
@@ -244,7 +248,13 @@ fn viewres_ceiling_changes_the_chord_batch_and_rebuilds_the_base() {
     controller.set_viewres(Some(1000));
     prepare(&mut controller, &db);
     let fine = controller.ready.as_ref().unwrap().clone();
-    let fine_vertices: usize = fine.base.batches().map(|batch| batch.vertices.len()).sum();
+    let fine_vertices: usize = fine
+        .base
+        .resident_batches()
+        .expect("resident payload")
+        .into_iter()
+        .map(|batch| batch.vertices.len())
+        .sum();
     assert!(fine_vertices > 7, "the fine arc has many chords");
 
     assert!(controller.set_viewres(Some(6)));
@@ -256,7 +266,9 @@ fn viewres_ceiling_changes_the_chord_batch_and_rebuilds_the_base() {
     );
     let coarse_vertices: usize = coarse
         .base
-        .batches()
+        .resident_batches()
+        .expect("resident payload")
+        .into_iter()
         .map(|batch| batch.vertices.len())
         .sum();
     // A `Lines` batch carries independent endpoint pairs: 6 chords = 12
