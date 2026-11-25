@@ -170,6 +170,53 @@ pub(crate) fn enforce_scene_budget(
     Ok(())
 }
 
+#[derive(Default)]
+struct InstancingStats {
+    placements: usize,
+    attribute_carrying: usize,
+    non_uniform_scale: usize,
+    mirrored: usize,
+    without_basic_fallbacks: usize,
+    blocks: std::collections::BTreeSet<cad_domain::BlockId>,
+}
+
+fn collect_instance_placements(
+    geometry: &cad_domain::SemanticGeometry,
+    stats: &mut InstancingStats,
+) {
+    match geometry {
+        cad_domain::SemanticGeometry::Insert {
+            block,
+            transform,
+            attributes,
+        } => {
+            stats.placements += 1;
+            stats.blocks.insert(*block);
+            let attributes = !attributes.is_empty();
+            let non_uniform = !transform.is_uniform_scale(1e-9);
+            let mirrored = transform.determinant() < 0.0;
+            if attributes {
+                stats.attribute_carrying += 1;
+            }
+            if non_uniform {
+                stats.non_uniform_scale += 1;
+            }
+            if mirrored {
+                stats.mirrored += 1;
+            }
+            if !attributes && !non_uniform && !mirrored {
+                stats.without_basic_fallbacks += 1;
+            }
+        }
+        cad_domain::SemanticGeometry::Compound(parts) => {
+            for part in parts {
+                collect_instance_placements(part, stats);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn run_build_representation(
     controller: &HostController,
     fonts: Option<&Arc<cad_representation::FontEngine>>,
@@ -233,6 +280,19 @@ pub(crate) fn run_build_representation(
         }
     }
     let primitives = lines + meshes + texts + instances + images + masks;
+    // Block references are expanded before they reach the representation, so
+    // `kind_counts.instances` is structurally zero here. This DB walk is the
+    // honest placement count and the input to the (future) instancing phases;
+    // it does not change the existing primitive/vertex counting semantics.
+    let mut instancing = InstancingStats::default();
+    for entity in document.drawing.model_space() {
+        collect_instance_placements(&entity.geometry, &mut instancing);
+    }
+    let direct_block_member_entities: usize = instancing
+        .blocks
+        .iter()
+        .map(|block| document.drawing.block_entities(*block).len())
+        .sum();
     Ok(serde_json::json!({
         "schema_version": CLI_SCHEMA_VERSION,
         "operation": CliOperation::BuildRepresentation.as_str(),
@@ -245,6 +305,16 @@ pub(crate) fn run_build_representation(
             "instances": instances,
             "images": images,
             "masks": masks,
+        },
+        "instancing": {
+            "model_insert_placements": instancing.placements,
+            "unique_blocks": instancing.blocks.len(),
+            "direct_block_member_entities": direct_block_member_entities,
+            "attribute_carrying_placements": instancing.attribute_carrying,
+            "non_uniform_scale_placements": instancing.non_uniform_scale,
+            "mirrored_placements": instancing.mirrored,
+            "without_basic_fallbacks": instancing.without_basic_fallbacks,
+            "note": "placements are counted from the DB; build_expanded never emits Instance, so kind_counts.instances stays 0",
         },
         "failures": failures,
     }))

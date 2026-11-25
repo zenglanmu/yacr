@@ -51,6 +51,20 @@
 - 单实体编辑/选择：instanced 行不进入 `entity_batches`，`update_candidate` 返回 `None`，
   走一次 full rebuild（显式、可接受）；成员 CPU 拾取保持现状。
 
+## 测量（2026-11-25）
+
+`cad-cli-tools build-representation fixtures/complex-test.dwg` 的新 `instancing` 块（只读 DB
+walk；不改变既有 primitive/vertex 计数）：
+
+- `model_insert_placements=1274`，`unique_blocks=128`，`direct_block_member_entities=19721`
+- `attribute_carrying_placements=276`，`non_uniform_scale_placements=14`，
+  `mirrored_placements=325`，`without_basic_fallbacks=672`
+- 展开后仍是 `lines=8,271,435` / `vertices=23,470,089`，`kind_counts.instances=0`
+
+这说明模板层有 128 个 unique block 可被 1,274 个 placement 共享；672 个 placement 不触发
+ATTRIB/非均匀/镜像这三类基础回退。它**不是**可实例化字节数的证明：XCLIP、世界空间虚线、
+透明、嵌套深度和每引用样式仍要在 Phase 1 的 eligibility 里过滤。
+
 ## 待办（实现前）
 
 1. 一个 **GPU-free `instancing-report`**（或 `build-representation` 的独立字段，不改现有计数）：
