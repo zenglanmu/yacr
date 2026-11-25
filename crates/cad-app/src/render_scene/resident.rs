@@ -33,7 +33,6 @@
 //!   Releasing the payload does not change any of those; replacing a batch bumps
 //!   exactly one generation, which is what the engine's append admission must
 //!   observe.
-use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -66,56 +65,6 @@ impl fmt::Display for MissingCpuPayload {
 
 impl std::error::Error for MissingCpuPayload {}
 
-/// Shared block-template geometry for the resident prefix.
-///
-/// A template placement is a metadata-only [`RenderBatch`] at a resident index
-/// whose heavy geometry lives once in this table. Staging composes the template
-/// with the placement's world origin (pure translation in the POC), draw order
-/// and sources. The table is shared by every `ResidentScene` clone and cleared
-/// by [`ResidentScene::release_payload`], so release is visible everywhere.
-#[derive(Default)]
-pub(crate) struct TemplateTable {
-    entries: RwLock<HashMap<usize, Arc<RenderBatch>>>,
-}
-
-impl TemplateTable {
-    pub(crate) fn from_map(entries: HashMap<usize, Arc<RenderBatch>>) -> Self {
-        Self {
-            entries: RwLock::new(entries),
-        }
-    }
-
-    pub(crate) fn get(&self, index: usize) -> Option<Arc<RenderBatch>> {
-        self.entries
-            .read()
-            .expect("template table lock")
-            .get(&index)
-            .cloned()
-    }
-
-    pub(crate) fn remove(&self, index: usize) {
-        self.entries
-            .write()
-            .expect("template table lock")
-            .remove(&index);
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.read().expect("template table lock").is_empty()
-    }
-
-    /// Drop every template and return their approximate bytes (unique copies).
-    pub(crate) fn clear(&self) -> usize {
-        let mut entries = self.entries.write().expect("template table lock");
-        let released = entries
-            .values()
-            .map(|template| template.approx_bytes())
-            .sum();
-        entries.clear();
-        released
-    }
-}
-
 struct BatchPayload {
     state: PayloadState,
     batches: Vec<Arc<RenderBatch>>,
@@ -142,11 +91,6 @@ impl BatchSet {
             .iter()
             .map(|batch| u32::try_from(batch.vertices.len()).unwrap_or(u32::MAX))
             .collect();
-        Self::new_with_counts(batches, vertex_counts)
-    }
-
-    fn new_with_counts(batches: Vec<Arc<RenderBatch>>, vertex_counts: Vec<u32>) -> Self {
-        debug_assert_eq!(batches.len(), vertex_counts.len());
         let len = batches.len();
         Self {
             len,
@@ -253,19 +197,6 @@ impl BatchSet {
     }
 }
 
-/// Compose a template placement for staging.
-///
-/// The POC only templates pure translations, so the shared block-local arrays
-/// are unchanged; only the world origin, draw order and per-placement sources
-/// come from the placeholder.
-fn compose_template(template: &RenderBatch, placeholder: &RenderBatch) -> RenderBatch {
-    let mut batch = template.clone();
-    batch.local_origin = placeholder.local_origin;
-    batch.draw_order = placeholder.draw_order;
-    batch.sources = placeholder.sources.clone();
-    batch
-}
-
 /// One segment appended after the prefix: the committed delta it came from
 /// (retained for its stamp) plus its batches, one `Arc` per batch.
 #[derive(Clone)]
@@ -290,8 +221,6 @@ pub struct ResidentScene {
     prefix_batches: Arc<BatchSet>,
     /// The prefix set generation this scene saw (identity snapshot).
     prefix_generation: u64,
-    /// Shared block-template geometry for the prefix (empty for a normal build).
-    templates: Arc<TemplateTable>,
     appended: Vec<Segment>,
 }
 
@@ -304,35 +233,13 @@ impl ResidentScene {
     /// `images`, `masks`) with `added` emptied: the batch payload is the
     /// per-batch `Arc` list, so the scene never stores every batch twice.
     pub fn from_owned(delta: SceneDelta) -> Self {
-        Self::from_owned_with_templates(delta, Arc::new(TemplateTable::default()))
-    }
-
-    /// A resident scene with a shared block-template table.
-    pub(crate) fn from_owned_with_templates(
-        delta: SceneDelta,
-        templates: Arc<TemplateTable>,
-    ) -> Self {
         let SceneDelta {
             stamp,
             added,
             images,
             masks,
         } = delta;
-        let vertex_counts: Vec<u32> = added
-            .iter()
-            .enumerate()
-            .map(|(index, batch)| {
-                templates
-                    .get(index)
-                    .map_or(batch.vertices.len(), |template| template.vertices.len())
-                    .try_into()
-                    .unwrap_or(u32::MAX)
-            })
-            .collect();
-        let prefix_batches = Arc::new(BatchSet::new_with_counts(
-            added.into_iter().map(Arc::new).collect(),
-            vertex_counts,
-        ));
+        let prefix_batches = Arc::new(BatchSet::new(added.into_iter().map(Arc::new).collect()));
         Self {
             prefix: Arc::new(SceneDelta {
                 stamp,
@@ -342,7 +249,6 @@ impl ResidentScene {
             }),
             prefix_batches,
             prefix_generation: 0,
-            templates,
             appended: Vec::new(),
         }
     }
@@ -468,8 +374,7 @@ impl ResidentScene {
         let prefix_end = self.prefix_batches.len();
         if start < prefix_end {
             let local_end = end.min(prefix_end);
-            let batches = self.prefix_batches.materialize(start, local_end)?;
-            self.push_materialized(&mut out, batches, start);
+            out.extend(self.prefix_batches.materialize(start, local_end)?);
         }
         cursor += prefix_end;
         for segment in &self.appended {
@@ -481,31 +386,12 @@ impl ResidentScene {
                 let local_start = start.saturating_sub(cursor);
                 let local_end = end.min(segment_end) - cursor;
                 if local_start < local_end {
-                    let batches = segment.batches.materialize(local_start, local_end)?;
-                    self.push_materialized(&mut out, batches, cursor + local_start);
+                    out.extend(segment.batches.materialize(local_start, local_end)?);
                 }
             }
             cursor = segment_end;
         }
         Ok(out)
-    }
-
-    /// Compose one materialised range: a template placement takes its heavy
-    /// geometry from the shared table, its world origin/draw order/sources from
-    /// the placeholder.
-    fn push_materialized(
-        &self,
-        out: &mut Vec<RenderBatch>,
-        batches: Vec<RenderBatch>,
-        base: usize,
-    ) {
-        for (offset, batch) in batches.into_iter().enumerate() {
-            let index = base + offset;
-            out.push(match self.templates.get(index) {
-                Some(template) => compose_template(&template, &batch),
-                None => batch,
-            });
-        }
     }
 
     /// The resident batch at `index`, in resident order.
@@ -548,7 +434,6 @@ impl ResidentScene {
             let replaced = self.prefix_batches.replace(index, batch);
             if replaced {
                 self.prefix_generation = self.prefix_batches.generation();
-                self.templates.remove(index);
             }
             return replaced;
         }
@@ -571,8 +456,7 @@ impl ResidentScene {
     /// [`Self::materialized`]/[`Self::resident_batches`] start reporting
     /// [`MissingCpuPayload`]. Returns the approximate bytes released.
     pub fn release_payload(&self) -> usize {
-        let mut released = self.templates.clear();
-        released = released.saturating_add(self.prefix_batches.release());
+        let mut released = self.prefix_batches.release();
         for segment in &self.appended {
             released = released.saturating_add(segment.batches.release());
         }
@@ -592,7 +476,7 @@ impl ResidentScene {
     /// still owns its CPU geometry. An append only stages its tail, so a
     /// released prefix is still a valid append predecessor.
     pub fn prefix_has_cpu_payload(&self) -> bool {
-        self.prefix_batches.has_payload() || !self.templates.is_empty()
+        self.prefix_batches.has_payload()
     }
 
     /// Current payload state (mixed scenes report `GpuOnly`).
@@ -634,7 +518,6 @@ impl ResidentScene {
     pub fn same_as(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.prefix, &other.prefix)
             && Arc::ptr_eq(&self.prefix_batches, &other.prefix_batches)
-            && Arc::ptr_eq(&self.templates, &other.templates)
             && self.prefix_generation == other.prefix_generation
             && self.appended.len() == other.appended.len()
             && self
@@ -654,9 +537,14 @@ impl ResidentScene {
     /// (tests, exporters), never on the append path. A released payload is an
     /// explicit error rather than an empty delta.
     pub fn to_delta(&self) -> Result<SceneDelta, MissingCpuPayload> {
+        let added = self
+            .resident_batches()?
+            .into_iter()
+            .map(|batch| (*batch).clone())
+            .collect();
         Ok(SceneDelta {
             stamp: self.stamp().clone(),
-            added: self.materialized(0..self.batch_len())?,
+            added,
             images: self.prefix.images.clone(),
             masks: self.prefix.masks.clone(),
         })
