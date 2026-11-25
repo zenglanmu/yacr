@@ -46,10 +46,10 @@ impl CadSceneController {
         fonts: &Option<Arc<FontEngine>>,
         layers: &LayerOverrideSet,
         space: SpaceSelection,
-    ) -> CadResult<(SceneDelta, EntityBatchIndex)> {
+    ) -> CadResult<(ResidentScene, EntityBatchIndex)> {
         match doc {
             Some(db) => {
-                let (delta, ranges) =
+                let (delta, ranges, templates) =
                     super::assembly::build_scene_with_space_and_images_and_vendor_indexed(
                         db,
                         stamp.clone(),
@@ -59,16 +59,20 @@ impl CadSceneController {
                         space,
                         self.vendor.as_deref(),
                         self.display,
+                        super::block_instancing_enabled(),
                     )?;
-                Ok((delta, EntityBatchIndex::from_ranges(ranges)))
+                Ok((
+                    ResidentScene::from_owned_with_templates(delta, Arc::new(templates)),
+                    EntityBatchIndex::from_ranges(ranges),
+                ))
             }
             None => Ok((
-                SceneDelta {
+                ResidentScene::from_owned(SceneDelta {
                     stamp: stamp.clone(),
                     added: vec![],
                     images: vec![],
                     masks: vec![],
-                },
+                }),
                 EntityBatchIndex::default(),
             )),
         }

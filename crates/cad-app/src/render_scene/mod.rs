@@ -18,6 +18,7 @@ pub use edit::{BaseAppend, DrawingEditReceipt};
 #[cfg(test)]
 mod edit_tests;
 mod entity_index;
+mod instancing;
 mod overlay;
 mod prepared;
 mod release;
@@ -49,6 +50,12 @@ mod wipeout_tests;
 use entity_index::EntityBatchIndex;
 pub use overlay::*;
 pub use resident::ResidentScene;
+pub(crate) use resident::TemplateTable;
+
+/// POC gate for block-instance templates (product default off).
+pub(crate) fn block_instancing_enabled() -> bool {
+    std::env::var_os("YACR_BLOCK_INSTANCING").is_some_and(|value| value != "0")
+}
 
 /// Decoded raster-image cache fed to the base scene build, re-exported so the UI
 /// bridge can name the type carried by [`PreparedScene::images`].
@@ -524,15 +531,15 @@ impl CadSceneController {
                 } else {
                     append_declined = true;
                     rebuilt = true;
-                    let (delta, index) = self.full_base(doc, &stamp, &fonts, layers, space)?;
-                    (ResidentScene::from_owned(delta), index, Vec::new())
+                    let (base, index) = self.full_base(doc, &stamp, &fonts, layers, space)?;
+                    (base, index, Vec::new())
                 }
             } else if base_changed {
                 // This also covers the undo trap (a re-inserted retired id declines
                 // the append) and a retire that crossed the compaction threshold.
                 rebuilt = true;
-                let (delta, index) = self.full_base(doc, &stamp, &fonts, layers, space)?;
-                (ResidentScene::from_owned(delta), index, Vec::new())
+                let (base, index) = self.full_base(doc, &stamp, &fonts, layers, space)?;
+                (base, index, Vec::new())
             } else {
                 // Nothing structural changed, a delete-only commit kept the base, or
                 // an in-place display update replaced one entity's batches: the

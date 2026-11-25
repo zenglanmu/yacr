@@ -335,6 +335,30 @@ impl RenderBatch {
         }
     }
 
+    /// A metadata-only placement of a shared block template.
+    ///
+    /// The heavy arrays come from `self` (the block-local template) at staging;
+    /// the placement stores the world origin (pure translation), its own draw
+    /// order and its own selection sources. Geometry readers must resolve it
+    /// through the resident scene's template table, never treat the empty
+    /// arrays as an empty batch.
+    pub fn template_placeholder(
+        &self,
+        translation: [f64; 3],
+        draw_order: i64,
+        sources: Vec<cad_domain::SelectionRef>,
+    ) -> Self {
+        let mut batch = self.metadata_only();
+        batch.local_origin = Point3 {
+            x: self.local_origin.x + translation[0],
+            y: self.local_origin.y + translation[1],
+            z: self.local_origin.z + translation[2],
+        };
+        batch.draw_order = draw_order;
+        batch.sources = sources;
+        batch
+    }
+
     pub fn triangle_count(&self) -> usize {
         if self.topology != RenderTopology::Mesh {
             0

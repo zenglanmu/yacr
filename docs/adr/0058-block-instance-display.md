@@ -74,6 +74,18 @@ ATTRIB/非均匀/镜像这三类基础回退。它**不是**可实例化字节�
    断言输出 batch 与展开基线逐字节一致；再在真实 GPU 上做 PNG diff。
 3. Phase 2 单独 ADR/实现，按载体能力门控。
 
+## POC 结果（2026-11-25，`YACR_BLOCK_INSTANCING=1`，默认关闭）
+
+- 同一 `complex-test.dwg`：`placements=155` / `batches=776`（总 164,762 batch 的 **0.47%**）。
+- 回退分布：`not_translation=701`、`attributes=276`、`representation_diagnostics=75`、
+  `raster_or_mask=49`、`clip=18`。
+- 峰值 RSS 2469 MiB（off 2448 MiB），稳态 1539 MiB（off 1530 MiB）：**没有可测的收益**。
+- 同一相机页的 `actual-render` verts/tris/draw 与展开基线一致（883008 / 308960 / ~2707），
+  组合路径没有引入可见错误；无 present 错误。
+- 结论：**纯平移窄范围不足以覆盖这份图纸**；真正的剩余量集中在旋转/缩放（701）和
+  ATTRIB（276）。前者需要 per-placement 矩阵组合（Phase 1 的真正主体），后者需要每引用文本，
+  两者都回到高风险区。POC 代码保留为 opt-in 基础，**不得默认启用**；默认路径仍是展开。
+
 ## 证据边界
 
 目前只有 recon 与 `build-representation` 的计数，没有实现、没有 PNG/像素/真机证据。

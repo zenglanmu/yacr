@@ -1,11 +1,19 @@
 //! Database-derived scene assembly, independent of the UI/GPU lifecycle.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
 
 use crate::layers::LayerOverrideSet;
 use crate::render_scene::DisplaySettings;
+use crate::render_scene::TemplateTable;
+
+type IndexedScene = (
+    SceneDelta,
+    SceneAssemblyStats,
+    BTreeMap<EntityId, Range<usize>>,
+    TemplateTable,
+);
 use crate::vendor::{VendorPrimitive, VendorRepresentationStore};
 use cad_db::DrawingDatabase;
 use cad_db::LinetypePattern;
@@ -57,6 +65,12 @@ pub struct SceneAssemblyStats {
     /// stayed separate because they came from different representations — the
     /// realizable draw reduction a representation-spanning line merge would get.
     pub adjacent_mergeable_line_pairs: usize,
+    /// POC block-instance placements applied (pure-translation INSERTs).
+    pub instanced_placements: usize,
+    /// Metadata-only placement batches those placements emitted.
+    pub instanced_batches: usize,
+    /// Block references rejected by the template gate (by reason, summed).
+    pub instancing_fallbacks: usize,
 }
 
 impl SceneAssemblyStats {
@@ -140,8 +154,9 @@ pub fn build_scene_with_space_and_images_and_vendor(
         space,
         vendor,
         DisplaySettings::default(),
+        false,
     )
-    .map(|(delta, _ranges)| delta)
+    .map(|(delta, _ranges, _templates)| delta)
 }
 
 /// [`build_scene_with_space_and_images_and_vendor`] plus the resident-batch
@@ -162,11 +177,12 @@ pub(crate) fn build_scene_with_space_and_images_and_vendor_indexed(
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
     display: DisplaySettings,
-) -> CadResult<(SceneDelta, BTreeMap<EntityId, Range<usize>>)> {
+    instancing: bool,
+) -> CadResult<(SceneDelta, BTreeMap<EntityId, Range<usize>>, TemplateTable)> {
     build_scene_stats_with_vendor_indexed(
-        database, stamp, fonts, images, overrides, space, vendor, display,
+        database, stamp, fonts, images, overrides, space, vendor, display, instancing,
     )
-    .map(|(delta, _stats, ranges)| (delta, ranges))
+    .map(|(delta, _stats, ranges, templates)| (delta, ranges, templates))
 }
 
 /// Like [`build_scene_with_space_and_images`] but also returns read-only
@@ -208,8 +224,9 @@ pub fn build_scene_stats_with_vendor(
         space,
         vendor,
         DisplaySettings::default(),
+        false,
     )
-    .map(|(delta, stats, _ranges)| (delta, stats))
+    .map(|(delta, stats, _ranges, _templates)| (delta, stats))
 }
 
 /// [`build_scene_stats_with_vendor`] plus per-entity ownership of the emitted
@@ -225,11 +242,8 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     space: SpaceSelection,
     vendor: Option<&VendorRepresentationStore>,
     display: DisplaySettings,
-) -> CadResult<(
-    SceneDelta,
-    SceneAssemblyStats,
-    BTreeMap<EntityId, Range<usize>>,
-)> {
+    instancing: bool,
+) -> CadResult<IndexedScene> {
     let registry = ProviderRegistry::with_default_provider();
     let mut context = display.apply(
         RepresentationContext::new(stamp.document, TolerancePolicy::default(), stamp.clone())
@@ -250,9 +264,33 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     };
     let mut stats = SceneAssemblyStats::default();
     let mut entity_batches: BTreeMap<EntityId, Range<usize>> = BTreeMap::new();
+    let mut block_instancing =
+        (instancing && vendor.is_none()).then(super::instancing::BlockInstanceBuilder::new);
+    let mut template_map: HashMap<usize, Arc<RenderBatch>> = HashMap::new();
     match space {
         SpaceSelection::Model => {
             for entity in crate::layers::visible_model_entities(database, overrides) {
+                if let Some(builder) = block_instancing.as_mut() {
+                    if let Some(placement) =
+                        builder.try_place(database, entity, &registry, &context, stamp.clone())?
+                    {
+                        let start = combined.added.len();
+                        for batch in placement.batches {
+                            combined.added.push(batch);
+                        }
+                        for (offset, template) in placement.templates {
+                            template_map.insert(start + offset, template);
+                        }
+                        let emitted = combined.added.len() - start;
+                        stats.batches_out += emitted;
+                        stats.instanced_placements += 1;
+                        stats.instanced_batches += emitted;
+                        if emitted > 0 {
+                            entity_batches.insert(entity.id, start..combined.added.len());
+                        }
+                        continue;
+                    }
+                }
                 let representation = model_entity_representation(
                     database,
                     entity,
@@ -291,7 +329,22 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
         }
     }
     tally_adjacent_merge_candidates(&combined.added, &mut stats);
-    Ok((combined, stats, entity_batches))
+    if let Some(builder) = block_instancing {
+        let rejected = builder.take_rejections();
+        stats.instancing_fallbacks += rejected.values().sum::<usize>();
+        if instancing {
+            eprintln!(
+                "[cad] block-instancing placements={} batches={} fallbacks={rejected:?}",
+                stats.instanced_placements, stats.instanced_batches
+            );
+        }
+    }
+    Ok((
+        combined,
+        stats,
+        entity_batches,
+        TemplateTable::from_map(template_map),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
