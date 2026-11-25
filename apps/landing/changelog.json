@@ -2,6 +2,111 @@
   "generatedFrom": "docs/release-notes",
   "releases": [
     {
+      "version": "v0.1.19",
+      "title": "yacr v0.1.19",
+      "date": "2026-11-25",
+      "url": "https://github.com/zenglanmu/yacr/releases/tag/v0.1.19",
+      "sections": [
+        {
+          "heading": "应用域 / Application domains",
+          "items": [
+            "四套工作界面，同一棵 React 树。 文档新增属性 application_domain（cad2d | bim | concept | mechanical），由导入来源推导：DWG/DXF/DGN → 二维绘图，IFC/RVT → BIM，SKP → 概念建模，STEP → 机械设计；未知来源不声明域，保持在 cad2d。域写入 document.json，切换只改文档头（一个 revision），不转换任何数据。",
+            "四个域都已接线，不再是占位卡：",
+            "cad2d：AutoCAD 参考的制图功能区（文件/常用/插入/注释/参数化/视图/管理/输出/附加模块）与命令行，现有完整界面。",
+            "bim：Revit 参考的 9 个选项卡与左侧托盘（属性/项目浏览器/可见性/BIM 浏览/明细表/操作提示），无命令行；BIM 视图面板的 6 个预设走 typed cad_set_view。",
+            "concept：SketchUp 参考的菜单栏、左侧工具集与右侧默认托盘；Space 选择、官方单键表、状态栏 Measurements 使用宿主真实工具参数，不伪造输入框。",
+            "mechanical：SolidWorks 参考的固定初步子集功能区与左侧 FeatureManager / PropertyManager / ConfigurationManager；无命令行，数值入口是状态栏工具参数。",
+            "切换入口：DOMAIN 命令（裸命令打开切换器，DOMAIN 有文档时写文档、无文档只预览）与每个 profile 文件菜单/文件页里的“应用域”行共用同一个切换器。未知 token 以 domain.unknown 具名拒绝；旧/未知宿主 token 回退到最成熟的 cad2d 并在画面上方显示原始 token，文档域值与数据不变。",
+            "按域主题： 选择界面 token；渲染器画布背景仍由 theme（dark/light）决定。每域主题持久化（ui.theme.）尚未实现。",
+            "结构转录，不是仿制：参考软件的选项卡/菜单/工具组顺序按官方手册整理为契约 fixture，图标与文案全部自有；没有内核的工具是带稳定理由的 disabled/pending 行，不摆可点假按钮。插件可通过 @yacr/plugin-api 的 api.ui.register 向菜单/工具组/托盘做声明式扩展（client-local；不注入 JSX/HTML）。"
+          ]
+        },
+        {
+          "heading": "概念建模与机械设计 / Concept modelling and mechanical",
+          "items": [
+            "EXTRUDE 把有界闭合平面轮廓拉成新的精确实体：LINE 单一闭环、全直线段闭合 LWPOLYLINE 或整圆，方向 +Z/-Z，距离来自 Measurements；轮廓原位保留、一条事务、一步撤销。含圆弧壁的轮廓、挖孔/多环、拔模与任意三维平面按具名原因拒绝。",
+            "PRESSPULL 移动已有精确实体的一个面（带符号距离），走同一模型器 seam 与撤销路径；把二维轮廓拉成实体仍请用 EXTRUDE。FOLLOWME、多面/连续推拉、拖拽驱动幅度仍未实现。",
+            "尺寸输入接线到真实工具参数：LINE 长度/角度、RECTANG 宽/高、CIRCLE 半径、ROTATE 角度、MOVE 距离、SCALE 比例、OFFSET 距离、EXTRUDE/PRESSPULL 距离；0 表示未设置。",
+            "mechanical 的 FeatureManager 设计树走只读 host read cad_mechanical_tree：按 tables/features.json 顺序投影特征（schema_only，尚无求值器）与 Body3d 实体行（ready/unavailable），1024 行截断并如实返回 total/truncated。它不评估特征、不重算网格；无该 seam 的载体按 unsupported-runtime: mechanicalTree 拒绝。",
+            "仍未实现：特征求值/几何传播、旋转/扫描/放样/抽壳/孔、草图约束与智能尺寸、装配体配合、工程图视图、材质与外观、BIM 构件内核/视图与图纸树/族编辑器；这些在 UI 中保持 pending，在命令层按名拒绝。"
+          ]
+        },
+        {
+          "heading": "BIM / Revit-style workspace",
+          "items": [
+            "Revit 式域 ribbon 与左侧托盘按阶段 4 落地：文件页（新建/打开/保存/导出/出图/关闭）、建筑/ 结构/插入/注释/分析/体量和场地/协作/视图/管理；托盘可整列隐藏，侧别按域（BIM 左、概念右）。",
+            "cad_set_view 是 typed 通道：绝对 eye/target/up/projection/mode，或宿主按活动空间拟合的 overview/plan/front/back/left/right。真实变化记一步 ZOOM PREVIOUS，空活动空间按 view.set.empty 拒绝；dom-canvas 的 3D 预设仍按 host profile 声明禁用。",
+            "BIM 查询仍是单一 cad_bim_query（分页行 + facet summary 一次返回）；属性面板与 BIM 浏览使用既有数据，不新增第二套查询通路。"
+          ]
+        },
+        {
+          "heading": "渲染与内存 / Rendering and memory",
+          "items": [
+            "修复撤回 v0.1.18 的性能/内存问题：fixtures/complex-test.dwg（约 72.5 万展开图元）在本机 Linux/Wayland + P620 上，稳态树 RSS 从约 3.22 GB 降到 1.55 GB，峰值约 4.07 GB 降到 2.45 GB，GPU 约 1.07 GB；全量上传后释放 CPU 场景副本（元数据保留、可按需重建），暂存上传每 tick 提交回收，不再积压整份场景。",
+            "默认使用 universal GPU storage（不再默认复制一份 “pulled” 顶点组织），显存预算默认 80%（10–80 可调，为合成器/WebView 留余量）；持久化的 81–100 设置启动时下调到 80 并给出诊断，运行期越界写入仍拒绝而不是静默夹取。",
+            "既有显示能力沿用 v0.1.17 基线：等轴测默认、FIT 居中、PBR 贴图/IBL/MSAA、表面边界线框、无头 render 的真实 3D 相机预设。",
+            "证据边界：内存数字来自本机 Linux/Wayland + 真实 GPU 的一次有界运行（complex-test.dwg），Windows/macOS/Android/Web 的 RSS 回收与真实 device-loss 恢复 NOT VERIFIED；不是普遍性能承诺或 GPU 验收。"
+          ]
+        },
+        {
+          "heading": "命令覆盖 / Command coverage",
+          "items": [
+            "完整实现 289 条、部分实现 690 条（已实现合计仍 979/981）；其余 2 条（MEASURE / TRACE）按同名不同义不计入。未支持选项继续按名拒绝。交互提示、系统剪贴板、多文档、绘图仪/CTB/STB 与三维装配属于全局范围，不算单命令缺口。"
+          ]
+        },
+        {
+          "heading": "块属性与参照编辑 / Block attributes and reference editing",
+          "items": [
+            "ATTDEF 是块成员实体，属性值存 INSERT 行内，随文档保存并与 DXF/DWG 往返；ATTEDIT/ATTIPEDIT/GATTE/EATTEDIT/ATTSYNC/ATTREDEF/BATTORDER/ATTDISP 可改值、排序与显隐，插入值按 ATTDISP 真正绘制。",
+            "REFEDIT/-REFEDIT/REFSET/REFCLOSE 在原图内编辑参照与块成员并写回。"
+          ]
+        },
+        {
+          "heading": "编组、命名视图与动作录制 / Groups, named views and action recorder",
+          "items": [
+            "GROUP/-GROUP/UNGROUP/GROUPEDIT 迁入文档表 tables/groups.json（.ymodel minor 17），按 AcDbGroup 在 DXF/DWG 往返；带空格名称用引号寻址。",
+            "VIEW/-VIEW/VIEWGO/NEWVIEW 迁入 tables/views.json（minor 18），NEWVIEW 支持名称与 WINDOW 矩形取景，DXF/DWG 的 VIEW 表可读写；连续 pan/orbit 记入导航历史，VIEWBACK/VIEWFORWARD 仍为部分实现。",
+            "动作录制器可用：ACTRECORD/ACTSTOP/ACTUSERINPUT/ACTUSERMESSAGE/-ACTUSERMESSAGE/ ACTMANAGER 录制可回放的宏（版本化 JSON，ADR-0056），Manage 面板直接驱动会话命令。"
+          ]
+        },
+        {
+          "heading": "图层、视口与二维编辑 / Layers, viewports and 2D editing",
+          "items": [
+            "LAYLCK/LAYULK/LAYFRZ 接受图纸空间与块拾取，LAYFRZ 写 Vpfreeze；LAYCUR/LAYMCH/-LAYMCH/LAYMCUR 扩到图纸布局与顶层 INSERT；LAYERPMODE 存进文档头，LAYERP/LAYWALK 的快照恢复与通配过滤补齐。",
+            "VPMAX/VPMIN、VPORTS 标准视口配置与 VPSYNC 主视口同步可用；LAYERSTATE/ LAYERSTATESAVE 仍是会话内快照（没有 DWG 命名层状态表与对话框）。",
+            "新增/补齐 CHPROP、BREAKATPOINT/FLATTEN、TEXTALIGN、TCIRCLE、DONUT、HATCHGENERATEBOUNDARY、ADDSELECTED、GETSEL、MEASUREGEOM VOLUME、CENTERMARK/CENTERLINE、HATCH/-HATCH（含 .pat 文件）、HATCHEDIT、IMAGEATTACH、MIRROR（MIRRTEXT）、EXPLODE（EXPLMODE）、XPLODE、CDORDER、BTRIM/BEXTEND、DIMROTATED、DIMREASSOC。",
+            "FINDINCLUDE/FINDMATCH、MULTIPLE、TFRAMES、TEXTSCR/GRAPHSCR、TRAYSETTINGS 与 -PURGE 成为真实会话开关；报告类 BCOUNT、DBLIST、JULIAN、ALIASEDIT、PAGESETUP/-PAGESETUP 补齐写读。"
+          ]
+        },
+        {
+          "heading": "单位、时间与文档信息 / Units, time and document info",
+          "items": [
+            "UNITS/-UNITS 的存储格式（长度/角度格式、精度、基准角、旋向）驱动状态栏坐标、命令回显/ 日志与测量诊断的排版；$INSUNITS 插入缩放与 UNITS 对话框仍属全局范围。",
+            "SAVE 的 .ymodel 写入创建/最后更新时间并在打开时读回；TIME/EDITTIME 报告真实存储值（耗时、计时器与活跃编辑时长仍 NOT TRACKED）。",
+            "DWGPROPS 写入真实文档摘要与自定义属性；SYSVDLG 支持 SAVE|RESTORE（版本化 yacr.sysvar）；ACADINFO 报告真实目标 OS/架构、单位/精度与应用域。"
+          ]
+        },
+        {
+          "heading": "保存、导出与载体 / Saving, exporting and carriers",
+          "items": [
+            "SAVE 在 Linux/Windows/macOS/Android 上恒写 .ymodel（原子替换，上一版留在 .bak；Android 仅在 provider 支持时建备份，否则提示 save.no_backup），其它格式走 EXPORT。",
+            "Web/dom-canvas 现在有真实 .ymodel 归档：SAVE 在 wasm 会话内编码并发起浏览器下载（download:///，每次保存是新下载，不原地覆盖、无 .bak/恢复快照）；没有归档时仍按名拒绝。",
+            "macOS 接收 RunEvent::Opened：在 Finder 双击/“打开方式”启动后把文件排入有界队列，经与 --open 相同的打开漏斗加载，不再停在欢迎页。macOS 真机双击仍 NOT VERIFIED。",
+            "Android 文件关联产物与源码一致（28 mimeType / 48 pathPattern，含 .rvt），本轮重建 debug APK 用 aapt2 核对；设备上“打开方式”仍未验收。",
+            "天正/探索者代理（ADR-0030 P0）：墙/洞/文字/块插入的语义写入 tables/vendor.json（minor 12），重开由 YANS 重算；openProgress/documentReady 门禁在 SAVE/EXPORT/PLOT 前生效。P1 其余类语义与 copy hook 仍未实现。"
+          ]
+        },
+        {
+          "heading": "兼容性 / Compatibility",
+          "items": [
+            "v0.1.16 及更早保存的 .ymodel 打不开：条目改为 zstd 帧后 format.read 必须等于 2，旧归档按 ymodel.unsupported_version 拒绝；请重新导入源文件。",
+            ".ymodel 按文档内容取最小档位：应用域 13、块属性 14、Text.mirrored 15、二维约束 16（实现后才会写出）、编组 17、命名视图 18；没有这些内容的文档仍写到更低的 4/5/7/8/9/10/11/12。v0.1.17 及更早读不了含 minor 14+ 新表/新字段的归档，按 ymodel.unsupported_minor 拒绝。",
+            "二维约束求解器（ADR-0054）只接受了有界设计，P0 尚未实现；约束命令仍按名拒绝，不算本版能力。"
+          ]
+        }
+      ]
+    },
+    {
       "version": "v0.1.17",
       "title": "yacr v0.1.17",
       "date": "2026-11-23",

@@ -17,7 +17,9 @@
       handles DWG/DXF documents, geometry and rendering; React + Tauri provides
       the desktop UI. It opens local DWG/DXF drawings and shows model space and
       supported layouts, and it draws and edits 2D geometry through the same
-      database transaction and undo path. Linux/Wayland is the primary development target with
+      database transaction and undo path. A document-level application domain
+      (2D drafting, BIM, concept modelling or mechanical) selects the interface
+      chrome while the same Rust core keeps the document. Linux/Wayland is the primary development target with
       the strongest support; the Android APK has been sideloaded by the
       maintainer, and the Windows/macOS hosts are real but their runtime
       acceptance is still pending.
@@ -25,7 +27,8 @@
     <p xml:lang="zh-CN">
       Yacr 是一个跨平台开源 CAD 项目：共享的 Rust 核心负责 DWG/DXF 文档、几何与渲染，
       React + Tauri 提供桌面界面。它可打开本地 DWG/DXF 图纸，查看模型空间与受支持的布局，
-      并可通过同一数据库写事务与撤销历史绘制、编辑 2D 几何。
+      并可通过同一数据库写事务与撤销历史绘制、编辑 2D 几何。文档级的应用域（二维绘图、
+      建筑信息模型、概念建模或机械设计）决定界面表现，文档数据仍由同一个 Rust 核心持有。
       Linux/Wayland 是主开发目标，支持最完整；Android APK 已由维护者侧载运行；Windows/macOS 是真实宿主，运行时验收仍待补。
     </p>
   </description>
