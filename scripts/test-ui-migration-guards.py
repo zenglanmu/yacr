@@ -89,6 +89,11 @@ ARCH_MEMBERS: dict[str, str] = {
         '[dependencies]\ncad-domain = { path = "../cad-domain" }\n'
         'cad-kernel-adapter = { path = "../cad-kernel-adapter" }\n'
     ),
+    "crates/cad-kernel-manifold": (
+        '[package]\nname = "cad-kernel-manifold"\nversion = "0.1.0"\n\n'
+        '[dependencies]\ncad-domain = { path = "../cad-domain" }\n'
+        'cad-kernel-adapter = { path = "../cad-kernel-adapter" }\n'
+    ),
     "crates/cad-store-zip": (
         '[package]\nname = "cad-store-zip"\nversion = "0.1.0"\n\n'
         '[dependencies]\ncad-db = { path = "../cad-db" }\n'
