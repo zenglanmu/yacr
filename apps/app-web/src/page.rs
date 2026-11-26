@@ -5,7 +5,8 @@
 //! them:
 //!
 //! ```text
-//! start(canvas_id, css_w, css_h, dpr)                    -> JSON status (async)
+//! start(canvas_id, css_w, css_h, dpr)                    -> JSON status (async, smoke fixture)
+//! start_empty(canvas_id, css_w, css_h, dpr)              -> JSON status (async, start page)
 //! open_bytes(canvas_id, label, css_w, css_h, dpr, bytes) -> JSON status (async)
 //! frame()                                                -> JSON frame line
 //! resize(css_w, css_h, dpr)                              -> JSON status
@@ -402,6 +403,26 @@ pub(crate) async fn start_impl(
     }
 }
 
+/// Start the session with **no document** (the production page carrier's start
+/// page). The first `open_bytes` replaces that empty document in place.
+pub(crate) async fn start_empty_impl(
+    canvas_id: &str,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+) -> Result<String, JsValue> {
+    begin_start()?;
+    match start_empty_session(canvas_id, css_w, css_h, dpr).await {
+        Ok(page) => {
+            let status = page_with_status(&page);
+            install_live(page);
+            crate::events::flush_live();
+            Ok(status)
+        }
+        Err(failure) => Err(fail_start(failure)),
+    }
+}
+
 pub(crate) async fn open_bytes_impl(
     canvas_id: &str,
     label: &str,
@@ -475,12 +496,41 @@ async fn start_session(
 ) -> Result<PageSession, Failure> {
     let metrics =
         Metrics::new(css_w, css_h, dpr).map_err(|message| Failure::new(STEP_VIEWPORT, message))?;
+    let (presenter, render) = presenter_for(canvas_id, metrics).await?;
+    let live = Live::install(render, browser_clock(), label, bytes, metrics, &heap_gauge)?;
+    let mut page = PageSession { live, presenter };
+    settle_first_frame(&mut page);
+    Ok(page)
+}
+
+/// The start-page session: the same carrier, no document to deliver.
+async fn start_empty_session(
+    canvas_id: &str,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+) -> Result<PageSession, Failure> {
+    let metrics =
+        Metrics::new(css_w, css_h, dpr).map_err(|message| Failure::new(STEP_VIEWPORT, message))?;
+    let (presenter, render) = presenter_for(canvas_id, metrics).await?;
+    let live = Live::install_empty(render, browser_clock(), metrics, &heap_gauge)?;
+    let mut page = PageSession { live, presenter };
+    settle_first_frame(&mut page);
+    Ok(page)
+}
+
+/// The real WebGL2 capability check and the render session attached to it.
+///
+/// Both session entries (`start`/`start_empty` and a first `open_bytes`) go through
+/// this one function, so a missing canvas or a refused WebGL2 context always emits
+/// the same stable `webgl2` marker instead of showing a blank canvas (ADR 0024 D5).
+async fn presenter_for(
+    canvas_id: &str,
+    metrics: Metrics,
+) -> Result<(CanvasPresenter, RenderSessionHandle), Failure> {
     let physical = metrics
         .physical()
         .map_err(|message| Failure::new(STEP_VIEWPORT, message))?;
-    // The real WebGL2 capability check (instance → surface → adapter → device →
-    // configure), not a feature sniff: a host that fails here must emit the `webgl2`
-    // marker instead of showing a blank canvas (ADR 0024 D5).
     let canvas = canvas_element(canvas_id)?;
     let presenter = CanvasPresenter::create(canvas, physical)
         .await
@@ -494,11 +544,7 @@ async fn start_session(
     render
         .attach_device(device, queue)
         .map_err(|error| Failure::new(STEP_DEVICE, error))?;
-
-    let live = Live::install(render, browser_clock(), label, bytes, metrics, &heap_gauge)?;
-    let mut page = PageSession { live, presenter };
-    settle_first_frame(&mut page);
-    Ok(page)
+    Ok((presenter, render))
 }
 
 /// The status object of a page session (canvas facts + the session's own).
@@ -518,12 +564,18 @@ pub(crate) fn event_snapshot() -> Option<(CadStatus, Option<String>)> {
         // live stage and terminal summary exactly like the native shell does
         // (ADR-0030 D9).
         crate::vendor::overlay_open(&mut status);
-        let canvas = serde_json::to_string(&shell::CanvasSession {
-            label: page.live.label.clone(),
-            batches: page.live.batches(),
-            draws: None,
-        })
-        .ok();
+        // No document → no descriptor: the chrome keys its start page on the
+        // absence of the identity, exactly like `shell_status_json`.
+        let canvas = if page.live.label.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&shell::CanvasSession {
+                label: page.live.label.clone(),
+                batches: page.live.batches(),
+                draws: None,
+            })
+            .ok()
+        };
         (status, canvas)
     })
 }

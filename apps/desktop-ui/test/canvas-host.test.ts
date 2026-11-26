@@ -76,14 +76,23 @@ function stubElement(box = { left: 40, top: 10, width: 320, height: 200 }) {
 }
 
 /** A wasm-session stub whose every export records its arguments. */
-function stubModule({ start = async () => OK_STATUS, resize = () => OK_STATUS, frame = () => '{"ok":true,"presented":false}' } = {}) {
+function stubModule({
+  start = async () => OK_STATUS,
+  startEmpty = null,
+  resize = () => OK_STATUS,
+  frame = () => '{"ok":true,"presented":false}',
+} = {}) {
   const calls = [];
-  return {
+  const module = {
     calls,
     start: (...args) => { calls.push(['start', ...args]); return start(); },
     resize: (...args) => { calls.push(['resize', ...args]); return resize(); },
     frame: (...args) => { calls.push(['frame', ...args]); return frame(); },
   };
+  if (startEmpty) {
+    module.start_empty = (...args) => { calls.push(['start_empty', ...args]); return startEmpty(); };
+  }
+  return module;
 }
 
 // --- no camera here --------------------------------------------------------
@@ -205,6 +214,29 @@ test('the transport starts once and resizes only on a real size change', async (
     ['resize', 640, 480, 2],
     ['resize', 640, 480, 1],
   ]);
+});
+
+test('the production page prefers start_empty and never auto-opens the fixture', async () => {
+  const module = stubModule({ startEmpty: async () => OK_STATUS });
+  const transport = createCanvasTransport({
+    module,
+    rect: { x: 0, y: 0, width: 320, height: 200, dpr: 2 },
+  });
+  await transport.whenIdle();
+  // The current bundle has `start_empty`: the React carrier asks for the start
+  // page, not the standalone harness's compiled-in DWG.
+
+  assert.deepEqual(module.calls, [['start_empty', 'cad-canvas', 320, 200, 2]]);
+});
+
+test('an older module without start_empty keeps its historic start', async () => {
+  const module = stubModule();
+  const transport = createCanvasTransport({
+    module,
+    rect: { x: 0, y: 0, width: 320, height: 200, dpr: 2 },
+  });
+  await transport.whenIdle();
+  assert.deepEqual(module.calls, [['start', 'cad-canvas', 320, 200, 2]]);
 });
 
 test('a degenerate rect makes no call at all', async () => {

@@ -83,8 +83,10 @@ fn the_status_is_the_frozen_wire_shape_plus_the_host_profile() {
             "surfaceMode": SURFACE_MODE_DOM_CANVAS,
             "documentOwner": "wasm",
             "palettesAvailable": true,
-            "standardViews": [],
-            "orbit": false,
+            "standardViews": [
+                "top", "bottom", "front", "back", "left", "right", "isometric"
+            ],
+            "orbit": true,
         }),
         "{wire}"
     );
@@ -183,8 +185,10 @@ fn no_session_reports_nothing_invented() {
             "surfaceMode": SURFACE_MODE_DOM_CANVAS,
             "documentOwner": "wasm",
             "palettesAvailable": true,
-            "standardViews": [],
-            "orbit": false,
+            "standardViews": [
+                "top", "bottom", "front", "back", "left", "right", "isometric"
+            ],
+            "orbit": true,
         })
     );
 }

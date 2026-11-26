@@ -132,6 +132,15 @@ export const CANVAS_EXPORTS = ['start', 'resize', 'frame'];
 export interface CanvasModule {
   readonly ready?: unknown;
   start(canvasId: string, width: number, height: number, dpr: number): unknown;
+  /**
+   * Start with **no document** (the production page carrier's start page).
+   *
+   * Optional for an older artifact: [`createCanvasTransport`] falls back to
+   * `start` when it is absent. The current bundle always serves it, so the React
+   * chrome does not auto-open the synthetic fixture that `start` keeps for the
+   * standalone smoke harness.
+   */
+  start_empty?(canvasId: string, width: number, height: number, dpr: number): unknown;
   resize(width: number, height: number, dpr: number): unknown;
   frame(): unknown;
 }
@@ -436,8 +445,8 @@ export function createCanvasTransport({
   onFailure = () => {},
   canvasId = CANVAS_ID,
 }: CanvasTransportOptions = {}): CanvasTransport {
-  if (!module || typeof module.start !== 'function') {
-    throw new TypeError('createCanvasTransport: module.start is required');
+  if (!module || (typeof module.start !== 'function' && typeof module.start_empty !== 'function')) {
+    throw new TypeError('createCanvasTransport: module.start or module.start_empty is required');
   }
   let chain: Promise<void> = Promise.resolve();
   let disposed = false;
@@ -489,7 +498,13 @@ export function createCanvasTransport({
     if (!started) {
       started = true;
       lastSize = sizeKey(size);
-      call('start', () => module.start(canvasId, size.width, size.height, size.dpr));
+      // The production page starts with **no document** (the start panel): the
+      // current bundle serves `start_empty`. An older artifact that only has
+      // `start` keeps its historic fixture-document start, never a blank canvas.
+      const begin = typeof module.start_empty === 'function'
+        ? () => module.start_empty!(canvasId, size.width, size.height, size.dpr)
+        : () => module.start(canvasId, size.width, size.height, size.dpr);
+      call('start', begin);
       return true;
     }
     const key = sizeKey(size);

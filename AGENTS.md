@@ -271,8 +271,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   `DOMAIN` 是 **chrome-local**：裸命令开切换器、`DOMAIN <id>` 写文档或预览（无 router 命令）；
   `cad2d` 的参考面板只接线已实现命令（视口/坐标/内容/注释缩放），无实现的参考面板保持 `pending`。
   BIM 视图用 typed `cad_set_view`（绝对 eye/target/up/projection 或宿主按活动空间拟合的
-  `overview`/`plan`/四立面），BIM“视图”面板的 6 个预设走它；`dom-canvas` 的 3D 预设按
-  `hostProfile.orbit=false` 禁用，`plan`（2D）仍可用。插件 API 不暴露相机。
+  `overview`/`plan`/四立面），BIM“视图”面板的 6 个预设走它；`dom-canvas` 现在声明
+  `hostProfile.orbit=true`（`cad_set_view`/`cad_standard_view`/`cad_orbit` 由 wasm 会话执行），
+  3D 预设与 `plan`（2D）都可用；运行时视觉证据仍 NOT VERIFIED。插件 API 不暴露相机。
 - 移动端不是第二套 UI：同一 React 树，只按宽度切换。单源是
   `src/layout/layout-mode.ts` 的 `MOBILE_MAX_WIDTH = 1024`（含端点）。
 - 三份产物**不得互相覆盖**：桌面 `apps/desktop-ui/dist`、Web `apps/app-web/dist-ui`、

@@ -108,6 +108,48 @@ fn click(live: &mut Live, at: [f64; 2]) {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn the_start_page_session_holds_no_document_and_publishes_no_identity() {
+    let live = Live::install_empty(
+        RenderSessionHandle::new(BackendPreference::WebGl2),
+        monotonic_clock(),
+        metrics(),
+        &small_heap,
+    )
+    .expect("the start-page session builds without a document");
+
+    let status = live.cad_status(&facts());
+    assert_eq!(status.document_label, None, "no document was opened");
+    assert_eq!(status.entity_count, None, "nothing was imported");
+    assert!(!status.can_fit, "an empty session has nothing to fit");
+    assert!(status.can_new, "NEW is the way out of the start page");
+
+    let mut live = live;
+    live.tick()
+        .expect("the owner tick runs with no document (the start page)");
+
+    // The wire omits `canvasSession`: the chrome keys the start panel on the
+    // absence of a drawing identity, not on an empty label.
+    let wire: serde_json::Value =
+        serde_json::from_str(&live.shell_status_json(&facts())).expect("valid JSON");
+    assert_eq!(wire["documentLabel"], serde_json::json!(null));
+    assert!(wire.get("canvasSession").is_none(), "{wire}");
+    assert_eq!(wire["hostProfile"]["orbit"], serde_json::json!(true));
+
+    // The first open is the ordinary in-place replacement.
+    live.replace_document(SYNTHETIC_LABEL, SYNTHETIC, &small_heap)
+        .expect("the first open installs a document");
+    let opened = live.cad_status(&facts());
+    assert_eq!(opened.document_label.as_deref(), Some(SYNTHETIC_LABEL));
+    assert_eq!(opened.entity_count, Some(4));
+    let wire: serde_json::Value =
+        serde_json::from_str(&live.shell_status_json(&facts())).expect("valid JSON");
+    assert_eq!(
+        wire["canvasSession"]["label"],
+        serde_json::json!(SYNTHETIC_LABEL)
+    );
+}
+
+#[test]
 fn the_production_session_holds_the_fixture_and_reports_its_own_facts() {
     let live = live();
     let status = live.cad_status(&facts());

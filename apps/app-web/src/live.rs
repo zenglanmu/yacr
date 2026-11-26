@@ -380,6 +380,59 @@ impl Live {
         })
     }
 
+    /// Build the session with **no document** (the page carrier's start page).
+    ///
+    /// The real desktop session is still the only owner: the canvas, the pointer
+    /// seam, the command router and the carrier archive are installed exactly as
+    /// in [`Live::install`], but no bytes are delivered. `shell_status_json`
+    /// omits `canvasSession` and the chrome shows its start panel; the
+    /// first `open_bytes` is an ordinary document replacement, not a rebuild.
+    pub fn install_empty(
+        render: RenderSessionHandle,
+        clock: RequestClock,
+        metrics: Metrics,
+        heap: &dyn Fn() -> Option<f64>,
+    ) -> Result<Self, Failure> {
+        budget::check_heap_after_build("start page", heap()).map_err(Failure::from_refusal)?;
+
+        let platform = BrowserPlatform::new();
+        platform.surface().report(metrics.css, metrics.dpr);
+        let started = clock();
+        let session = CadSession::from_empty(
+            options(metrics),
+            platform.host_platform(BROWSER_CAPABILITIES),
+            render,
+            Rc::clone(&clock),
+            Some(crate::ymodel_archive::ZipArchive::new()),
+        )
+        .map_err(|error| Failure::new(STEP_STATE, error.to_string()))?;
+        let import_ms = (clock() - started).max(0.0);
+        session
+            .set_canvas_metrics(metrics.css, metrics.dpr)
+            .map_err(|message| Failure::new(STEP_VIEWPORT, message))?;
+        let measured = heap();
+        Ok(Self {
+            session,
+            platform,
+            // No document: the descriptor is not published (see
+            // `shell_status_json`), and `documentLabel` stays the session's own
+            // `None`.
+            label: String::new(),
+            bytes: 0,
+            metrics,
+            import_ms,
+            heap_after_open: measured,
+            over_budget: over_budget("start page", measured),
+            ticks: 0,
+            frames: 0,
+            waited: 0,
+            last_error: None,
+            clock,
+            popups: PopupSlot::default(),
+            input: input::InputState::default(),
+        })
+    }
+
     /// Replace the open document with `bytes`, in place.
     ///
     /// This is the second open of the one session
@@ -513,8 +566,12 @@ impl Live {
     /// The whole `cad_status` wire object (`shell_status`).
     pub fn shell_status_json(&self, present: &PresenterFacts) -> String {
         let status = self.cad_status(present);
+        // The descriptor names an open drawing. A live start-page session has
+        // none, and must not be published as `{"label": ""}`: the chrome keys the
+        // start panel on its absence, exactly like a host that never opened a
+        // file.
         let carrier = crate::shell::Carrier {
-            canvas_session: Some(crate::shell::CanvasSession {
+            canvas_session: (!self.label.is_empty()).then(|| crate::shell::CanvasSession {
                 label: self.label.clone(),
                 batches: self.batches(),
                 draws: None,

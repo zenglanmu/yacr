@@ -59,8 +59,10 @@ const ZOOM_IN_FACTOR = 1.25;
  * `setInputFiles` never resolves relative paths).
  *
  * `fixtures/dwg/synthetic-four-lines.dwg` is the only DWG in the repository
- * (20 755 bytes, four LINE entities) and the same synthetic fixture the wasm
- * `start` loads. That is deliberate: the case then proves the *command* path
+ * (20 755 bytes, four LINE entities). The production page now starts on its
+ * start panel with no document, so this case opens that fixture once through the
+ * real picker before the command assertions. That is deliberate: the case then
+ * proves the *command* path
  * (picker → bytes → `open_bytes` → replaced document) without depending on an
  * external sample, and `importCount` is what distinguishes the re-open of the same
  * bytes from no open at all.
@@ -658,6 +660,15 @@ async function runCommandCase(browser, options, helpers) {
       'the session advertises the camera selectors and the drawing commands',
       Array.isArray(commands) ? { count: commands.length, sample: commands.slice(0, 6) } : commands,
     );
+    // The production page starts on its start panel (no document). The command
+    // cases need a drawing, so open the authorized fixture through the real picker
+    // once. The OPEN case below opens it again and still proves `importCount` grows.
+    const setupChooserPromise = page.waitForEvent('filechooser', { timeout: options.timeout });
+    await typeCommand(page, options, 'OPEN');
+    const setupChooser = await setupChooserPromise;
+    await setupChooser.setFiles(OPEN_DWG);
+    await waitForLabel(page, OPEN_DWG_LABEL, options.timeout);
+
     const before = await readShellStatus(page);
     record(
       checks,

@@ -19,17 +19,18 @@
 //! }
 //! ```
 //!
-//! `standardViews: null` means **not declared** (today's `native-below`
-//! behaviour: every standard view is allowed); an empty array means **declared,
-//! none available** (today's `dom-canvas` behaviour: the seven view buttons are
-//! refused with their own reason). That distinction preserves the current
-//! semantics instead of turning "undeclared" into "none".
+//! `standardViews: null` means **not declared** (the `native-below` answer: every
+//! standard view is allowed); an array is authoritative, so an empty array means
+//! **declared, none available** and the listed keys are the only views accepted.
+//! `dom-canvas` lists the seven real keys because its wasm `CadSession` executes
+//! `cad_standard_view` through the same funnel as the native hosts.
 //!
 //! `orbit` follows the same three-state shape. `null` = **not declared** (the
 //! `native-below` answer, historic allow: the ViewCube's `cad_orbit` is admitted);
-//! `false` = **declared unavailable** (the `dom-canvas` 2D-only wasm session, which
-//! refuses `cad_orbit` by name). It is a `bool` rather than a list because an orbit
-//! has no named variants: either the carrier can rotate the 3D camera or it cannot.
+//! `true` = **declared available** (the `dom-canvas` wasm session executes
+//! `cad_orbit` when the live view is 3D); `false` = **declared unavailable**. It is
+//! a `bool` rather than a list because an orbit has no named variants: either the
+//! carrier can rotate the 3D camera or it cannot.
 //!
 //! [`WireStatus`] is the envelope that keeps the frozen [`CadStatus`] field set
 //! and **order** intact while appending the profile (and the optional
@@ -95,16 +96,16 @@ pub struct HostProfile {
     /// The declared standard-view capability list, or `null` when undeclared.
     ///
     /// `null` keeps every view enabled (the `native-below` answer, unchanged from
-    /// the previous absence of the key); `[]` declares "none available" (the
-    /// `dom-canvas` answer, unchanged from the previous top-level empty array).
+    /// the previous absence of the key); an array is authoritative, so `[]`
+    /// declares "none available" and a list names exactly the views this carrier
+    /// executes (the `dom-canvas` answer is the seven real keys).
     pub standard_views: Option<Vec<String>>,
     /// The declared orbit capability, or `null` when undeclared.
     ///
     /// `null` means **not declared**, preserving the pre-profile semantics where an
-    /// absent key kept the orbit admitted (the `native-below` answer). `Some(false)`
-    /// declares the orbit unavailable (the `dom-canvas` answer: that wasm session is
-    /// 2D-only and refuses `cad_orbit` by name). `Some(true)` is never produced by
-    /// this repository.
+    /// absent key kept the orbit admitted (the `native-below` answer). `Some(true)`
+    /// declares the orbit available (the `dom-canvas` wasm session executes
+    /// `cad_orbit` when the live view is 3D); `Some(false)` declares it unavailable.
     pub orbit: Option<bool>,
 }
 
@@ -126,16 +127,27 @@ impl HostProfile {
     }
 
     /// The wasm session owns the pixels: the document is wasm-owned, the palettes
-    /// are served by that same session, and the standard views are **declared
-    /// empty** (the same refusal the old top-level `standardViews: []` carried).
+    /// are served by that same session, and every standard view/orbit is served
+    /// by the same real `CadSession` behind the wasm `cad_standard_view` /
+    /// `cad_orbit` funnel.
+    ///
+    /// These were declared unavailable while the wasm session was still 2D-only;
+    /// the session now executes both, so the profile lists the seven real keys
+    /// (not `None`/undeclared) and declares the orbit available. The chrome can
+    /// therefore enable the ViewCube and the standard-view entry points instead
+    /// of refusing them before the request reaches the session.
     pub fn dom_canvas() -> Self {
         Self {
             surface_mode: HostSurfaceMode::DomCanvas,
             document_owner: DocumentOwner::Wasm,
             palettes_available: true,
-            standard_views: Some(Vec::new()),
-            // The wasm session is 2D-only: the orbit is declared unavailable.
-            orbit: Some(false),
+            standard_views: Some(
+                cad_app::StandardView::ALL
+                    .iter()
+                    .map(|view| view.key().to_string())
+                    .collect(),
+            ),
+            orbit: Some(true),
         }
     }
 }
@@ -238,13 +250,26 @@ mod tests {
         assert!(canvas.palettes_available);
         assert_eq!(
             canvas.standard_views,
-            Some(Vec::new()),
-            "dom-canvas declares none, it does not leave them undeclared"
+            Some(
+                [
+                    "top",
+                    "bottom",
+                    "front",
+                    "back",
+                    "left",
+                    "right",
+                    "isometric"
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+            ),
+            "dom-canvas declares the seven views it really serves"
         );
         assert_eq!(
             canvas.orbit,
-            Some(false),
-            "dom-canvas declares the orbit unavailable, it does not leave it undeclared"
+            Some(true),
+            "dom-canvas declares the orbit available, it does not leave it undeclared"
         );
     }
 
@@ -268,8 +293,10 @@ mod tests {
                 "surfaceMode": "dom-canvas",
                 "documentOwner": "wasm",
                 "palettesAvailable": true,
-                "standardViews": [],
-                "orbit": false,
+                "standardViews": [
+                    "top", "bottom", "front", "back", "left", "right", "isometric"
+                ],
+                "orbit": true,
             })
         );
         let decoded: HostProfile =

@@ -39,19 +39,17 @@
 //! * `hostProfile` — the typed carrier description from
 //!   `cad_ui_core::session::HostProfile::dom_canvas()`:
 //!   `{"surfaceMode":"dom-canvas","documentOwner":"wasm","palettesAvailable":true,
-//!   "standardViews":[],"orbit":false}`. `surfaceMode` is what
+//!   "standardViews":["top","bottom","front","back","left","right","isometric"],
+//!   "orbit":true}`. `surfaceMode` is what
 //!   `apps/desktop-ui/src/cad/surface.ts` selects the in-DOM canvas path on;
 //!   `palettesAvailable: true` is honest because this carrier **is** the real
 //!   desktop session, so it has the layer table, the selection rows and the
 //!   settings the docked palettes read (`cad_layers`, `cad_setting*` are all
-//!   served here). `orbit: false` is the declared orbit refusal: this session is
-//!   2D-only, so the ViewCube never sends `cad_orbit` here (and the session would
-//!   refuse it by name if it did). `standardViews: []` means **declared, none available** — the
-//!   chrome disables the seven view buttons with their own reason; this list is
-//!   now **stale** (the funnel forwards `cad_standard_view` and the session's own
-//!   router would execute it), so enabling them is a separate decision that needs
-//!   its own per-key acceptance, recorded as open in
-//!   `docs/validation-web-funnel-parity-2026-10-28.md` §4;
+//!   served here). `standardViews` lists the seven keys and `orbit: true` is the
+//!   declared orbit capability: the funnel forwards `cad_standard_view`/
+//!   `cad_orbit` to the same `CadSession` the native hosts drive, so the chrome
+//!   enables those controls instead of refusing them before the request. A 2D
+//!   orbit remains the session's own real refusal until the view is 3D.
 //! * `canvasSession: {label, batches, draws}` — the session's own descriptor,
 //!   present only while a session is live. `batches` is the prepared scene's
 //!   resident batch count; `draws` is `null` because the session's engine owns the

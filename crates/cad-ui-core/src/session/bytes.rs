@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use cad_domain::{CadError, CadResult};
 use cad_engine::render::RenderSessionHandle;
-use cad_host::{HostCore, HostOptions, HostPlatform, RequestClock};
+use cad_host::{HostCore, HostOptions, HostPlatform, RequestClock, StartDocument};
 use cad_platform::{DocumentArchive, FileTarget};
 
 use super::CadSession;
@@ -137,6 +137,48 @@ impl CadSession {
         Ok(Self::wrap(core))
     }
 
+    /// Build the session with **no document** (the start page).
+    ///
+    /// This is the production carrier's first state: the page shows its start
+    /// panel and the session holds no `cad-db` document until the user opens one
+    /// through [`Self::open_bytes`]. The composition is the same as
+    /// [`Self::from_bytes`] minus the delivery step: the injected clock, startup
+    /// config, fonts/images and the carrier archive are installed exactly once, so
+    /// a later `open_bytes` is an ordinary replacement (and the archive can decode
+    /// a first `.ymodel` upload).
+    ///
+    /// `options.drawing` must be `None` and `options.document_at_start` must be
+    /// [`StartDocument::Empty`]; anything else would contradict "no document" and
+    /// is refused instead of silently winning.
+    pub fn from_empty(
+        options: HostOptions,
+        platform: HostPlatform,
+        render: RenderSessionHandle,
+        clock: RequestClock,
+        archive: Option<Arc<dyn DocumentArchive>>,
+    ) -> CadResult<Self> {
+        if options.drawing.is_some() {
+            return Err(CadError::InvalidInput(
+                "empty session: HostOptions.drawing must be None (there is no document)".into(),
+            ));
+        }
+        if options.document_at_start != StartDocument::Empty {
+            return Err(CadError::InvalidInput(
+                "empty session: HostOptions.document_at_start must be StartDocument::Empty".into(),
+            ));
+        }
+        let core = HostCore::new(options, platform, render)?;
+        core.set_request_clock(clock)?;
+        core.set_document_archive(archive);
+        let _startup_diagnostics = core.load_startup();
+        core.install_fonts()?;
+        core.install_images()?;
+        // A no-op for `StartDocument::Empty` (and no configured drawing), kept for
+        // the same startup sequence as every other session entry.
+        core.open_configured_drawing()?;
+        Ok(Self::wrap(core))
+    }
+
     /// Replace the open document with new **bytes**, in place.
     ///
     /// This is the carrier's second open: [`CadSession::from_bytes`] builds the
@@ -239,6 +281,97 @@ mod tests {
             BytesDocument::new(SYNTHETIC_LABEL, SYNTHETIC),
         )
         .expect("the synthetic fixture opens from bytes")
+    }
+
+    /// The same platform adapters, but with no document at all.
+    fn empty_session() -> CadSession {
+        let platform = cad_host::HostPlatform {
+            files: Rc::new(NoFiles),
+            config_store: Rc::new(NoConfig),
+            surface: Rc::new(FixedSurface),
+            resources: Rc::new(NoResources),
+            capabilities: HostCapabilities::default(),
+        };
+        CadSession::from_empty(
+            HostOptions {
+                fonts: Vec::new(),
+                fonts_dir: None,
+                images_dir: None,
+                headless: false,
+                drawing: None,
+                document_at_start: StartDocument::Empty,
+                size: [800.0, 600.0],
+            },
+            platform,
+            RenderSessionHandle::new(BackendPreference::WebGl2),
+            mono_clock(),
+            None,
+        )
+        .expect("an empty session builds without a document")
+    }
+
+    #[test]
+    fn an_empty_session_starts_with_no_document_and_can_still_open_bytes() {
+        let session = empty_session();
+        let status = session.snapshot(None, None, 0);
+        assert_eq!(status.document_label, None, "no document was opened");
+        assert_eq!(status.entity_count, None, "nothing was imported");
+        assert!(!status.can_fit, "an empty session has nothing to fit");
+
+        // The first open is the ordinary bytes replacement, not a second session.
+        session
+            .open_bytes(SYNTHETIC_LABEL, SYNTHETIC)
+            .expect("the first bytes open installs the document");
+        let opened = session.snapshot(None, None, 0);
+        assert_eq!(opened.document_label.as_deref(), Some(SYNTHETIC_LABEL));
+        assert_eq!(opened.entity_count, Some(4));
+    }
+
+    #[test]
+    fn an_empty_session_refuses_a_contradictory_start_state() {
+        let platform = || cad_host::HostPlatform {
+            files: Rc::new(NoFiles),
+            config_store: Rc::new(NoConfig),
+            surface: Rc::new(FixedSurface),
+            resources: Rc::new(NoResources),
+            capabilities: HostCapabilities::default(),
+        };
+        let options = |document_at_start| HostOptions {
+            fonts: Vec::new(),
+            fonts_dir: None,
+            images_dir: None,
+            headless: false,
+            drawing: None,
+            document_at_start,
+            size: [800.0, 600.0],
+        };
+        for document_at_start in [StartDocument::Blank, StartDocument::Demo] {
+            let error = match CadSession::from_empty(
+                options(document_at_start),
+                platform(),
+                RenderSessionHandle::new(BackendPreference::WebGl2),
+                mono_clock(),
+                None,
+            ) {
+                Ok(_) => panic!("a non-empty start state must be refused"),
+                Err(error) => error,
+            };
+            assert!(matches!(error, CadError::InvalidInput(_)), "{error}");
+        }
+        let error = match CadSession::from_empty(
+            HostOptions {
+                drawing: Some("drawing.dwg".into()),
+                ..options(StartDocument::Empty)
+            },
+            platform(),
+            RenderSessionHandle::new(BackendPreference::WebGl2),
+            mono_clock(),
+            None,
+        ) {
+            Ok(_) => panic!("a configured drawing must be refused"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, CadError::InvalidInput(_)), "{error}");
     }
 
     struct NoFiles;

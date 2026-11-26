@@ -1160,7 +1160,7 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   | 载体 | `cad_standard_view` | `cad_orbit` | `hostProfile.orbit` | 拒绝 |
   |---|---|---|---|---|
   | `native-below`（Wayland / Windows / macOS / Android） | 支持 | **支持**（仅 3D；2D 是宿主真实拒绝 `Orbit is only defined in the three-dimensional view`） | `null`（未声明 = 历史允许） | 非有限角：`orbit.angles_not_finite: cad_orbit needs finite yaw and pitch`；队列满：`CAD orbit queue is full`；模态：`popup.modal_open`；probe：`CAD is disabled in probe mode` |
-  | `dom-canvas`（X11/XWayland / Web） | 声明 `standardViews: []`（前端禁用七键） | **声明不可用**：`orbit: false`，adapter/front-end 按名拒绝；wasm 会话是 2D-only，若请求到达会话亦为同一真实拒绝 | `false` | 同上（会话侧真实拒绝；载体侧前端显式禁用） |
+  | `dom-canvas`（X11/XWayland / Web） | 支持（`standardViews` 列出七个真实键；前端不再预先禁用） | **支持**（仅 3D；2D 仍是会话的真实拒绝，同左） | `true`（已声明可用） | 同上（会话侧真实拒绝；不再有载体侧前端显式禁用） |
 
   **证据边界**：只有编译 + 契约测试（`cad-ui-core` 的 admission/wire/`CadSession::orbit` 测试、
   `app-web` 双 sink 等价矩阵）。轨道**手感**、方位球（ViewCube 组件）交互、真机输入、GPU/像素、性能一律
@@ -1182,8 +1182,10 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   （`0.0035 rad/逻辑像素 × orbitSensitivityPercent/100`）。**证据**：`cad-app` / `cad-host`
   契约测试 + `cargo check -p app-linux` + 前端 `npm test`/`build`
   （`docs/validation-3d-view-2026-11-22.md`）；真实 GUI/像素、真实 3D DWG 打开手感、
-  Windows/macOS/Android/Web 运行时 **NOT VERIFIED**。Web/`dom-canvas` 仍是 2D-only
-  （`hostProfile.orbit=false`、`standardViews: []`），不套用这套 3D 默认。
+  Windows/macOS/Android/Web 运行时 **NOT VERIFIED**。Web/`dom-canvas` 现在声明
+  `hostProfile.orbit=true` 与七个 `standardViews`（会话经同一漏斗执行 `cad_orbit` /
+  `cad_standard_view`），但**没有**采用 native 的“打开即 3D”默认：文档仍以 plan 视图打开，
+  3D 只由用户显式选择标准视图/拖动方位球进入。
 - **块属性 ATTRIB 的坐标系（2026-11-26 修复）**：DXF/DWG 的 `ATTRIB` 把插入点、旋转和字高写在
   引用被绘制的坐标系里，而域模型 `AttributeValue::text` 定义在块局部（与 `ATTDEF` 同帧）。导入
   用引用变换的逆映射回块局部（旋转取逆线性部分的基线方向，字高乘逆 glyph-up 向量长度；奇异变换

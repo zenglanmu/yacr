@@ -59,7 +59,8 @@
 //! # Exported API (the contract the hosts are wired against)
 //!
 //! ```text
-//! start(canvas_id, css_w, css_h, dpr)                       -> JSON status (async)
+//! start(canvas_id, css_w, css_h, dpr)                       -> JSON status (async, synthetic smoke fixture)
+//! start_empty(canvas_id, css_w, css_h, dpr)                 -> JSON status (async, start page / no document)
 //! set_font_package(catalog_json, files)                     -> JSON summary (lazy, after an open)
 //! apply_font_package()                                      -> JSON status (lazy, reinstalls on the live session)
 //! open_bytes(canvas_id, label, css_w, css_h, dpr, bytes)    -> JSON status (async)
@@ -607,6 +608,26 @@ pub async fn start(canvas_id: &str, css_w: f64, css_h: f64, dpr: f64) -> Result<
     page::start_impl(canvas_id, css_w, css_h, dpr).await
 }
 
+/// Start the wasm CAD session with **no document** (the production page carrier's
+/// start page).
+///
+/// The React chrome calls this instead of [`start`]: a page that opens with no
+/// file shows its start panel, exactly like the native carriers' `StartDocument::
+/// Empty`. The session is fully built (canvas presenter, platform adapters, the
+/// carrier archive), so the first [`open_bytes`] replaces the empty document in
+/// place rather than building a second session. [`start`] keeps the compiled-in
+/// fixture for the standalone smoke harness.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn start_empty(
+    canvas_id: &str,
+    css_w: f64,
+    css_h: f64,
+    dpr: f64,
+) -> Result<String, JsValue> {
+    page::start_empty_impl(canvas_id, css_w, css_h, dpr).await
+}
+
 /// Open **caller-supplied DWG `bytes`** as the session document and present the
 /// first frame on `canvas_id`.
 ///
@@ -761,6 +782,17 @@ pub fn probe_input(args_json: &str) -> Result<String, JsValue> {
 /// constraint, not a placeholder (see [`NOT_IMPLEMENTED`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn start(_canvas_id: &str, _css_w: f64, _css_h: f64, _dpr: f64) -> Result<String, String> {
+    Err(NOT_IMPLEMENTED.to_string())
+}
+
+/// Native builds cannot run the browser canvas host (see [`NOT_IMPLEMENTED`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn start_empty(
+    _canvas_id: &str,
+    _css_w: f64,
+    _css_h: f64,
+    _dpr: f64,
+) -> Result<String, String> {
     Err(NOT_IMPLEMENTED.to_string())
 }
 

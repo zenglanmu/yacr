@@ -571,8 +571,10 @@ mod tests {
                 "surfaceMode": "dom-canvas",
                 "documentOwner": "wasm",
                 "palettesAvailable": true,
-                "standardViews": [],
-                "orbit": false,
+                "standardViews": [
+                    "top", "bottom", "front", "back", "left", "right", "isometric"
+                ],
+                "orbit": true,
             }))
         );
         // The old top-level carrier keys are gone, not merely duplicated.
