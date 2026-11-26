@@ -11,13 +11,15 @@
 //! * face regions addressed by the persisted `Mesh.face_sources` key;
 //! * face-region move / press-pull with generated side walls;
 //! * triangle subdivision and Laplacian smoothing;
-//! * planar boundary-loop hole filling with a per-hole report (P-MESH-3).
+//! * boundary-loop hole filling with a per-hole report (P-MESH-3), including the
+//!   annulus between coplanar nested loops.
 //!
 //! What it deliberately does **not** do:
 //!
 //! * recompute normals, UVs, vertex colours, textures or PBR channels (the edit
 //!   products drop them rather than keep stale values);
-//! * fill a non-planar or self-intersecting hole (it reports the refusal);
+//! * fill a self-intersecting loop or an inconsistent nested group (it reports
+//!   the refusal);
 //! * turn a mesh into exact B-rep geometry.
 
 mod fill;

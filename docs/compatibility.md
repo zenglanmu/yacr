@@ -2034,15 +2034,15 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `SURFTRIM` | **部分实现（具名拒绝）**：`surftrim.unsupported: surface trimming is not implemented` | 不写库/不升修订/不入历史 |
 | `SURFUNTRIM` | **部分实现（具名拒绝）**：`surfuntrim.unsupported: surface untrimming is not implemented` | 不写库/不升修订/不入历史 |
 | `MESH` | **部分实现（具名拒绝）**：`mesh.unsupported: free-form mesh creation is not implemented` | 不写库/不升修订/不入历史 |
-| `MESHCAP` | **部分实现（具名拒绝）**：`meshcap.unsupported: mesh capping is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHCAP` | **实现（2026-11-26，P-MESH-3）**：对选中网格的每个简单边界环做 ear-clip 补片并逐洞报告；平面环直接补，非平面环投影到最佳拟合平面后补并标 `non_planar`；多个独立环各自补；共面嵌套环按奇偶深度成组——外环以直接内环为孔做环带（annulus），深度 2 的岛独立补，环带不覆盖孔洞；同向绕行/找不到可见桥的嵌套组与自交/退化环按名拒绝并保持开口；一条事务/一步撤销 | 不补精确 B-Rep、不重算法线/UV/材质；没有“所有开放网格都能闭合”的声明 |
 | `MESHCOLLAPSE` | **部分实现（具名拒绝）**：`meshcollapse.unsupported: mesh collapse is not implemented` | 不写库/不升修订/不入历史 |
 | `MESHCREASE` | **部分实现（具名拒绝）**：`meshcrease.unsupported: mesh creasing is not implemented` | 不写库/不升修订/不入历史 |
 | `MESHEXTRUDE` | **部分实现（具名拒绝）**：`meshextrude.unsupported: mesh extrusion is not implemented` | 不写库/不升修订/不入历史 |
 | `MESHMERGE` | **部分实现（具名拒绝）**：`meshmerge.unsupported: mesh merge is not implemented` | 不写库/不升修订/不入历史 |
 | `MESHOPTIONS` | **部分实现（具名拒绝）**：`meshoptions.unsupported: no mesh tessellation options model` | 不写库/不升修订/不入历史 |
 | `MESHPRIMITIVEOPTIONS` | **部分实现（具名拒绝）**：`meshprimitiveoptions.unsupported: no mesh primitive options model` | 不写库/不升修订/不入历史 |
-| `MESHREFINE` | **部分实现（具名拒绝）**：`meshrefine.unsupported: mesh refinement is not implemented` | 不写库/不升修订/不入历史 |
-| `MESHSMOOTH` | **部分实现（具名拒绝）**：`meshsmooth.unsupported: mesh smoothing conversion is not implemented` | 不写库/不升修订/不入历史 |
+| `MESHREFINE` | **实现（2026-11-26，P-MESH-2）**：选中网格（或 `face_sources` 面选择）每个三角形 1→4 细分；一条事务/一步撤销；派生属性（法线/UV/颜色/纹理/PBR）丢弃而不伪造 | 无面身份时按 `mesh.face_identity_unavailable` 拒绝；不是曲面重网格化 |
+| `MESHSMOOTH` | **实现（2026-11-26，P-MESH-2）**：对选中网格做一遍 Laplacian 平滑（边界顶点固定）；一条事务/一步撤销；派生属性丢弃而不伪造 | 只支持整网格选择，子元素选择按 `meshsmooth.sub_element_not_supported` 拒绝；不是 SketchUp 的平滑/软化边语义 |
 | `MESHSMOOTHLESS` | **部分实现（具名拒绝）**：`meshsmoothless.unsupported: no mesh smoothness level model` | 不写库/不升修订/不入历史 |
 | `MESHSMOOTHMORE` | **部分实现（具名拒绝）**：`meshsmoothmore.unsupported: no mesh smoothness level model` | 不写库/不升修订/不入历史 |
 | `MESHSPIN` | **部分实现（具名拒绝）**：`meshspin.unsupported: mesh edge spin is not implemented` | 不写库/不升修订/不入历史 |

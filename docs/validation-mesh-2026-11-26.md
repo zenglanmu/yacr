@@ -4,9 +4,9 @@
 `cad-kernel-manifold` + 架构/许可/门禁）、**P-MESH-1a**（`UNION`/`SUBTRACT`/`INTERSECT` 的网格
 操作数 + worker/取消/陈旧检查 + `AcDbSubDMesh` 提交）、**P-MESH-1b**（`MESHREPAIR`/
 `MESHREBUILD` + `Partial`）、**P-MESH-2**（SKP 面身份 + 无内核 `cad-mesh-edit` 面/边移动/
-推拉/细分/平滑）与 **P-MESH-3**（`MESHCAP` 边界环补洞 + 逐洞报告，非平面环投影补）。
-**边身份为几何派生 `mesh:edge:<bits>` key；wire-only 边/跨多三角形边 polyline 仍不可编辑；
-自交/退化/嵌套岛环仍拒绝**。
+推拉/细分/平滑）与 **P-MESH-3**（`MESHCAP` 边界环补洞 + 逐洞报告：平面、非平面投影、多个
+独立环与共面嵌套环带）。**边身份为几何派生 `mesh:edge:<bits>` key；wire-only 边/跨多三角形边
+polyline 仍不可编辑；自交/退化环、同向绕行或找不到可见桥的嵌套组仍拒绝**。
 
 ## 1. 已运行
 
@@ -18,7 +18,7 @@
 | `cargo test -p cad-app --lib --locked host::tests::mesh_jobs -- --test-threads=1` | **PASS** 5 passed, 0 failed | 真实 worker：`AcDbSubDMesh` 提交、一条事务/一步撤销、repair `Partial`、open 拒绝不写库、取消不写库、操作数被编辑 → `Stale` |
 | `cargo test -p cad-spatial --lib --locked` | **PASS** 60 passed, 0 failed | 边点击返回 `mesh:edge:<bits>` 子元素；面点击仍返回 `face_sources`；wire-only 边保持整实体 |
 | `cargo test -p cad-ui-core --lib --locked mesh_repair_selectors` | **PASS** 1 passed, 0 failed | `MESHREPAIR`/`MESHREBUILD`/`MESHREFINE`/`MESHSMOOTH`/`MESHCAP` 各在 `COMMAND_TABLE` 出现一次，规范化正确，Work-only |
-| `cargo test -p cad-mesh-edit --locked` | **PASS** 20 passed, 0 failed | 无内核编辑层：焊接、边界环、面区域、面移动/推拉、边 key 解析/移动、细分、平滑、平面/非平面投影补洞、两个独立环、嵌套岛环拒绝、退化拒绝、无面身份拒绝 |
+| `cargo test -p cad-mesh-edit --locked` | **PASS** 22 passed, 0 failed | 无内核编辑层：焊接、边界环、面区域、面移动/推拉、边 key 解析/移动、细分、平滑、平面/非平面投影补洞、两个独立环、共面嵌套环带（方形管上下环带体积 6、带两孔平板、带岛平板深度 2 独立补）、退化拒绝、无面身份拒绝 |
 | `cargo test -p cad-app --lib --locked tests::drawing::mesh_edit -- --test-threads=1` | **PASS** 8 passed, 0 failed | `MOVE` 面区域/边、`PRESSPULL` 网格面、`MESHREFINE`（48 三角形/1 undo）、`MESHSMOOTH`、`MESHCAP` 闭合/诊断、无面身份与 no-holes 拒绝 |
 | `cargo test -p cad-host --lib --locked press_pull -- --test-threads=1` | **PASS** 3 passed, 0 failed | 原精确捕获不变；无 solid modeler 时网格面 `PRESSPULL` 仍可启动并捕获面点 |
 | `cargo test -p cad-cli-tools --test mesh_command --locked -- --test-threads=1` | **PASS** 5 passed, 0 failed | 真实 `manifold-rust` + 真实命令/宿主：∪/∖/∩ 体积 12/4/4、闭合、`Revision(1)`；repair 闭合；闭合非流形汤重建为 `Partial` 体积 16；`Body3d{Unknown}` 操作数；open 拒绝且 `Revision(0)` |
@@ -114,8 +114,9 @@ SUMMARY files=11 meshes=11 triangles=34347 closed=5 open=1 non_manifold=5 repair
 
 - **P-MESH-2 边身份是几何派生 key**：三角形边点击返回 `mesh:edge:<bits>`，`MOVE` 平移两个端点；
   **wire-only body 的边/跨多个三角形边的 stored polyline 仍是整实体**，没有假边 id。
-- **P-MESH-3 边界**：平面环、非平面投影环、多个独立环已实现；自交/退化/嵌套岛环仍按名拒绝并
-  保持开口；没有“所有开放网格都能闭合”的声明。
+- **P-MESH-3 边界**：平面环、非平面投影环、多个独立环、共面嵌套环带已实现；自交/退化环、
+  同向绕行（`mesh.hole_nested_inconsistent_winding`）或找不到可见桥的嵌套组仍按名拒绝并保持
+  开口；没有“所有开放网格都能闭合”的声明。
 - 真实 `.skp` 语料（`YACR_TEST_SKP`）**NOT RUN**；SKP 面身份只有合成模型测试与
   `skpwright` 自洽 roundtrip 证据。
 - **内核运行期取消未测**：只验证了预取消与宿主令牌取消（取消后不写库）。原生看门线程已实现，

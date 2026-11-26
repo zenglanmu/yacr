@@ -428,7 +428,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | SKP tag | 扁平化到 layer 0 | **P-SKP-2**：tag → `Layer` | 已有诊断；改后可按图层显隐/过滤 |
 | SKP 材质/透明度 | 逐实体颜色 | 保持 | `Mesh.colors` 目前未用；纹理平均色已是诚实降级 |
 | SKP 边/曲线 | **已实现（2026-11-23，ADR-0049）**：真实 `MeshEdge` 记录进 `Body3d` 载体（完整边记录的面组 → `SkpPreviewMesh` body 的 `BodyDisplay.edges`；游离/未被 body 或已三角化面环覆盖的边 → `SkpPreviewEdges` wire 体），`hidden`/`soft`/不可见图层剔除，曲线存两点弦，边只作显示/拾取 | **P-SKP-3 完成**：不新增 `LineSegments` 图元，复用既有 `Body3d` + `BodyDisplay.edges` | 不做边 id/子元素与编辑；端点/中点吸附与 `measure = Partial` 已实现（ADR-0050 的窄声明：只为**实际携带存储边**的载体，无面/三角/中心/象限/交点吸附、无面积/体积；三角-only 组仍 `Unsupported`）；纯边文件不再拒绝，导入为 `Partial` wire 体 |
-| STL/SKP 的"实体编辑" | 无 | **P-MESH-0…3**（[ADR-0061](adr/0061-mesh-kernel-selection.md)，均未实现）：`MeshModeler` + `manifold-rust` 网格布尔/修复，SKP 面身份 + 共享层编辑 | 产物仍是网格；**不要**复用 `BodyKind::Solid`；open shell 不自动补洞 |
+| STL/SKP 的"实体编辑" | 无 | **P-MESH-0/1a/1b/2/3 已实现（2026-11-26）**（[ADR-0061](adr/0061-mesh-kernel-selection.md)）：`MeshModeler` + `manifold-rust` 网格布尔/修复，SKP 面身份 + 共享层面/边编辑与补洞 | 产物仍是网格；**不要**复用 `BodyKind::Solid`；open shell 不自动补洞，`MESHCAP` 是显式命令 |
 
 **SKP 写出（2026-11-23，ADR-0051）**：所有源写进**一个**合并的 root `GeometryRun`——钉死的
 `skpwright` 0.6.0 写出器只发第一个 root run（`build26.rs` 的 `find(|r| r.def_index.is_none())`），
@@ -465,8 +465,9 @@ wire 体按 `export.skp.wire_body_no_writable_edges` 整实体丢弃）；
 - 域里不新增持久化字段：拓扑/修复/补洞报告是派生数据；面身份复用已持久化的
   `Mesh.face_sources`（SKP 导入已写入 `skp:face:<n>`）。
 - **robust 引擎要求输入闭合且可定向**：open shell 返回 `Error::NotClosed`，按
-  `mesh.not_closed` 显式拒绝。P-MESH-3 的 `MESHCAP` 在编辑层补**简单平面**边界环；
-  非平面、自交、退化环逐洞拒绝，不会把失败补洞当成功。
+  `mesh.not_closed` 显式拒绝。P-MESH-3 的 `MESHCAP` 在编辑层补简单边界环：平面直补、非平面
+  投影补、共面嵌套环按奇偶深度组成外环-内环环带（岛独立补）；自交、退化、同向绕行或无可
+  见桥的嵌套组逐洞拒绝，不会把失败补洞当成功。
 - 布尔结果仍是 `Mesh`；**不得**写成 `Body3d.exact`，也不得让 `MASSPROP` 报精确体积。
 - SketchUp 式的面/边编辑（移动、推拉、细分、平滑、撤销）由共享层 `cad-mesh-edit` 承担，
   需要 CSG 时再调 `MeshModeler`；边用几何派生 `mesh:edge:<bits>` key，wire-only 边不可编辑。
@@ -645,8 +646,8 @@ StepImporter::import
 | P-MESH-0（**已实现 2026-11-26**） | [ADR-0061](adr/0061-mesh-kernel-selection.md)：`cad-kernel-adapter::mesh` 的 `MeshModeler` 接缝 + `cad-kernel-manifold`（`manifold-rust =0.19.6`）+ 架构门禁 + 许可证登记；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`check-architecture.py`；无 modeler 时 `unsupported-runtime: mesh-modeler` |
 | P-MESH-1a（**已实现 2026-11-26**） | `concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质），必须是 `ClosedManifold`；mesh/solid 布尔互斥；仍非精确 | 闭合 cube∪/∖/∩ cube；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/运行期取消不写库；一条事务/一步撤销 |
 | P-MESH-1b（**已实现 2026-11-26**） | 网格修复命令（`MESHREPAIR` Orientation / `MESHREBUILD` Rebuild）+ `Partial` 报告；补洞仍属 P-MESH-3 | 非流形闭合汤 → `Partial` + `MeshRepair`；open → `mesh.not_closed`；一条事务/一步撤销 |
-| P-MESH-2（**已实现 2026-11-26**） | SKP 源面身份写 `Mesh.face_sources`（`skp:face:<n>`）+ 面选择 + 移动/推拉/细分/平滑（共享层 `cad-mesh-edit`）；边身份为几何派生 `mesh:edge:<bits>`，`MOVE` 可平移两端点；wire-only/跨多三角形边 polyline 仍不可编辑 | 同一源面三角形共享 id；面/边编辑后 `cad-db` 校验通过；无面身份 → `mesh.face_identity_unavailable`；`cad-mesh-edit` 20 + `cad-app` 9 + `cad-host` 捕获 1 passed |
-| P-MESH-3（**已实现 2026-11-26**） | `MESHCAP` 补简单边界环 + 逐洞报告；平面直补、非平面投影补并标 `non_planar`、多个独立环各自补；自交/退化/嵌套岛环拒绝 | 去掉顶/底面的 cube → 两环闭合、体积 8；非平面环 → 填充 + `non_planar=true`；真实 r1.obj open → `fill_refused=1`（退化环） |
+| P-MESH-2（**已实现 2026-11-26**） | SKP 源面身份写 `Mesh.face_sources`（`skp:face:<n>`）+ 面选择 + 移动/推拉/细分/平滑（共享层 `cad-mesh-edit`）；边身份为几何派生 `mesh:edge:<bits>`，`MOVE` 可平移两端点；wire-only/跨多三角形边 polyline 仍不可编辑 | 同一源面三角形共享 id；面/边编辑后 `cad-db` 校验通过；无面身份 → `mesh.face_identity_unavailable`；`cad-mesh-edit` 22 + `cad-app` 9 + `cad-host` 捕获 1 passed |
+| P-MESH-3（**已实现 2026-11-26**） | `MESHCAP` 补简单边界环 + 逐洞报告；平面直补、非平面投影补并标 `non_planar`、多个独立环各自补；共面嵌套环成组做环带（外环 + 直接内环为孔），深度 2 的岛独立补；自交/退化/同向绕行/无可见桥的嵌套组拒绝 | 去掉顶/底面的 cube → 两环闭合、体积 8；非平面环 → 填充 + `non_planar=true`；方形管上下环带 → 闭合、体积 6；带两孔/带岛的平板 → 全部环闭合；真实 r1.obj open → `fill_refused=1`（退化环） |
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |
 | P-STEP-2 | STEP 装配改为 `BlockDefinition` + `Insert` | 同一 body 两次实例 → 两个 `Insert`，不是两份网格 |

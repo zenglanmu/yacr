@@ -198,7 +198,8 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   显式拒绝。P-MESH-2/3 已实现于无内核共享层 `cad-mesh-edit`：面区域 `MOVE`/`PRESSPULL`
   （依赖 `Mesh.face_sources`）、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 边界环补洞；
   边身份为几何派生 `mesh:edge:<bits>` key，`MOVE` 可平移边两端点；wire-only 边/跨多三角形边
-  polyline 仍不可编辑。补洞支持平面环、非平面投影环与多个独立环；自交/退化/嵌套岛环拒绝。
+  polyline 仍不可编辑。补洞支持平面环、非平面投影环、多个独立环，以及共面嵌套环的外环-内环环带
+  （annulus，内环作为孔）；自交/退化环仍拒绝。
   open shell 仍按 `mesh.not_closed` 拒绝，网格结果永不写成精确 B-Rep。写出一律读 `cad-db` 并
   返回 `CompatReport`：DXF/DWG/STL/OBJ/PLY/OFF/IFC4/SKP/glTF（GLB + JSON `.gltf`）已接线；
   STEP/DGN/RVT 为稳定拒绝

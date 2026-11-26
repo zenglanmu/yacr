@@ -2,21 +2,28 @@
 //!
 //! The kernel seam deliberately does **not** fill holes: `manifold-rust` refuses
 //! an open shell. This module implements the narrow, honest capability P-MESH-3
-//! asks for: close each boundary loop of a mesh with a planar patch, report every
-//! hole, and leave a refused hole open. It never claims a non-planar or
-//! self-intersecting loop was filled, and the product is still a non-exact mesh.
+//! asks for: close each boundary loop with a cap (projected to the loop's
+//! best-fit plane when non-planar), fill the annulus between coplanar nested
+//! loops without covering the hole, report every
+//! hole, and leave a refused hole open. It never claims a self-intersecting loop
+//! or an inconsistent nested group was filled, and the product is still a
+//! non-exact mesh.
 
 use cad_domain::{CadResult, Mesh, Point3};
 
 use crate::topology::{boundary_loops, classify, weld, TopologyReport};
+
+mod nested;
+
 use crate::{invalid, unsupported};
+use nested::{fill_group, Nesting};
 
 /// What happened to one boundary loop.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoleReport {
     /// Number of vertices on the loop.
     pub boundary_vertices: usize,
-    /// Number of triangles added (0 when refused).
+    /// Number of triangles added (0 when refused or closed by an enclosing annulus).
     pub triangles: usize,
     pub filled: bool,
     /// Whether the loop was non-planar and the patch was produced by projecting
@@ -37,12 +44,19 @@ pub struct FillHolesResult {
     pub topology: TopologyReport,
 }
 
-/// Fill every simple planar boundary loop.
+/// Fill every boundary loop of an open shell.
+///
+/// Independent loops are capped directly. Coplanar loops nested inside another
+/// boundary loop are treated as one region: the outer loop is filled with the
+/// nested loops as holes (an annulus), so the patch never covers the hole or an
+/// island. Loops alternate between solid and hole by nesting depth: a hole at
+/// odd depth is closed by its parent patch, a nested island at even depth gets
+/// its own patch with its direct children as holes.
 ///
 /// A mesh with no boundary loops is refused by name (`mesh.no_holes`), never
-/// returned as an empty success. A hole that is non-planar, degenerate or
-/// self-intersecting stays open and is reported; the other holes are still
-/// filled.
+/// returned as an empty success. A hole that is degenerate, self-intersecting,
+/// inconsistently wound or has no visible bridge stays open and is reported;
+/// the other holes are still filled.
 pub fn fill_holes(mesh: &Mesh) -> CadResult<FillHolesResult> {
     let welded = weld(mesh)?;
     let loops = boundary_loops(&welded)?;
@@ -52,62 +66,137 @@ pub fn fill_holes(mesh: &Mesh) -> CadResult<FillHolesResult> {
             "the mesh has no boundary loop; there is nothing to fill",
         ));
     }
-    let nested = nested_loops(&welded.vertices, &loops);
+    let nesting = Nesting::build(&welded.vertices, &loops);
     let mut triangles = welded.triangles.clone();
     let mut sources = welded.face_sources.clone();
-    let mut holes = Vec::with_capacity(loops.len());
+    let mut reports: Vec<Option<HoleReport>> = (0..loops.len()).map(|_| None).collect();
     let mut filled = 0usize;
     let mut refused = 0usize;
-    for (index, boundary) in loops.iter().enumerate() {
-        if nested.contains(&index) {
-            holes.push(HoleReport {
-                boundary_vertices: boundary.len(),
-                triangles: 0,
-                filled: false,
-                non_planar: false,
-                code: Some("mesh.hole_nested_not_supported"),
-                detail: "the loop is nested with another boundary loop; filling it independently                          could cover an island"
-                    .into(),
-            });
-            refused += 1;
+    for index in 0..loops.len() {
+        if reports[index].is_some() {
             continue;
         }
-        match fill_loop(&welded.vertices, boundary) {
-            Ok((patch, non_planar)) => {
-                let count = patch.len();
-                triangles.extend(patch);
+        // Odd depth loops are holes of an enclosing patch and are reported with
+        // that patch, not filled on their own.
+        if nesting.depth(index) % 2 == 1 {
+            continue;
+        }
+        let children = nesting.children(index);
+        if children.is_empty() {
+            match fill_loop(&welded.vertices, &loops[index]) {
+                Ok((patch, non_planar)) => {
+                    let count = patch.len();
+                    triangles.extend(patch);
+                    sources.extend(std::iter::repeat_n(None, count));
+                    reports[index] = Some(HoleReport {
+                        boundary_vertices: loops[index].len(),
+                        triangles: count,
+                        filled: true,
+                        non_planar,
+                        code: None,
+                        detail: format!(
+                            "filled {} boundary vertices with {count} triangle(s){}",
+                            loops[index].len(),
+                            if non_planar {
+                                " by projecting a non-planar loop onto its best-fit plane"
+                            } else {
+                                ""
+                            }
+                        ),
+                    });
+                    filled += 1;
+                }
+                Err((code, detail)) => {
+                    reports[index] = Some(HoleReport {
+                        boundary_vertices: loops[index].len(),
+                        triangles: 0,
+                        filled: false,
+                        non_planar: false,
+                        code: Some(code),
+                        detail,
+                    });
+                    refused += 1;
+                }
+            }
+            continue;
+        }
+        let holes: Vec<&Vec<u32>> = children.iter().map(|child| &loops[*child]).collect();
+        match fill_group(&welded.vertices, &loops[index], &holes) {
+            Ok(group) => {
+                let count = group.triangles.len();
+                triangles.extend(group.triangles);
                 sources.extend(std::iter::repeat_n(None, count));
-                holes.push(HoleReport {
-                    boundary_vertices: boundary.len(),
+                reports[index] = Some(HoleReport {
+                    boundary_vertices: loops[index].len(),
                     triangles: count,
                     filled: true,
-                    non_planar,
+                    non_planar: group.non_planar,
                     code: None,
                     detail: format!(
-                        "filled {} boundary vertices with {count} triangle(s){}",
-                        boundary.len(),
-                        if non_planar {
-                            " by projecting a non-planar loop onto its best-fit plane"
+                        "filled the outer loop and {} nested hole loop(s) with {count} triangle(s){}",
+                        children.len(),
+                        if group.non_planar {
+                            " by projecting a non-planar group onto the outer loop's best-fit plane"
                         } else {
                             ""
                         }
                     ),
                 });
                 filled += 1;
+                for child in children {
+                    reports[child] = Some(HoleReport {
+                        boundary_vertices: loops[child].len(),
+                        triangles: 0,
+                        filled: true,
+                        non_planar: group.non_planar,
+                        code: None,
+                        detail: format!(
+                            "closed as a nested hole of boundary loop {}; the annulus patch does not \
+                             cover the hole",
+                            index + 1
+                        ),
+                    });
+                    filled += 1;
+                }
             }
             Err((code, detail)) => {
-                holes.push(HoleReport {
-                    boundary_vertices: boundary.len(),
-                    triangles: 0,
-                    filled: false,
-                    non_planar: false,
-                    code: Some(code),
-                    detail,
-                });
-                refused += 1;
+                for affected in nesting.subtree(index) {
+                    if reports[affected].is_some() {
+                        continue;
+                    }
+                    reports[affected] = Some(HoleReport {
+                        boundary_vertices: loops[affected].len(),
+                        triangles: 0,
+                        filled: false,
+                        non_planar: false,
+                        code: Some(code),
+                        detail: format!(
+                            "boundary loop {} is part of a nested group that cannot be filled: {detail}",
+                            affected + 1
+                        ),
+                    });
+                    refused += 1;
+                }
             }
         }
     }
+    for index in 0..loops.len() {
+        if reports[index].is_none() {
+            reports[index] = Some(HoleReport {
+                boundary_vertices: loops[index].len(),
+                triangles: 0,
+                filled: false,
+                non_planar: false,
+                code: Some("mesh.hole_nested_incomplete"),
+                detail: "the nested boundary group could not be resolved".into(),
+            });
+            refused += 1;
+        }
+    }
+    let holes: Vec<HoleReport> = reports
+        .into_iter()
+        .map(|report| report.expect("every boundary loop receives a report"))
+        .collect();
     let product = Mesh {
         vertices: welded.vertices.clone(),
         triangles,
@@ -126,88 +215,6 @@ pub fn fill_holes(mesh: &Mesh) -> CadResult<FillHolesResult> {
         refused,
         topology,
     })
-}
-
-/// Loop indices that are nested with another loop (same plane, one inside the
-/// other). Filling them independently would cover the island between them.
-fn nested_loops(vertices: &[Point3], loops: &[Vec<u32>]) -> std::collections::BTreeSet<usize> {
-    let mut nested = std::collections::BTreeSet::new();
-    for i in 0..loops.len() {
-        for j in (i + 1)..loops.len() {
-            if loops_nested(vertices, &loops[i], &loops[j]) {
-                nested.insert(i);
-                nested.insert(j);
-            }
-        }
-    }
-    nested
-}
-
-fn loops_nested(vertices: &[Point3], a: &[u32], b: &[u32]) -> bool {
-    let pa: Vec<Point3> = a.iter().map(|index| vertices[*index as usize]).collect();
-    let pb: Vec<Point3> = b.iter().map(|index| vertices[*index as usize]).collect();
-    let normal = crate::topology::newell_normal(&pa);
-    let length = (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z).sqrt();
-    if length <= 1e-12 {
-        return false;
-    }
-    let normal = Point3 {
-        x: normal.x / length,
-        y: normal.y / length,
-        z: normal.z / length,
-    };
-    let centroid = pa.iter().fold(
-        Point3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        },
-        |sum, point| Point3 {
-            x: sum.x + point.x,
-            y: sum.y + point.y,
-            z: sum.z + point.z,
-        },
-    );
-    let count = pa.len() as f64;
-    let centroid = Point3 {
-        x: centroid.x / count,
-        y: centroid.y / count,
-        z: centroid.z / count,
-    };
-    let tolerance = 1e-6 * diagonal(&pa).max(1.0);
-    if pb.iter().any(|point| {
-        ((point.x - centroid.x) * normal.x
-            + (point.y - centroid.y) * normal.y
-            + (point.z - centroid.z) * normal.z)
-            .abs()
-            > tolerance
-    }) {
-        return false;
-    }
-    let (u, v) = basis(normal, &pa);
-    let project = |point: Point3| [dot(point, u), dot(point, v)];
-    let poly_a: Vec<[f64; 2]> = pa.iter().map(|point| project(*point)).collect();
-    let poly_b: Vec<[f64; 2]> = pb.iter().map(|point| project(*point)).collect();
-    // Use a boundary vertex from each loop: centroids can coincide for two
-    // nested but differently sized rings, so they are not a containment test.
-    point_in_polygon(poly_b[0], &poly_a) != point_in_polygon(poly_a[0], &poly_b)
-}
-
-fn point_in_polygon(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
-    let mut inside = false;
-    let mut j = polygon.len() - 1;
-    for i in 0..polygon.len() {
-        let a = polygon[i];
-        let b = polygon[j];
-        if (a[1] > point[1]) != (b[1] > point[1]) {
-            let x = (b[0] - a[0]) * (point[1] - a[1]) / (b[1] - a[1]) + a[0];
-            if point[0] < x {
-                inside = !inside;
-            }
-        }
-        j = i;
-    }
-    inside
 }
 
 type LoopFill = Result<(Vec<[u32; 3]>, bool), (&'static str, String)>;
@@ -305,7 +312,7 @@ fn fill_loop(vertices: &[Point3], boundary: &[u32]) -> LoopFill {
     ))
 }
 
-fn basis(normal: Point3, points: &[Point3]) -> (Point3, Point3) {
+pub(super) fn basis(normal: Point3, points: &[Point3]) -> (Point3, Point3) {
     let mut u = Point3 {
         x: 1.0,
         y: 0.0,
@@ -339,7 +346,7 @@ fn basis(normal: Point3, points: &[Point3]) -> (Point3, Point3) {
 
 /// Ear clipping; returns triangles whose boundary follows the input polygon
 /// order (the polygon may be clockwise or counter-clockwise).
-fn ear_clip(points: &[[f64; 2]]) -> Option<Vec<[usize; 3]>> {
+pub(super) fn ear_clip(points: &[[f64; 2]]) -> Option<Vec<[usize; 3]>> {
     let count = points.len();
     if count < 3 {
         return None;
@@ -389,7 +396,7 @@ fn ear_clip(points: &[[f64; 2]]) -> Option<Vec<[usize; 3]>> {
     Some(result)
 }
 
-fn signed_area(points: &[[f64; 2]]) -> f64 {
+pub(super) fn signed_area(points: &[[f64; 2]]) -> f64 {
     let mut area = 0.0;
     for index in 0..points.len() {
         let a = points[index];
@@ -399,18 +406,18 @@ fn signed_area(points: &[[f64; 2]]) -> f64 {
     area / 2.0
 }
 
-fn cross2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
+pub(super) fn cross2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
     (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 }
 
-fn point_in_triangle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool {
+pub(super) fn point_in_triangle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool {
     let ab = cross2(a, b, p);
     let bc = cross2(b, c, p);
     let ca = cross2(c, a, p);
     (ab >= -1e-12 && bc >= -1e-12 && ca >= -1e-12) || (ab <= 1e-12 && bc <= 1e-12 && ca <= 1e-12)
 }
 
-fn self_intersects(points: &[[f64; 2]]) -> bool {
+pub(super) fn self_intersects(points: &[[f64; 2]]) -> bool {
     let count = points.len();
     for i in 0..count {
         let a = points[i];
@@ -438,7 +445,7 @@ fn segments_intersect(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> boo
         && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
 }
 
-fn diagonal(points: &[Point3]) -> f64 {
+pub(super) fn diagonal(points: &[Point3]) -> f64 {
     let mut min = points[0];
     let mut max = points[0];
     for point in points {
@@ -452,11 +459,11 @@ fn diagonal(points: &[Point3]) -> f64 {
     ((max.x - min.x).powi(2) + (max.y - min.y).powi(2) + (max.z - min.z).powi(2)).sqrt()
 }
 
-fn dot(a: Point3, b: Point3) -> f64 {
+pub(super) fn dot(a: Point3, b: Point3) -> f64 {
     a.x * b.x + a.y * b.y + a.z * b.z
 }
 
-fn cross(a: Point3, b: Point3) -> Point3 {
+pub(super) fn cross(a: Point3, b: Point3) -> Point3 {
     Point3 {
         x: a.y * b.z - a.z * b.y,
         y: a.z * b.x - a.x * b.z,

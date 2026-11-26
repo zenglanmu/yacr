@@ -2,7 +2,7 @@
 
 - 状态：**已接受（决策，2026-11-26）**；**P-MESH-0 已实现（2026-11-26）**，
   **P-MESH-1a/1b 已实现（2026-11-26，Linux 原生契约 + 真实内核命令路径）**，
-  **P-MESH-2 面/边编辑与 P-MESH-3 平面/非平面投影补洞已实现（2026-11-26，`cad-mesh-edit` + 命令契约）**
+  **P-MESH-2 面/边编辑与 P-MESH-3 平面/非平面投影/共面嵌套环补洞已实现（2026-11-26，`cad-mesh-edit` + 命令契约）**
 - 关联：ADR-0036（3D 实体与 solidcore 接缝）、ADR-0033（多格式导入）、ADR-0048（格式连接器
   crate）、ADR-0049（SKP 存储边）、ADR-0053（应用域，SketchUp 对应 `concept`）、
   `docs/3d-solidcore-and-mesh-import.md` §5.4/§7
@@ -66,7 +66,7 @@ split/trim、refine/simplify/smooth、2D cross-section）。因此：
 - **按面/边拾取（边用几何派生 key）、移动、推拉、细分、平滑、撤销**不外包给内核，放在共享层
   `cad-mesh-edit`（**已实现 2026-11-26**，纯 `cad-domain` 数据，不依赖任何内核 crate）：
   拓扑普查（边界边、非流形边、连通块）、`face_sources` 面区域边界提取、移动/推拉/细分/
-  平滑、平面边界环补洞（P-MESH-3），以及提交前的闭合校验。
+  平滑、边界环补洞（P-MESH-3，含共面嵌套环的环带补片），以及提交前的闭合校验。
 - 需要 CSG 的编辑（推拉一个面区域后与自身求并/差）由命令层调用 `MeshModeler`；编辑层不
   链接内核。进度/取消/worker 与 ADR-0036 C2 相同：命令线程只校验与快照，kernel 在 worker，
   结果按文档/操作数快照陈旧检查后以一条事务写回。
@@ -196,8 +196,8 @@ P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1/2/3 决定命令�
 | **P-MESH-0** | **已实现（2026-11-26）**：`cad-kernel-adapter::mesh` 接缝 + `cad-kernel-manifold` + 架构门禁 + `THIRD_PARTY_NOTICES` 登记；原生目标用看门线程把 `cancelled` 映射到内核 `CancelToken`（wasm 只有预/后检查，已声明）；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`（66 + 9 passed）；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`python3 scripts/check-architecture.py`；无 `MeshModeler` 时 `unsupported-runtime: mesh-modeler`（宿主接线前） |
 | **P-MESH-1a** | **已实现（2026-11-26）**：`MeshModeler` 注入 `native-below` 宿主；`concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质，类型/来源不冒充）；结果必须 `ClosedManifold`；mesh/solid 布尔互斥（共用命令面，应用层拒绝交错启动），文档替换/关闭同时中止两者；仍非精确 | `cad-app` 命令/host 契约 12 passed；`cad-cli-tools/tests/mesh_command.rs` 真实内核 5 passed（∪/∖/∩ 体积 12/4/4、`Revision(1)`、一条撤销、`Body3d{Unknown}` 操作数、闭合非流形汤重建 `Partial`）；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/宿主取消不写库；陈旧结果丢弃；宿主无 mesh modeler → `unsupported-runtime: mesh-modeler` |
 | **P-MESH-1b** | **已实现（2026-11-26）**：网格修复命令 `MESHREPAIR`（`Orientation`）/`MESHREBUILD`（winding `Rebuild`）+ `Partial` 报告；补洞仍属 P-MESH-3 | 真实内核命令路径：闭合/翻转网格修复后仍 `ClosedManifold` 且外向；open → `mesh.not_closed` 不写库；非流形闭合汤可能 `Partial` 或按 `mesh.failed`/`mesh.not_manifold` 结构化拒绝（在线样本 5 例）；一条事务/一步撤销；导出仍非精确 |
-| **P-MESH-2** | **已实现（2026-11-26）**：SKP 面身份（`face_sources`）+ 面选择 + `MOVE`（面区域/边）/`PRESSPULL`（面区域，沿法向）/`MESHREFINE`（1→4 细分）/`MESHSMOOTH`（Laplacian，边界固定）；**边身份是几何派生 key**（`mesh:edge:<两端点的精确位模式>`，无 schema 变更），拾取落在三角形边附近时返回该 key，`MOVE` 平移其两个端点；wire-only/跨多个三角形边的 stored polyline 仍是整实体，不做假边。编辑层 `cad-mesh-edit` 不链接内核 | 同一 SKP 面所有三角形共享 `skp:face:<n>`；面/边编辑后 `cad-db` 校验通过、闭合/流形性保持；无面身份时 `mesh.face_identity_unavailable`；边 key 在端点移动后按设计改变；`cad-mesh-edit` 20 + `cad-app` 命令 9 + `cad-host` 捕获 1 passed |
-| **P-MESH-3** | **已实现（2026-11-26）**：`MESHCAP` 对每个简单边界环做 ear-clip 补片 + 逐洞报告；平面环直接补，**非平面环投影到最佳拟合平面后补**并标 `non_planar`；多个独立边界环各自补；自交/退化/嵌套岛环按名拒绝并保持开口，输出仍是非精确网格 | 闭合 cube 去掉顶/底面 → 两个环都补、闭合、体积 8；非平面环 → 填充 + `non_planar=true`；退化/自交/嵌套 → `mesh.hole_degenerate`/`mesh.hole_self_intersecting`/`mesh.hole_nested_not_supported` + `mesh.fill_failed`；真实 open 样本 r1.obj → `fill_refused=1`；`cad-mesh-edit` 20 passed |
+| **P-MESH-2** | **已实现（2026-11-26）**：SKP 面身份（`face_sources`）+ 面选择 + `MOVE`（面区域/边）/`PRESSPULL`（面区域，沿法向）/`MESHREFINE`（1→4 细分）/`MESHSMOOTH`（Laplacian，边界固定）；**边身份是几何派生 key**（`mesh:edge:<两端点的精确位模式>`，无 schema 变更），拾取落在三角形边附近时返回该 key，`MOVE` 平移其两个端点；wire-only/跨多个三角形边的 stored polyline 仍是整实体，不做假边。编辑层 `cad-mesh-edit` 不链接内核 | 同一 SKP 面所有三角形共享 `skp:face:<n>`；面/边编辑后 `cad-db` 校验通过、闭合/流形性保持；无面身份时 `mesh.face_identity_unavailable`；边 key 在端点移动后按设计改变；`cad-mesh-edit` 22 + `cad-app` 命令 9 + `cad-host` 捕获 1 passed |
+| **P-MESH-3** | **已实现（2026-11-26）**：`MESHCAP` 对每个简单边界环做 ear-clip 补片 + 逐洞报告；平面环直接补，**非平面环投影到最佳拟合平面后补**并标 `non_planar`；多个独立边界环各自补；**共面嵌套环按奇偶深度成组**——外环以直接内环为孔做环带（annulus）补片，深度 2 的岛再独立补，环带不覆盖孔洞；自交/退化环、同向绕行的嵌套组、找不到可见桥的嵌套组按名拒绝并保持开口，输出仍是非精确网格 | 闭合 cube 去掉顶/底面 → 两个环都补、闭合、体积 8；非平面环 → 填充 + `non_planar=true`；方形管（外 2×2、内 1×1、高 2）上下两个环带 → 闭合、体积 6；带两个孔的平板 → 3 个环都补；带岛平板 → 外环环带 + 岛独立补；退化/自交 → `mesh.hole_degenerate`/`mesh.hole_self_intersecting` + `mesh.fill_failed`；真实 open 样本 r1.obj → `fill_refused=1`；`cad-mesh-edit` 22 passed |
 
 ## 证据边界
 
@@ -234,5 +234,6 @@ P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1/2/3 决定命令�
   产物增加内核 crate 的代码量，受既有 20/25 MiB 预算约束（P-MESH-0 实测）；
 - 面编辑依赖 P-MESH-2 的 `face_sources`；边编辑依赖几何派生 `mesh:edge:<bits>` key（端点移动后
   改变），wire-only 边/跨多个三角形边的 polyline 仍不可编辑，不得用三角形索引冒充 SketchUp 边；
-- 补洞已覆盖平面环、非平面投影环和多个独立环；自交/退化/嵌套岛环仍拒绝，open shell 仍不能
-  进入布尔/重建，补洞必须逐洞报告，不得当成“所有开放网格已修复”。
+- 补洞已覆盖平面环、非平面投影环、多个独立环和共面嵌套环的环带；自交/退化环、同向绕行或
+  无可见桥的嵌套组仍拒绝，open shell 仍不能进入布尔/重建，补洞必须逐洞报告，不得当成
+  “所有开放网格已修复”。

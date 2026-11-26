@@ -35,7 +35,8 @@
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
   结果仍是**非精确**网格。`PRESSPULL` 现在同时支持精确面与带 `face_sources` 的网格面；
-  `MOVE` 面选择、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 平面闭环补洞已接线。
+  `MOVE` 面选择、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 边界环补洞（含共面嵌套环带）
+  已接线。
   边身份使用几何派生 `mesh:edge:<bits>` key，`MOVE` 可移动边；wire-only 边/跨多个三角形边的
   stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
 - P-MESH-1a/1b 已实现（2026-11-26）：Linux 原生注入 `ManifoldMeshModeler`；其它载体按
@@ -165,8 +166,9 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   `mesh:edge:<bits>` key，`MOVE` 平移两个端点，全部在无内核共享层 `cad-mesh-edit`。
   wire-only 边/跨多个三角形边的 stored polyline 仍不可编辑。
 - **P-MESH-3（已实现 2026-11-26）**：`MESHCAP` 对简单边界环做补片并逐洞报告；平面环直接补，
-  非平面环投影到最佳拟合平面后补并标 `non_planar`；多个独立环各自补；自交/退化/嵌套岛环
-  仍按名拒绝且保持开口。
+  非平面环投影到最佳拟合平面后补并标 `non_planar`；多个独立环各自补；共面嵌套环按奇偶深度
+  成组，外环以内环为孔做环带（annulus），深度 2 的岛独立补；自交/退化环、同向绕行或找不到
+  可见桥的嵌套组仍按名拒绝且保持开口。
 - **真实 SKP 样本（2026-11-26）**：本地 `house.skp`（2,237,796 bytes，SHA-256
   `9cd2689df7c1bf0d1ce0d496e4e83c9367abab6d8ff3e21dc9bb8162e982dd30`，不入库）导入
   64 meshes / 1440 triangles；`face_sources` 1440 条、28 个 distinct keys；网格内核拓扑

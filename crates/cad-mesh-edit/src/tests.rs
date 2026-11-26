@@ -270,17 +270,26 @@ fn filling_two_separate_holes_closes_both_loops() {
     assert!((signed_volume(&result.mesh) - 8.0).abs() < 1e-9);
 }
 
-#[test]
-fn nested_boundary_loops_are_refused_instead_of_covering_the_island() {
+/// A square tube: outer 2×2, inner 1×1, open at the top and bottom. The two
+/// annulus rims must be capped without covering the through-hole.
+fn square_tube() -> Mesh {
     let vertices = vec![
         p(0.0, 0.0, 0.0),
-        p(3.0, 0.0, 0.0),
-        p(3.0, 3.0, 0.0),
-        p(0.0, 3.0, 0.0),
-        p(1.0, 1.0, 0.0),
-        p(2.0, 1.0, 0.0),
+        p(2.0, 0.0, 0.0),
         p(2.0, 2.0, 0.0),
-        p(1.0, 2.0, 0.0),
+        p(0.0, 2.0, 0.0),
+        p(0.0, 0.0, 2.0),
+        p(2.0, 0.0, 2.0),
+        p(2.0, 2.0, 2.0),
+        p(0.0, 2.0, 2.0),
+        p(0.5, 0.5, 0.0),
+        p(1.5, 0.5, 0.0),
+        p(1.5, 1.5, 0.0),
+        p(0.5, 1.5, 0.0),
+        p(0.5, 0.5, 2.0),
+        p(1.5, 0.5, 2.0),
+        p(1.5, 1.5, 2.0),
+        p(0.5, 1.5, 2.0),
     ];
     let triangles = vec![
         [0, 1, 5],
@@ -291,8 +300,16 @@ fn nested_boundary_loops_are_refused_instead_of_covering_the_island() {
         [2, 7, 6],
         [3, 0, 4],
         [3, 4, 7],
+        [9, 8, 12],
+        [9, 12, 13],
+        [11, 10, 14],
+        [11, 14, 15],
+        [8, 11, 15],
+        [8, 15, 12],
+        [10, 9, 13],
+        [10, 13, 14],
     ];
-    let mesh = Mesh {
+    Mesh {
         vertices,
         triangles: triangles.clone(),
         normals: Vec::new(),
@@ -301,14 +318,168 @@ fn nested_boundary_loops_are_refused_instead_of_covering_the_island() {
         uvs: Vec::new(),
         texture: None,
         pbr: None,
-    };
-    let result = fill_holes(&mesh).expect("the loops are reported");
-    assert_eq!(result.filled, 0);
-    assert_eq!(result.refused, 2);
+    }
+}
+
+/// A flat 5×5 plate with two disjoint 1×1 holes at cells (1,1) and (3,3).
+fn plate_with_two_holes() -> Mesh {
+    let size = 6usize;
+    let mut vertices = Vec::new();
+    for j in 0..size {
+        for i in 0..size {
+            vertices.push(p(i as f64, j as f64, 0.0));
+        }
+    }
+    let index = |i: usize, j: usize| (j * size + i) as u32;
+    let mut triangles = Vec::new();
+    for j in 0..size - 1 {
+        for i in 0..size - 1 {
+            if (i, j) == (1, 1) || (i, j) == (3, 3) {
+                continue;
+            }
+            let a = index(i, j);
+            let b = index(i + 1, j);
+            let c = index(i + 1, j + 1);
+            let d = index(i, j + 1);
+            triangles.push([a, b, c]);
+            triangles.push([a, c, d]);
+        }
+    }
+    Mesh {
+        vertices,
+        triangles: triangles.clone(),
+        normals: Vec::new(),
+        face_sources: vec![None; triangles.len()],
+        colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
+        pbr: None,
+    }
+}
+
+#[test]
+fn nested_boundary_loops_fill_the_annulus_between_them() {
+    let mesh = plate_with_two_holes();
+    let result = fill_holes(&mesh).expect("the three loops are reported");
+    assert_eq!(result.filled, 3);
+    assert_eq!(result.refused, 0);
+    assert_eq!(result.topology.boundary_edges, 0);
+    assert!(
+        result
+            .holes
+            .iter()
+            .all(|hole| hole.filled && hole.code.is_none()),
+        "the outer loop and both nested holes are closed by one annulus patch"
+    );
+    let outer = result
+        .holes
+        .iter()
+        .find(|hole| hole.triangles > 0)
+        .expect("the outer loop owns the patch");
+    assert!(outer.detail.contains("nested hole loop"));
+    let nested = result
+        .holes
+        .iter()
+        .filter(|hole| hole.triangles == 0 && hole.filled)
+        .count();
+    assert_eq!(nested, 2);
+}
+
+/// A flat 7×7 plate with a 3×3 hole that contains a 1×1 island: the outer
+/// frame and the island are separate material regions, and the moat between
+/// them must stay open.
+fn plate_with_island() -> Mesh {
+    let size = 8usize;
+    let mut vertices = Vec::new();
+    for j in 0..size {
+        for i in 0..size {
+            vertices.push(p(i as f64, j as f64, 0.0));
+        }
+    }
+    let index = |i: usize, j: usize| (j * size + i) as u32;
+    let removed = [
+        (2usize, 2usize),
+        (3, 2),
+        (4, 2),
+        (2, 3),
+        (4, 3),
+        (2, 4),
+        (3, 4),
+        (4, 4),
+    ];
+    let mut triangles = Vec::new();
+    for j in 0..size - 1 {
+        for i in 0..size - 1 {
+            if removed.contains(&(i, j)) {
+                continue;
+            }
+            let a = index(i, j);
+            let b = index(i + 1, j);
+            let c = index(i + 1, j + 1);
+            let d = index(i, j + 1);
+            triangles.push([a, b, c]);
+            triangles.push([a, c, d]);
+        }
+    }
+    Mesh {
+        vertices,
+        triangles: triangles.clone(),
+        normals: Vec::new(),
+        face_sources: vec![None; triangles.len()],
+        colors: Vec::new(),
+        uvs: Vec::new(),
+        texture: None,
+        pbr: None,
+    }
+}
+
+#[test]
+fn a_nested_island_is_filled_separately_from_the_frame_annulus() {
+    let mesh = plate_with_island();
+    let result = fill_holes(&mesh).expect("the nested loops are reported");
+    assert_eq!(
+        result.filled, 3,
+        "outer frame, its hole, and the island close"
+    );
+    assert_eq!(result.refused, 0);
+    assert_eq!(result.topology.boundary_edges, 0);
+    let patch_owners = result
+        .holes
+        .iter()
+        .filter(|hole| hole.triangles > 0)
+        .count();
+    let nested_holes = result
+        .holes
+        .iter()
+        .filter(|hole| hole.filled && hole.triangles == 0)
+        .count();
+    assert_eq!(
+        patch_owners, 2,
+        "the frame annulus and the island each get a patch"
+    );
+    assert_eq!(
+        nested_holes, 1,
+        "only the frame hole is owned by the outer patch"
+    );
     assert!(result
         .holes
         .iter()
-        .all(|hole| hole.code == Some("mesh.hole_nested_not_supported")));
+        .any(|hole| hole.filled && hole.detail.contains("nested hole")));
+}
+
+#[test]
+fn a_square_tube_caps_both_annulus_rims_without_covering_the_hole() {
+    let mesh = square_tube();
+    let result = fill_holes(&mesh).expect("two annulus rims fill");
+    assert_eq!(result.filled, 4, "two outer and two nested loops close");
+    assert_eq!(result.refused, 0);
+    assert_eq!(
+        classify(&weld(&result.mesh).unwrap()).class,
+        MeshClass::ClosedManifold
+    );
+    assert_eq!(result.topology.boundary_edges, 0);
+    // 2×2×2 outside minus a 1×1×2 through-hole.
+    assert!((signed_volume(&result.mesh) - 6.0).abs() < 1e-9);
 }
 
 #[test]
