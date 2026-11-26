@@ -25,18 +25,19 @@
 
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
-| `full` | 48 | **69.6%** |
-| `partial` | 8 | 11.6% |
+| `full` | 51 | **73.9%** |
+| `partial` | 5 | 7.2% |
 | `pending` | 13 | 18.8% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（48/69 = 69.6%）。
-- 但 `full` 的主体是二维制图/编辑/导航/文件命令；**SketchUp 特有的网格核心仍是 `partial`**：
-  `PRESSPULL` 只对精确实体，`UNION`/`SUBTRACT`/`INTERSECT` 只对精确 `Body3d{Solid,Exact}`。
-  因此本表的“50%”不是“SketchUp 已复刻一半”的营销结论；网格核心由 P-MESH-0…3 补齐。
-- 当前轮的工程目标（见 ADR-0061）是 P-MESH-0（已实现）；P-MESH-1a/1b（网格布尔/修复）未实现，它们
-  把上面三个 Solid Tools 从 `partial` 推向 `full`（仍是非精确网格），并让 `PRESSPULL` 具备
-  网格分支。
+- **50% 线已满足**（51/69 = 73.9%）。
+- `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
+  `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
+  （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
+  结果仍是**非精确**网格。`PRESSPULL` 仍只对精确实体（网格编辑是 P-MESH-2）。
+  因此本表的“73.9%”不是“SketchUp 已复刻七成”的营销结论；网格编辑/补洞由 P-MESH-2/3 补齐。
+- P-MESH-1a/1b 已实现（2026-11-26）：Linux 原生注入 `ManifoldMeshModeler`；其它载体按
+  `unsupported-runtime: mesh-modeler` 显式拒绝。
 
 ## 3. Toolbar 单元
 
@@ -115,13 +116,13 @@
 七个标准视图（top/bottom/front/back/left/right/isometric）由 `STANDARD_VIEWS` 与
 `cad_set_view` 承担。
 
-### Solid Tools（6；partial 3 / pending 3）
+### Solid Tools（6；full 3 / pending 3）
 
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
-| Union | `UNION` | partial | 只接受精确 `Body3d{Solid,Exact}`；网格走 P-MESH-1a |
-| Subtract | `SUBTRACT` | partial | 同上 |
-| Intersect | `INTERSECT` | partial | 同上 |
+| Union | `UNION` | full | 精确 `Body3d{Solid,Exact}` 或闭合网格；混合选择拒绝；网格结果非精确 |
+| Subtract | `SUBTRACT` | full | 同上 |
+| Intersect | `INTERSECT` | full | 同上 |
 | Outer Shell | `OUTERSHELL` | pending | 没有“只留外表面”的网格操作 |
 | Trim | `TRIMSOLID` | pending | 没有保留刀具的裁剪 |
 | Split | `SPLITSOLID` | pending | 没有双结果分割 |
@@ -151,11 +152,12 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 
 ## 5. 本轮验收与后续
 
-- **本轮（P-MESH-0）**：网格内核接缝 + 真实布尔/修复**原语**（`MeshModeler` 已在
-  `cad-kernel-manifold` 落地并有真实内核测试）；**命令/宿主未接线**，`UNION`/`SUBTRACT`/
-  `INTERSECT` 对网格体仍不可用，open shell 按 `mesh.not_closed` 拒绝。
-- **P-MESH-1a/1b（未实现）**：复用 `UNION`/`SUBTRACT`/`INTERSECT` 接网格体（结果写新的
-  `AcDbSubDMesh`，不冒充来源/精确），再做网格修复命令。
+- **P-MESH-0（已实现 2026-11-26）**：网格内核接缝 + 真实布尔/修复**原语**
+  （`MeshModeler` 在 `cad-kernel-manifold`，真实内核测试）。
+- **P-MESH-1a/1b（已实现 2026-11-26）**：复用 `UNION`/`SUBTRACT`/`INTERSECT` 接网格体
+  （结果写新的 `AcDbSubDMesh`，不冒充来源/精确）；`MESHREPAIR`（orientation）与
+  `MESHREBUILD`（winding rebuild）修复闭合网格，返回 `Partial` 报告；worker + 取消 +
+  陈旧检查 + 一条事务/一步撤销。open shell 仍按 `mesh.not_closed` 拒绝。
 - **之后（P-MESH-2）**：SKP 面身份（已导入 `Mesh.face_sources`）+ 网格 `PRESSPULL` +
   `cad-mesh-edit` 的移动/推拉/细分/平滑。
 - **P-MESH-3**：补洞与更大范围修复；未实现前不得声称支持 open shell 修复。
@@ -163,7 +165,8 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   `9cd2689df7c1bf0d1ce0d496e4e83c9367abab6d8ff3e21dc9bb8162e982dd30`，不入库）导入
   64 meshes / 1440 triangles；`face_sources` 1440 条、28 个 distinct keys；网格内核拓扑
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
-  21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。app 命令仍未接线；详见 `docs/validation-mesh-2026-11-26.md`。
+  21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
+  app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
 - 其余 `pending` 工具（Freehand/Rotated Rectangle/Pie/Follow Me/Protractor/3D Text/
   Outer Shell/Trim/Split/Camera/Walk/Look Around/Materials/Scenes/...）保持显式 pending；
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

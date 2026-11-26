@@ -253,6 +253,13 @@ pub(super) fn create_and_bind_session(shared: &Arc<Mutex<Shared>>, cad_mode: boo
                     session.set_solid_tessellator(Some(std::sync::Arc::new(
                         cad_kernel_solidcore::SolidCoreTessellator::new(),
                     )));
+                    // ADR-0061 P-MESH-1a/1b: the mesh modeler is the carrier's
+                    // composition exactly like the solid modeler. Only this
+                    // carrier injects it; every other carrier refuses mesh
+                    // booleans/repairs with `unsupported-runtime: mesh-modeler`.
+                    session.set_mesh_modeler(Some(std::sync::Arc::new(
+                        cad_kernel_manifold::ManifoldMeshModeler::new(),
+                    )));
                     // The native document format. `cad-store-zip` may only be
                     // linked by a carrier app (`scripts/check-architecture.py`),
                     // so the shared layers see it exclusively through

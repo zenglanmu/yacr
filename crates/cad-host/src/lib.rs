@@ -866,6 +866,7 @@ impl HostCore {
         self.tick_recovery();
         self.poll_open()
             .and_then(|_| self.poll_solid_boolean())
+            .and_then(|_| self.poll_mesh_job())
             .and_then(|_| self.poll_pending_save())
             .and_then(|_| self.metrics())
             .and_then(|_| self.sync_view())

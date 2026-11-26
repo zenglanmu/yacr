@@ -785,6 +785,10 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MESHEXTRUDE", CommandId::Extended(ExtendedCommandId::MeshExtrude)), ("MESHMERGE", CommandId::Extended(ExtendedCommandId::MeshMerge)),
     ("MESHOPTIONS", CommandId::Extended(ExtendedCommandId::MeshOptions)), ("MESHPRIMITIVEOPTIONS", CommandId::Extended(ExtendedCommandId::MeshPrimitiveOptions)),
     ("MESHREFINE", CommandId::Extended(ExtendedCommandId::MeshRefine)), ("MESHSMOOTH", CommandId::Extended(ExtendedCommandId::MeshSmooth)),
+    // ADR-0061 P-MESH-1b: mesh repair of the one selected closed mesh. Two canonical
+    // selectors (orientation / winding rebuild) rather than a typed argument, so a
+    // typo can never silently pick the destructive rebuild.
+    ("MESHREPAIR", CommandId::Extended(ExtendedCommandId::MeshRepair)), ("MESHREBUILD", CommandId::Extended(ExtendedCommandId::MeshRebuild)),
     ("MESHSMOOTHLESS", CommandId::Extended(ExtendedCommandId::MeshSmoothLess)), ("MESHSMOOTHMORE", CommandId::Extended(ExtendedCommandId::MeshSmoothMore)),
     ("MESHSPIN", CommandId::Extended(ExtendedCommandId::MeshSpin)), ("MESHSPLIT", CommandId::Extended(ExtendedCommandId::MeshSplit)),
     ("MESHUNCREASE", CommandId::Extended(ExtendedCommandId::MeshUncrease)),

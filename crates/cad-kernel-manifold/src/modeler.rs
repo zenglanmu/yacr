@@ -159,11 +159,30 @@ fn boolean(
     }
 
     match mesh_from_kernel(&result, family) {
-        Ok(mesh) => Ok(MeshOutcome::Success {
-            topology: inspect_topology_welded(&mesh),
-            mesh,
-            diagnostics: Vec::new(),
-        }),
+        Ok(mesh) => {
+            // ADR-0061: a boolean product is stored as a closed solid-like mesh;
+            // an open/non-manifold answer is a structured refusal, never a body
+            // that would be committed as if it had volume.
+            let topology = inspect_topology_welded(&mesh);
+            if topology.topology != MeshTopology::ClosedManifold {
+                return Ok(unsupported(
+                    family,
+                    codes::MESH_NOT_CLOSED,
+                    format!(
+                        "the boolean produced a {} mesh ({} boundary, {} non-manifold edge(s)); \
+                         a boolean product must be a closed 2-manifold",
+                        topology.topology.as_str(),
+                        topology.boundary_edges,
+                        topology.non_manifold_edges
+                    ),
+                ));
+            }
+            Ok(MeshOutcome::Success {
+                topology,
+                mesh,
+                diagnostics: Vec::new(),
+            })
+        }
         Err(KernelRun::Cancelled) => Err(CadError::Cancelled),
         Err(KernelRun::Refused(outcome)) => Ok(*outcome),
     }

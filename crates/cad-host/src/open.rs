@@ -1,6 +1,6 @@
 //! The open pipeline: picker/read → begin_async_open (or sync) → poll → install.
 use super::*;
-use cad_app::host::{SolidBooleanPoll, XrefOptions};
+use cad_app::host::{MeshJobPoll, SolidBooleanPoll, XrefOptions};
 use cad_app::AsyncOpenPoll;
 #[cfg(not(target_arch = "wasm32"))]
 use cad_platform::FsXrefSource;
@@ -19,6 +19,19 @@ fn solid_boolean_error_text(error: &CadError) -> String {
             // Generic sentence: the panic payload was dropped at the task seam and
             // must not be reconstructed here.
             "the solid boolean worker stopped unexpectedly; the drawing is unchanged".to_string()
+        }
+        other => error_text(other),
+    }
+}
+
+/// How a failed mesh job is shown: a worker panic is a stable generic sentence
+/// (the payload is never reconstructed), every other error keeps its text.
+fn mesh_job_error_text(error: &CadError) -> String {
+    match error {
+        CadError::Invariant(reason)
+            if reason.starts_with(cad_app::tasks::MESH_JOB_WORKER_PANICKED) =>
+        {
+            "the mesh worker stopped unexpectedly; the drawing is unchanged".to_string()
         }
         other => error_text(other),
     }
@@ -531,6 +544,50 @@ impl HostCore {
                 self.set_catalog_status(
                     "solid.boolean_failed",
                     &[("error", &solid_boolean_error_text(&error))],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Advance the background mesh boolean/repair and publish a current result.
+    ///
+    /// The controller commits the mesh (one transaction/one undo step) before
+    /// this returns `Done`; the render side is then told to rebuild from the new
+    /// document. `Idle`/`Running` change nothing; `Stale`, `Cancelled` and
+    /// `Failed` are reported explicitly and leave the drawing untouched.
+    pub(crate) fn poll_mesh_job(&self) -> CadResult<()> {
+        let poll = self.controller.borrow_mut().poll_mesh_job();
+        self.apply_mesh_job_poll(poll)
+    }
+
+    /// The status/document half of [`Self::poll_mesh_job`].
+    pub(crate) fn apply_mesh_job_poll(&self, poll: MeshJobPoll) -> CadResult<()> {
+        match poll {
+            MeshJobPoll::Idle | MeshJobPoll::Running => {}
+            MeshJobPoll::Stale => {
+                self.set_catalog_status("mesh.job_stale", &[])?;
+            }
+            MeshJobPoll::Done { repair, .. } => {
+                self.controller.borrow_mut().cancel_tool()?;
+                self.render.sync_drawing(self.controller.borrow().drawing());
+                self.full_dirty.set(true);
+                // A repair is the only product that carries a report; the status
+                // names it so a user sees which command settled.
+                let key = if repair.is_some() {
+                    "mesh.repair_done"
+                } else {
+                    "mesh.boolean_done"
+                };
+                self.set_catalog_status(key, &[])?;
+            }
+            MeshJobPoll::Cancelled => {
+                self.set_catalog_status("mesh.job_cancelled", &[])?;
+            }
+            MeshJobPoll::Failed { error } => {
+                self.set_catalog_status(
+                    "mesh.job_failed",
+                    &[("error", &mesh_job_error_text(&error))],
                 )?;
             }
         }

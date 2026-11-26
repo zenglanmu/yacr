@@ -48,7 +48,9 @@
     `truck`/`opencascade` 均未出现）。网格内核已选定 `manifold-rust =0.19.6`（纯 Rust，
     robust 引擎 + 修复 + 取消），见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；
     **P-MESH-0 已实现（2026-11-26）：接缝 + `cad-kernel-manifold` + 门禁 + 真实内核测试；
-    P-MESH-1a 之前仍无用户可见命令**。
+    P-MESH-1a/1b 也已实现（2026-11-26）：网格 `UNION`/`SUBTRACT`/`INTERSECT` 与
+    `MESHREPAIR`/`MESHREBUILD` 由 Linux 原生载体注入 `ManifoldMeshModeler`，其它载体按
+    `unsupported-runtime: mesh-modeler` 拒绝**。
 
 **2026-11-17 更新（命令侧）**：`MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线（C3a，见 §4.3）；
 `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`（C3b）；`VSCURRENT` 已是
@@ -453,7 +455,7 @@ wire 体按 `export.skp.wire_body_no_writable_edges` 整实体丢弃）；
 - 不能做的：布尔、圆角、体积、精确质量属性。
 - 这是今天的行为；只要 UI 不写"实体"就没有过度承诺。
 
-**B. 网格布尔/修复（选定，见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；P-MESH-0 已实现，P-MESH-1a/1b 未实现）**
+**B. 网格布尔/修复（选定，见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；P-MESH-0/1a/1b 已实现）**
 
 - 内核固定为纯 Rust 的 `manifold-rust =0.19.6`（Apache-2.0；exact + robust 引擎；
   `repair_orientation`/`rebuild_solid`/`merge`；`CancelToken`/进度；wasm32 可编译）。
@@ -639,8 +641,8 @@ StepImporter::import
 | P0.1 | 存储边线直送 `RenderBatch.edges`；拆分到限文件（**已完成**，Linux 契约/单元证据） | 表示/场景契约测试；无三角形重推 |
 | P-SKP-1/2/3 | SKP 组件实例、tag 图层、边线（**P-SKP-3 已实现 2026-11-23，ADR-0049**：真实边进 `Body3d`/`BodyDisplay.edges`；显示边吸附/测量按 ADR-0050 的窄声明，SKP 写出按 ADR-0051 合并单 run + 自由边） | 导入契约测试 + 同一文件重复导入稳定；`Partial` 理由收窄；边证据仅契约测试，corpus 重跑 **NOT RUN**；导出证据仅 `skpwright` 自洽往返 |
 | P-MESH-0（**已实现 2026-11-26**） | [ADR-0061](adr/0061-mesh-kernel-selection.md)：`cad-kernel-adapter::mesh` 的 `MeshModeler` 接缝 + `cad-kernel-manifold`（`manifold-rust =0.19.6`）+ 架构门禁 + 许可证登记；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`check-architecture.py`；无 modeler 时 `unsupported-runtime: mesh-modeler` |
-| P-MESH-1a（未实现） | `concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质），必须是 `ClosedManifold`；mesh/solid 布尔互斥；仍非精确 | 闭合 cube∪/∖/∩ cube；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/运行期取消不写库；一条事务/一步撤销 |
-| P-MESH-1b（未实现） | 网格修复命令（`Orientation`/`Rebuild`）+ `Partial` 报告；补洞仍属 P-MESH-3 | 非流形闭合汤 → `Partial` + `MeshRepair`；open → `mesh.not_closed`；一条事务/一步撤销 |
+| P-MESH-1a（**已实现 2026-11-26**） | `concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质），必须是 `ClosedManifold`；mesh/solid 布尔互斥；仍非精确 | 闭合 cube∪/∖/∩ cube；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/运行期取消不写库；一条事务/一步撤销 |
+| P-MESH-1b（**已实现 2026-11-26**） | 网格修复命令（`MESHREPAIR` Orientation / `MESHREBUILD` Rebuild）+ `Partial` 报告；补洞仍属 P-MESH-3 | 非流形闭合汤 → `Partial` + `MeshRepair`；open → `mesh.not_closed`；一条事务/一步撤销 |
 | P-MESH-2（未实现） | SKP 源面身份写 `Mesh.face_sources`（`skp:face:<n>`）+ 按面/边拾取 + 移动/推拉/细分/平滑（共享层 `cad-mesh-edit`） | 同一源面三角形共享 id；编辑后 `cad-db` 校验通过；无面身份 → `mesh.face_identity_unavailable` |
 | P-MESH-3（未实现） | 补洞/更大范围修复（boundary loop fill、非闭合输入） | 逐洞报告、输出仍非精确；未实现前不得声称支持 open shell 修复 |
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |

@@ -631,6 +631,17 @@ pub struct Application {
     /// `HostController`). The worker only computes; the host publishes the body
     /// when it polls a current, non-stale result.
     solid_booleans: crate::tasks::SolidBooleanManager,
+    /// The injected mesh modeler (ADR-0061, P-MESH-1a/1b).
+    ///
+    /// Injected by the **carrier** exactly like the solid modeler. `None` means
+    /// this carrier has no mesh kernel and every mesh boolean/repair refuses
+    /// with `unsupported-runtime: mesh-modeler` instead of fabricating geometry.
+    mesh_modeler: Option<Arc<dyn cad_kernel_adapter::MeshModeler>>,
+    /// The single current background mesh boolean/repair job.
+    ///
+    /// Booleans and repairs share one slot so they can never run at once; the
+    /// host publishes the mesh only for a current, non-stale result.
+    mesh_jobs: crate::tasks::MeshJobManager,
 }
 
 impl Default for Application {

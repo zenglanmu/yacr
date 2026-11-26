@@ -218,7 +218,9 @@ impl HostController {
 /// instance paths are refused), so carrying it would only copy an unreachable
 /// field. A plain body therefore inherits nothing, while an operand with an
 /// explicit colour/linetype/lineweight/opacity keeps it.
-fn inherited_display_state(states: &[EntityDisplayState]) -> Option<&EntityDisplayState> {
+pub(super) fn inherited_display_state(
+    states: &[EntityDisplayState],
+) -> Option<&EntityDisplayState> {
     states
         .first()
         .filter(|state| state.attributes != EntityRenderAttributes::default())

@@ -45,4 +45,5 @@ cad-kernel-solidcore.workspace = true
 # itself links neither connector nor mesh kernel.
 cad-connector-core.workspace = true
 cad-connector-skp.workspace = true
+cad-connector-mesh.workspace = true
 cad-kernel-manifold.workspace = true

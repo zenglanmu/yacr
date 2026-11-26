@@ -191,7 +191,9 @@ mod shape;
 // ADR-0036 phase C1: BOX/WEDGE/PYRAMID/CYLINDER/SPHERE/CONE/TORUS create one
 // real exact `Body3d` through the injected `SolidModeler`; phase C2 adds the
 // background `UNION`/`SUBTRACT`/`INTERSECT` job (`tasks::solid`).
+pub(crate) mod mesh_solids;
 pub(crate) mod solids;
+pub(crate) use mesh_solids::{classify_boolean_operand, BooleanOperand, MESH_TYPE_KEY};
 // `XEDGES`: copy the selected bodies' stored display edges into LINE rows (one
 // transaction / one undo step; no second geometry kernel).
 mod xedges;

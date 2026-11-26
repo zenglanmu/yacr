@@ -51,4 +51,18 @@ impl CadSession {
     pub fn persistence_store(&self) -> Option<Arc<dyn Persistence>> {
         self.core.persistence_store()
     }
+
+    /// Install (or clear) the carrier's mesh modeler (ADR-0061 P-MESH-1a/1b).
+    ///
+    /// The same carrier-owned, trait-only composition as
+    /// [`Self::set_solid_modeler`]: `app-linux` injects the real
+    /// `ManifoldMeshModeler`; every other carrier passes nothing and mesh
+    /// booleans/repairs refuse with `unsupported-runtime: mesh-modeler`.
+    pub fn set_mesh_modeler(&self, modeler: Option<Arc<dyn cad_kernel_adapter::MeshModeler>>) {
+        self.core
+            .controller
+            .borrow_mut()
+            .application
+            .set_mesh_modeler(modeler);
+    }
 }

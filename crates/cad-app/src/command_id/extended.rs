@@ -877,6 +877,12 @@ pub enum ExtendedCommandId {
     MeshPrimitiveOptions,
     /// `MESHREFINE`: mesh refinement is not implemented.
     MeshRefine,
+    /// `MESHREPAIR` (ADR-0061 P-MESH-1b): orientation-repair the one selected
+    /// closed mesh (Work-only; background job).
+    MeshRepair,
+    /// `MESHREBUILD` (ADR-0061 P-MESH-1b): rebuild the one selected closed mesh
+    /// from its winding numbers (Work-only; background job).
+    MeshRebuild,
     /// `MESHSMOOTH`: mesh smoothing conversion is not implemented.
     MeshSmooth,
     /// `MESHSMOOTHLESS`: no mesh smoothness level model.

@@ -18,6 +18,7 @@ mod document;
 mod domain;
 mod draw_pick;
 mod explode;
+mod mesh_jobs;
 mod mtext;
 mod multiple;
 mod ortho;

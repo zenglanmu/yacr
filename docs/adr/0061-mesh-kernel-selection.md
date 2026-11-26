@@ -1,6 +1,7 @@
 # ADR-0061：网格内核选择（SketchUp 网格布尔 / 修复 / 编辑）
 
-- 状态：**已接受（决策，2026-11-26）**；**P-MESH-0 已实现（2026-11-26）**，P-MESH-1a/1b 未实现
+- 状态：**已接受（决策，2026-11-26）**；**P-MESH-0 已实现（2026-11-26）**，
+  **P-MESH-1a/1b 已实现（2026-11-26，Linux 原生契约 + 真实内核命令路径）**
 - 关联：ADR-0036（3D 实体与 solidcore 接缝）、ADR-0033（多格式导入）、ADR-0048（格式连接器
   crate）、ADR-0049（SKP 存储边）、ADR-0053（应用域，SketchUp 对应 `concept`）、
   `docs/3d-solidcore-and-mesh-import.md` §5.4/§7
@@ -166,8 +167,10 @@ P-MESH-2 在 `cad-connector-skp` 为每个源面写 `Mesh.face_sources`（`skp:f
 
 ### D8 用户可见命令不在本 ADR 开放
 
-P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1 才决定命令拼写与域摆放；在实现前，
-`concept` 域的网格布尔/修复/编辑入口保持 `pending`，不得放可点假按钮（ADR-0053 D8）。
+P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1 决定命令拼写与域摆放：**已实现
+（2026-11-26）**——`UNION`/`SUBTRACT`/`INTERSECT` 按操作数类别复用，修复用 `MESHREPAIR`
+（Orientation）与 `MESHREBUILD`（Rebuild）；`concept` 域的网格编辑入口（P-MESH-2）仍保持
+`pending`，不得放可点假按钮（ADR-0053 D8）。
 
 ## 候选比较
 
@@ -187,8 +190,8 @@ P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1 才决定命令�
 | 阶段 | 内容 | 验收（必须真实运行） |
 |---|---|---|
 | **P-MESH-0** | **已实现（2026-11-26）**：`cad-kernel-adapter::mesh` 接缝 + `cad-kernel-manifold` + 架构门禁 + `THIRD_PARTY_NOTICES` 登记；原生目标用看门线程把 `cancelled` 映射到内核 `CancelToken`（wasm 只有预/后检查，已声明）；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`（66 + 9 passed）；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`python3 scripts/check-architecture.py`；无 `MeshModeler` 时 `unsupported-runtime: mesh-modeler`（宿主接线前） |
-| **P-MESH-1a** | `MeshModeler` 注入 `native-below` 宿主；`concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质，类型/来源不冒充）；结果必须是 `ClosedManifold`；mesh/solid 布尔互斥（或共用单槽），文档替换/关闭同时中止两者；仍非精确 | 闭合 cube∪/∖/∩ cube 体积与流形性；`Body3d{Unknown}`/`Mesh` 操作数；mixed exact+mesh → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/运行期取消不写库；一条事务/一步撤销；陈旧结果丢弃；宿主无 mesh modeler → `unsupported-runtime: mesh-modeler` |
-| **P-MESH-1b** | 网格修复命令（`Orientation`/`Rebuild`）+ `Partial` 报告；补洞仍属 P-MESH-3 | 非流形闭合汤 → `Partial` + `MeshRepair`；open → `mesh.not_closed`；一条事务/一步撤销；导出仍非精确 |
+| **P-MESH-1a** | **已实现（2026-11-26）**：`MeshModeler` 注入 `native-below` 宿主；`concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质，类型/来源不冒充）；结果必须 `ClosedManifold`；mesh/solid 布尔互斥（共用命令面，应用层拒绝交错启动），文档替换/关闭同时中止两者；仍非精确 | `cad-app` 命令/host 契约 12 passed；`cad-cli-tools/tests/mesh_command.rs` 真实内核 5 passed（∪/∖/∩ 体积 12/4/4、`Revision(1)`、一条撤销、`Body3d{Unknown}` 操作数、闭合非流形汤重建 `Partial`）；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/宿主取消不写库；陈旧结果丢弃；宿主无 mesh modeler → `unsupported-runtime: mesh-modeler` |
+| **P-MESH-1b** | **已实现（2026-11-26）**：网格修复命令 `MESHREPAIR`（`Orientation`）/`MESHREBUILD`（winding `Rebuild`）+ `Partial` 报告；补洞仍属 P-MESH-3 | 真实内核命令路径：闭合/翻转网格修复后仍 `ClosedManifold` 且外向；open → `mesh.not_closed` 不写库；非流形闭合汤可能 `Partial` 或按 `mesh.failed`/`mesh.not_manifold` 结构化拒绝（在线样本 5 例）；一条事务/一步撤销；导出仍非精确 |
 | **P-MESH-2** | SKP 面身份（`face_sources`）+ 按面/边拾取 + 移动/推拉/细分/平滑；编辑层 `cad-mesh-edit` 与 kernel 的边界 | 导入契约：同一 SKP 面所有三角形共享 `skp:face:<n>`；编辑后 `cad-db` 校验通过；无面身份时 `mesh.face_identity_unavailable` |
 | **P-MESH-3** | 补洞/更大范围修复（boundary loop fill、非闭合输入） | 逐洞报告、输出仍非精确；**未实现前不得声称支持 open shell 修复** |
 
@@ -208,7 +211,8 @@ P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1 才决定命令�
   kernel 拓扑普查 21 closed / 41 open / 2 non-manifold（共 1379 boundary edges；2 个非流形也带
   boundary edge，按 `mesh.not_closed` 拒绝）；21 个闭合网格的 `Orientation` 修复全部 `Partial`，
   41 个开放网格全部 `mesh.not_closed`；前两个闭合网格的 kernel-level `Union` 返回非空 mesh。
-  **这只代表这一份文件**，不是 SketchUp 语料/产品验收；app 命令仍未接线。
+  **这只代表这一份文件**，不是 SketchUp 语料/产品验收；P-MESH-1a/1b 的 app 命令接线由
+  `docs/validation-mesh-2026-11-26.md` §3 的 `mesh_command`/`mesh_real_samples` 覆盖。
 - **非 Linux 平台运行状态仍为 NOT VERIFIED**；P-MESH-0 的契约测试在 Linux 原生执行，
   Windows/macOS/Android 仅编译/类型检查，Web/`dom-canvas` 的 mesh 布尔仍拒绝。
 - `manifold-rust` 是 0.19.x（pre-1.0）且 2026-07 才发布；固定精确版本、不启用 `parallel`，

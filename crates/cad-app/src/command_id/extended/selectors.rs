@@ -379,6 +379,8 @@ impl ExtendedCommandId {
             Self::MeshOptions => "MESHOPTIONS",
             Self::MeshPrimitiveOptions => "MESHPRIMITIVEOPTIONS",
             Self::MeshRefine => "MESHREFINE",
+            Self::MeshRepair => "MESHREPAIR",
+            Self::MeshRebuild => "MESHREBUILD",
             Self::MeshSmooth => "MESHSMOOTH",
             Self::MeshSmoothLess => "MESHSMOOTHLESS",
             Self::MeshSmoothMore => "MESHSMOOTHMORE",
@@ -794,6 +796,8 @@ impl ExtendedCommandId {
         Self::MeshOptions,
         Self::MeshPrimitiveOptions,
         Self::MeshRefine,
+        Self::MeshRepair,
+        Self::MeshRebuild,
         Self::MeshSmooth,
         Self::MeshSmoothLess,
         Self::MeshSmoothMore,
@@ -948,6 +952,10 @@ impl ExtendedCommandId {
                 | Self::Union
                 | Self::Subtract
                 | Self::Intersect
+                // ADR-0061 P-MESH-1b: MESHREPAIR/MESHREBUILD rewrite the one
+                // selected mesh (one transaction / one undo step).
+                | Self::MeshRepair
+                | Self::MeshRebuild
                 // ADR-0036: CHAMFEREDGE and PRESSPULL rewrite one exact body in
                 // place (one transaction / one undo step), so they are drawing
                 // writes too.

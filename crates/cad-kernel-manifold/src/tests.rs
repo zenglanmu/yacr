@@ -173,6 +173,43 @@ fn rebuild_solid_returns_a_closed_product() {
 }
 
 #[test]
+fn a_closed_non_manifold_soup_rebuilds_to_a_partial_closed_product() {
+    // Two face-sharing cubes with both copies of the shared wall: every edge is
+    // used 2 or 4 times, so the surface is closed but non-manifold. A rebuild
+    // must drop the internal wall and return one closed product.
+    let left = cube(2.0, [0.0, 0.0, 0.0]);
+    let right = cube(2.0, [2.0, 0.0, 0.0]);
+    let mut vertices = left.vertices.clone();
+    let offset = vertices.len() as u32;
+    vertices.extend(right.vertices.iter().copied());
+    let mut triangles = left.triangles.clone();
+    triangles.extend(right.triangles.iter().map(|triangle| {
+        [
+            triangle[0] + offset,
+            triangle[1] + offset,
+            triangle[2] + offset,
+        ]
+    }));
+    let soup = MeshData::from_parts(vertices, triangles);
+    let input = cad_kernel_adapter::inspect_topology_welded(&soup);
+    assert_eq!(input.topology, MeshTopology::NonManifold);
+    assert_eq!(input.boundary_edges, 0);
+
+    let outcome = run(MeshOperation::Repair {
+        mesh: &soup,
+        mode: MeshRepairMode::Rebuild,
+        rule: MeshWindingRule::Nonzero,
+    });
+    let MeshOutcome::Partial { mesh, repair, .. } = outcome else {
+        panic!("a closed non-manifold soup must rebuild to Partial, got {outcome:?}");
+    };
+    assert_eq!(repair.input.topology, MeshTopology::NonManifold);
+    assert!(repair.is_closed());
+    assert_eq!(repair.output.topology, MeshTopology::ClosedManifold);
+    assert_close(volume_of(&mesh).expect("rebuilt soup re-imports"), 16.0);
+}
+
+#[test]
 fn pre_cancellation_wins_before_validation() {
     let left = cube(1.0, [0.0, 0.0, 0.0]);
     let right = left.clone();

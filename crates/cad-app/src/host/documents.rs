@@ -105,6 +105,8 @@ impl HostController {
         // A boolean result computed against the old document must never publish
         // into the replacement: cancel and drop the job before the slot changes.
         self.application.abort_solid_boolean();
+        // The mesh boolean/repair slot has the same rule (ADR-0061 D7).
+        self.application.abort_mesh_job();
         let tool_generation = self.session.tool_generation.saturating_add(1);
         self.application.history.remove(&self.document_id);
         self.application.query = cad_query::QueryService::new();

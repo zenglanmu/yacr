@@ -18,6 +18,11 @@ impl Application {
             solid_tessellator: None,
             // Adopted from the first plan's document at `start`.
             solid_booleans: crate::tasks::SolidBooleanManager::new(cad_domain::DocumentId(0)),
+            // No mesh kernel is linked here either: a carrier injects its mesh
+            // modeler (ADR-0061). Without one every mesh boolean/repair refuses
+            // by name with `unsupported-runtime: mesh-modeler`.
+            mesh_modeler: None,
+            mesh_jobs: crate::tasks::MeshJobManager::new(cad_domain::DocumentId(0)),
         }
     }
 
@@ -43,6 +48,15 @@ impl Application {
         plan: crate::tasks::SolidBooleanPlan,
         modeler: Arc<dyn cad_kernel_adapter::SolidModeler>,
     ) -> CadResult<()> {
+        // A mesh job and an exact boolean share the one background slot from the
+        // user's point of view; refuse rather than queue behind it.
+        if self.mesh_jobs.is_running() {
+            return Err(CadError::Unsupported(
+                "solid.boolean_busy: a mesh operation is running; wait for it to settle before \
+                 starting a solid boolean"
+                    .into(),
+            ));
+        }
         // The display mesher rides along with the modeler: the worker tessellates
         // its own result, so the injected one (or `None`) must cross with it.
         let tessellator = self.solid_tessellator.clone();
@@ -104,6 +118,63 @@ impl Application {
     /// the document is replaced or closed: no later poll may publish it.
     pub(crate) fn abort_solid_boolean(&mut self) {
         self.solid_booleans.cancel();
+    }
+
+    /// Inject (or clear) the mesh modeler this application uses (ADR-0061).
+    ///
+    /// Carrier-owned composition, exactly like [`Self::set_solid_modeler`]:
+    /// `cad-app` links no mesh kernel and the seam is trait-only, so no kernel
+    /// type crosses into this crate. `None` restores the honest
+    /// `unsupported-runtime: mesh-modeler` answer.
+    pub fn set_mesh_modeler(&mut self, modeler: Option<Arc<dyn cad_kernel_adapter::MeshModeler>>) {
+        self.mesh_modeler = modeler;
+    }
+
+    /// Whether this carrier injected a mesh modeler (ADR-0061).
+    pub fn has_mesh_modeler(&self) -> bool {
+        self.mesh_modeler.is_some()
+    }
+
+    /// Start the controller's single background mesh boolean/repair job.
+    ///
+    /// Mesh booleans and exact solid booleans mutually exclude each other: the
+    /// two workers would otherwise compete for the same command surface and
+    /// history ordering. A busy slot is a named refusal, not a queue.
+    pub(crate) fn start_mesh_job(
+        &mut self,
+        plan: crate::tasks::MeshJobPlan,
+        modeler: Arc<dyn cad_kernel_adapter::MeshModeler>,
+    ) -> CadResult<()> {
+        if self.solid_booleans.is_running() {
+            return Err(CadError::Unsupported(
+                "mesh.kernel_busy: a solid boolean is running; wait for it to settle before \
+                 starting a mesh operation"
+                    .into(),
+            ));
+        }
+        self.mesh_jobs.start(plan, modeler).map(|_| ())
+    }
+
+    /// Whether a background mesh job is currently running.
+    pub fn mesh_job_running(&self) -> bool {
+        self.mesh_jobs.is_running()
+    }
+
+    /// Take the mesh job's terminal state (never commits).
+    pub(crate) fn poll_mesh_job_take(&mut self) -> crate::tasks::MeshJobTake {
+        self.mesh_jobs.poll()
+    }
+
+    /// Ask a running mesh job to stop; the slot is kept so the terminal
+    /// `Cancelled` state stays observable.
+    pub(crate) fn cancel_mesh_job(&mut self) {
+        self.mesh_jobs.request_cancel();
+    }
+
+    /// Cancel and release a running mesh job without a terminal report. Used
+    /// when the document is replaced or closed.
+    pub(crate) fn abort_mesh_job(&mut self) {
+        self.mesh_jobs.cancel();
     }
 
     /// Execute a command. This is the single entry point shared by UI and CLI.

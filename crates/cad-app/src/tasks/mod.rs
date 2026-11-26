@@ -43,8 +43,11 @@ use cad_platform::CancellationToken;
 
 use crate::host::HostController;
 
+mod mesh;
 mod solid;
 
+pub use mesh::MESH_JOB_WORKER_PANICKED;
+pub(crate) use mesh::{MeshJobKind, MeshJobManager, MeshJobOperand, MeshJobPlan, MeshJobTake};
 pub use solid::SOLID_BOOLEAN_WORKER_PANICKED;
 pub(crate) use solid::{
     SolidBooleanManager, SolidBooleanOperand, SolidBooleanPlan, SolidBooleanTake,

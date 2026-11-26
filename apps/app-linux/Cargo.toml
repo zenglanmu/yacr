@@ -49,6 +49,9 @@ cad-store-zip.workspace = true
 # stays behind the trait seam; no kernel type reaches another shared layer, and
 # this host never names the trait's crate itself.
 cad-kernel-solidcore.workspace = true
+# ADR-0061 P-MESH-1a/1b: the same carrier-composition rule for the mesh kernel.
+# `cad-kernel-manifold` is injected here only; the shared layers see the trait.
+cad-kernel-manifold.workspace = true
 
 # GTK overlay bridge: the probe surface lives on a windowed GtkDrawingArea
 # inside a GtkOverlay, with the React webview reparented as a transparent sibling.

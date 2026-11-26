@@ -27,6 +27,7 @@ mod draw_create;
 mod draw_intent_map;
 mod draw_pick;
 mod export_options;
+mod mesh;
 mod multiple;
 mod open_import;
 mod properties;
@@ -64,7 +65,8 @@ pub use databases::{
 /// Re-exported so host-side code can name the option types without a direct
 /// `cad-connector-acadrust` dependency, exactly like [`XrefOptions`].
 pub use export_options::{AcisVersion, DxfTarget, ExportOptions};
-/// The poll result of the background solid boolean (ADR-0036 phase C2).
+pub use mesh::MeshJobPoll;
+/// The background solid boolean and mesh job poll results (ADR-0036 / ADR-0061).
 pub use solids::SolidBooleanPoll;
 
 /// Result of a successful drawing open, for status lines and diagnostics.

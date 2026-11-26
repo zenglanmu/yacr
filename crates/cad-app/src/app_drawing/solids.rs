@@ -8,10 +8,18 @@
 //! display mesh) and commits **one** `Body3d { kind: Solid, exact, display }` row
 //! with the ACIS class key `AcDb3dSolid` — one transaction, one undo step.
 //!
-//! `UNION`/`SUBTRACT`/`INTERSECT` (phase C2) validate at least two selected exact
-//! solid bodies and start a background job; the worker folds them through the
-//! modeler and the host commits the result in one transaction (see
+//! `UNION`/`SUBTRACT`/`INTERSECT` (phase C2) validate at least two selected
+//! bodies and start a background job; the worker folds them through the modeler
+//! and the host commits the result in one transaction (see
 //! [`Application::boolean_solids`] and `crate::tasks::SolidBooleanJob`).
+//!
+//! P-MESH-1a (ADR-0061) extends the **same three commands** to triangle meshes:
+//! after the shared selection/layer/space checks, every operand is classified as
+//! exact (`AcDb3dSolid`) or mesh (`Mesh`, or a `Body3d { kind: Unknown }` display
+//! body). A mixed selection refuses `boolean.operand_class_mismatch`; an
+//! all-mesh selection starts a `MeshJob` instead (see
+//! `crate::app_drawing::mesh_solids`). The result is a new `AcDbSubDMesh` row and
+//! is never exact B-rep geometry.
 //!
 //! # Result representability
 //!
@@ -267,9 +275,12 @@ impl Application {
     ///
     /// Everything that can refuse happens here, before any worker or staging:
     /// payload shape, selection arity, whole-body refs, layer/space agreement and
-    /// every operand's `Body3d { Solid, Exact }` (stored as `AcDb3dSolid`). A
-    /// curved/unliftable operand is deliberately **not** pre-judged: the modeler
-    /// decides, and its `Unsupported` answer becomes the job's `Failed` terminal.
+    /// the operand class. Exact operands must be `Body3d { Solid, Exact }` rows
+    /// stored as `AcDb3dSolid`; mesh operands are `Mesh` rows or imported
+    /// `Body3d { kind: Unknown }` display bodies. Mixing the two refuses
+    /// `boolean.operand_class_mismatch` (P-MESH-1a). A curved/unliftable exact
+    /// operand is deliberately **not** pre-judged: the modeler decides, and its
+    /// `Unsupported` answer becomes the job's `Failed` terminal.
     ///
     /// On success this starts the job and returns [`CommandOutcome::none`] with a
     /// `solid.boolean_started` diagnostic: the drawing, its revision and history
@@ -282,10 +293,13 @@ impl Application {
         op: BooleanOp,
     ) -> CadResult<CommandOutcome> {
         require_none_payload(command, op_name(op))?;
-        let Some(modeler) = self.solid_modeler.clone() else {
-            return Err(CadError::Unsupported(SOLID_MODELER_UNSUPPORTED.into()));
-        };
         let refs = session.selection.refs().to_vec();
+        // No selection and no kernel of either class: there is no operand to pick
+        // a seam from, so the command keeps the single stable refusal. With a
+        // selection, the operand class decides which missing modeler is named.
+        if refs.is_empty() && self.solid_modeler.is_none() && self.mesh_modeler.is_none() {
+            return Err(CadError::Unsupported(SOLID_MODELER_UNSUPPORTED.into()));
+        }
         // A boolean combines bodies, never a face/edge of one or a block member.
         if refs
             .iter()
@@ -303,13 +317,13 @@ impl Application {
             return Err(invalid(
                 "boolean.needs_two",
                 format!(
-                    "{} needs at least two selected solid bodies, got {}",
+                    "{} needs at least two selected bodies, got {}",
                     op_label(op),
                     refs.len()
                 ),
             ));
         }
-        let (plan, mut diagnostics) = {
+        let (entities, mut diagnostics) = {
             let Some(document) = self.workspace.documents.get(&command.document) else {
                 return Err(CadError::InvalidInput("document not open".into()));
             };
@@ -327,70 +341,102 @@ impl Application {
                 return Err(invalid(
                     "boolean.needs_two",
                     format!(
-                        "{} needs at least two distinct selected solid bodies",
+                        "{} needs at least two distinct selected bodies",
                         op_label(op)
                     ),
                 ));
             }
-            let layer = operands[0].layer;
-            let space = operands[0].space.clone();
-            let mut snapshots = Vec::with_capacity(operands.len());
-            for entity in &operands {
-                if entity.layer != layer {
+            (operands, diagnostics)
+        };
+        let layer = entities[0].layer;
+        let space = entities[0].space.clone();
+        for entity in &entities {
+            if entity.layer != layer {
+                return Err(invalid(
+                    "boolean.layer_mismatch",
+                    format!(
+                        "entity {} is on layer {} but the first operand is on layer {}",
+                        entity.id.0, entity.layer.0, layer.0
+                    ),
+                ));
+            }
+            if entity.space != space {
+                return Err(invalid(
+                    "boolean.space_mismatch",
+                    format!(
+                        "entity {} is in another space than the first operand; a boolean never \
+                         crosses model/paper space",
+                        entity.id.0
+                    ),
+                ));
+            }
+        }
+        // Classify every operand before choosing a kernel: exact B-rep solids
+        // and triangle meshes have different seams, and mixing them is a named
+        // refusal (`boolean.operand_class_mismatch`), never a silent tessellation
+        // of the exact body (ADR-0061 P-MESH-1a).
+        let mut exact = Vec::new();
+        let mut meshes = Vec::new();
+        for entity in entities {
+            match classify_boolean_operand(&entity) {
+                Some(BooleanOperand::Exact(brep)) => exact.push((entity, brep)),
+                Some(BooleanOperand::Mesh(mesh)) => meshes.push((entity, mesh)),
+                None => {
                     return Err(invalid(
-                        "boolean.layer_mismatch",
-                        format!(
-                            "entity {} is on layer {} but the first operand is on layer {}",
-                            entity.id.0, entity.layer.0, layer.0
-                        ),
-                    ));
-                }
-                if entity.space != space {
-                    return Err(invalid(
-                        "boolean.space_mismatch",
-                        format!(
-                            "entity {} is in another space than the first operand; a boolean never \
-                             crosses model/paper space",
-                            entity.id.0
-                        ),
-                    ));
-                }
-                let snapshot = entity.clone();
-                let brep = boolean_operand_brep(&snapshot).ok_or_else(|| {
-                    invalid(
                         "boolean.non_solid_operand",
                         format!(
-                            "entity {} is {}; {} needs exact {SOLID_TYPE_KEY} solid bodies",
+                            "entity {} is {}; {} needs exact {SOLID_TYPE_KEY} solids or closed \
+                             mesh bodies",
                             entity.id.0,
-                            describe_operand(entity),
+                            describe_operand(&entity),
                             op_label(op)
                         ),
-                    )
-                })?;
-                snapshots.push(SolidBooleanOperand {
-                    id: snapshot.id,
-                    revision: snapshot.object.revision,
-                    brep,
-                    snapshot,
-                });
+                    ))
+                }
             }
-            let plan = SolidBooleanPlan {
-                document: command.document,
-                op,
-                layer,
-                space,
-                // The result replaces the group in place: inherit the lowest
-                // draw order instead of jumping above every entity.
-                draw_order: operands
-                    .iter()
-                    .map(|entity| entity.draw_order)
-                    .min()
-                    .unwrap_or(0),
-                operands: snapshots,
-            };
-            (plan, diagnostics)
+        }
+        if !exact.is_empty() && !meshes.is_empty() {
+            return Err(invalid(
+                "boolean.operand_class_mismatch",
+                format!(
+                    "{} cannot combine exact solid bodies with mesh bodies; select operands of one \
+                     class (exact {SOLID_TYPE_KEY} rows or closed meshes)",
+                    op_label(op)
+                ),
+            ));
+        }
+        // The result replaces the group in place: inherit the lowest draw order
+        // instead of jumping above every entity.
+        let draw_order = exact
+            .iter()
+            .map(|(entity, _)| entity.draw_order)
+            .chain(meshes.iter().map(|(entity, _)| entity.draw_order))
+            .min()
+            .unwrap_or(0);
+        if !meshes.is_empty() {
+            return self.boolean_meshes(command, op, meshes, diagnostics);
+        }
+        let Some(modeler) = self.solid_modeler.clone() else {
+            return Err(CadError::Unsupported(SOLID_MODELER_UNSUPPORTED.into()));
         };
-        let operand_count = plan.operands.len();
+        let snapshots: Vec<SolidBooleanOperand> = exact
+            .into_iter()
+            .map(|(snapshot, brep)| SolidBooleanOperand {
+                id: snapshot.id,
+                revision: snapshot.object.revision,
+                brep,
+                snapshot,
+            })
+            .collect();
+        let operand_count = snapshots.len();
+        let plan = SolidBooleanPlan {
+            document: command.document,
+            op,
+            layer,
+            space,
+            draw_order,
+            operands: snapshots,
+        };
         self.start_solid_boolean(plan, modeler)?;
         diagnostics.push(Diagnostic {
             object: None,
@@ -421,7 +467,7 @@ pub(crate) fn op_name(op: BooleanOp) -> &'static str {
 }
 
 /// The upper-case command word of a boolean.
-fn op_label(op: BooleanOp) -> &'static str {
+pub(crate) fn op_label(op: BooleanOp) -> &'static str {
     match op {
         BooleanOp::Union => "UNION",
         BooleanOp::Subtract => "SUBTRACT",
@@ -430,7 +476,7 @@ fn op_label(op: BooleanOp) -> &'static str {
 }
 
 /// A plan-level boolean refusal: `InvalidInput` carrying its stable code.
-fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(crate) fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
 }
 
@@ -439,7 +485,7 @@ fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
 /// The stored class key, the topological kind and the exact geometry are all
 /// required: a `Sheet`/`Wire`/`Unknown` body or a `BodyExact::Unavailable` row
 /// would give the kernel nothing exact to combine.
-fn boolean_operand_brep(entity: &DbEntity) -> Option<BrepData> {
+pub(crate) fn boolean_operand_brep(entity: &DbEntity) -> Option<BrepData> {
     if entity.object.type_key != SOLID_TYPE_KEY {
         return None;
     }
