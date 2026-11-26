@@ -31,6 +31,16 @@
   revision。它是 API 自陈 experimental 的内核，本仓库只按 ADR-0036 已落地的范围（平面与解析曲面
   基本体、拉伸、布尔、质量属性、单边倒角、单面偏置；圆角/抽壳与 NURBS 编辑未接）使用它，其传递
   依赖的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
+- manifold-rust 0.19.6：Manifold 3D 几何库（C++ v3.5.4）的**纯 Rust 移植**，并带有上游没有的
+  robust 精确有理数引擎（网格布尔、构造器、2D cross-section、凸包、Minkowski、SDF、
+  smooth/refine/simplify、朝向/实体重建修复、取消与进度），**Apache-2.0**，上游
+  <https://github.com/larsbrubaker/manifold-rust>。仅由 `cad-kernel-manifold` 依赖
+  （`scripts/check-architecture.py` 强制该唯一所有者；只有载体 app 可运行时依赖该适配 crate）；
+  版本在 workspace 中**精确固定**（`=0.19.6`），**不启用 `parallel`**（默认顺序路径确定且
+  wasm 可用），未修改上游源码、无 Cargo patch、无 vendoring。它以纯 Rust 编入
+  `wasm32-unknown-unknown`，不引入 C/C++ 工具链。上游是 2026-07 才出现的 0.x 项目（pre-1.0），
+  本仓库只按 ADR-0061 的接缝使用它；其传递依赖（`clipper2-rust`、`dashu-int`/`dashu-ratio`、
+  `num-traits`、`rustc-hash` 等）的实际版本与许可证见 Cargo.lock，分发前需做完整依赖审计。
 - cadmpeg-codec-step 0.6.12：ISO 10303-21（STEP，AP203/AP214/AP242）Part 21 解码器，
   Apache-2.0，上游 <https://github.com/cadmpeg/cadmpeg>。仅由 `cad-connector-step` 依赖；未修改。
 - structured-zstd 0.4.3：纯 Rust 的 RFC 8878 zstd 编解码器，Apache-2.0，上游

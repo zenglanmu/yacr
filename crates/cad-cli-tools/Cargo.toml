@@ -39,3 +39,10 @@ cad-spatial.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 cad-kernel-adapter.workspace = true
 cad-kernel-solidcore.workspace = true
+
+# Real-SketchUp mesh contract (`tests/mesh_real_skp.rs`): import through the
+# real SKP adapter and run the real Manifold mesh modeler. Dev-only: the CLI
+# itself links neither connector nor mesh kernel.
+cad-connector-core.workspace = true
+cad-connector-skp.workspace = true
+cad-kernel-manifold.workspace = true

@@ -29,7 +29,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cad_connector_core::{ImportLimits, MeshImport};
 use cad_domain::hatch::{fill_rings, triangulate};
-use cad_domain::{CadError, Mesh, Point3};
+use cad_domain::{CadError, Mesh, Point3, Revision, SubElementId};
 
 use crate::edges::{face_ring_pairs, Boundary, EdgeStats, RunEdges, VertexPair};
 use crate::texture::{self, TextureSlots};
@@ -341,7 +341,11 @@ fn place_run(
 
     for (material, faces) in groups {
         let (color, opacity) = material_style(model, material);
-        let plan = texture::plan_group(model, material, &faces, import, textures);
+        // Texture planning and boundary detection only need the face records;
+        // the source-face index travels alongside so every emitted triangle can
+        // name the face it came from.
+        let face_refs: Vec<&skpwright::MeshFace> = faces.iter().map(|(_, face)| *face).collect();
+        let plan = texture::plan_group(model, material, &face_refs, import, textures);
         stats.external_textures += usize::from(plan.external_image);
         if let Some(refusal) = plan.refusal {
             if stats.texture_refusal.is_none() {
@@ -352,10 +356,10 @@ fn place_run(
         let uv_ok = plan.key.is_some();
         // The boundary is decided before triangulation: a group's real edges do
         // not depend on whether its faces tessellate (ADR-0049).
-        let boundary = run_edges.boundary(&run.mesh, &faces, world);
+        let boundary = run_edges.boundary(&run.mesh, &face_refs, world);
         let mut out = GroupBuffers::default();
         let mut meshed: BTreeSet<VertexPair> = BTreeSet::new();
-        for (index, face) in faces.iter().enumerate() {
+        for (index, &(face_index, face)) in faces.iter().enumerate() {
             if cancelled() {
                 return Err(CadError::Cancelled);
             }
@@ -364,6 +368,7 @@ fn place_run(
             } else {
                 None
             };
+            let first_triangle = out.triangles.len();
             match emit_face(&run.mesh, face, world, uv, &mut out) {
                 Ok(()) => {
                     stats.faces_emitted += 1;
@@ -371,6 +376,16 @@ fn place_run(
                         stats.textured_faces += 1;
                     }
                     meshed.extend(face_ring_pairs(face));
+                    // One entry per appended triangle, all naming the same source
+                    // face. A skipped face appended no triangles and so adds no
+                    // entries.
+                    let source = SubElementId {
+                        source_key: format!("skp:face:{face_index}"),
+                        topology_revision: Revision(0),
+                    };
+                    for _ in first_triangle..out.triangles.len() {
+                        out.face_sources.push(Some(source.clone()));
+                    }
                 }
                 Err(FaceSkip::Malformed) => stats.faces_malformed += 1,
                 Err(FaceSkip::Untriangulable) => stats.faces_untriangulable += 1,
@@ -389,12 +404,17 @@ fn place_run(
             vertices: out.vertices,
             triangles: out.triangles,
             normals: out.normals,
-            face_sources: Vec::new(),
+            face_sources: out.face_sources,
             colors: Vec::new(),
             uvs: out.uvs,
             texture: None,
             pbr: None,
         };
+        debug_assert_eq!(
+            mesh.face_sources.len(),
+            mesh.triangles.len(),
+            "every emitted triangle must name its source face"
+        );
         if uv_ok && mesh.uvs.len() == mesh.vertices.len() {
             mesh.texture = plan.key;
             stats.textured_groups += 1;
@@ -411,7 +431,7 @@ fn place_run(
             Boundary::Complete { edges, curves } if !edges.is_empty() => {
                 // A body carries the group's whole ring boundary, including a
                 // face whose triangulation failed but whose edges are real.
-                covered_by_body.extend(faces.iter().flat_map(|face| face_ring_pairs(face)));
+                covered_by_body.extend(faces.iter().flat_map(|(_, face)| face_ring_pairs(face)));
                 stats.edges.curves_flattened += curves;
                 edges
             }
@@ -504,6 +524,10 @@ fn check_face_budget(stats: &SkpStats, limits: &ImportLimits) -> cad_domain::Cad
 
 /// Group a run's visible faces by effective material slot (`0` = none).
 ///
+/// Each entry is the face's index in [`skpwright::Mesh::faces`] together with the
+/// face itself, so a placed triangle can name the source face it came from even
+/// when faces are regrouped by material.
+///
 /// An instance's inherited material paints only faces that carry no material
 /// of their own — the SketchUp §4q composition rule.
 fn group_faces<'a>(
@@ -511,9 +535,9 @@ fn group_faces<'a>(
     inherited_material: u16,
     layer_visible: &dyn Fn(u16) -> bool,
     stats: &mut SkpStats,
-) -> BTreeMap<u16, Vec<&'a skpwright::MeshFace>> {
-    let mut groups: BTreeMap<u16, Vec<&skpwright::MeshFace>> = BTreeMap::new();
-    for face in &mesh.faces {
+) -> BTreeMap<u16, Vec<(usize, &'a skpwright::MeshFace)>> {
+    let mut groups: BTreeMap<u16, Vec<(usize, &skpwright::MeshFace)>> = BTreeMap::new();
+    for (index, face) in mesh.faces.iter().enumerate() {
         if face.hidden {
             stats.hidden_faces_skipped += 1;
             continue;
@@ -524,7 +548,7 @@ fn group_faces<'a>(
         }
         let own = face.front_material.filter(|slot| *slot != 0);
         let effective = own.unwrap_or(inherited_material);
-        groups.entry(effective).or_default().push(face);
+        groups.entry(effective).or_default().push((index, face));
     }
     groups
 }
@@ -539,6 +563,9 @@ struct GroupBuffers {
     vertices: Vec<Point3>,
     normals: Vec<Point3>,
     triangles: Vec<[u32; 3]>,
+    /// One source-face identity per emitted triangle, parallel to `triangles`
+    /// once a group is completed (P-MESH-2). Empty until faces are emitted.
+    face_sources: Vec<Option<SubElementId>>,
     /// Per-vertex UV0, 1:1 with `vertices`; filled only when a §4v transform is
     /// supplied, so the group is textured exactly when this is non-empty.
     uvs: Vec<[f64; 2]>,

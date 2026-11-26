@@ -21,7 +21,7 @@
 |---|---|
 | 引入 solidcore 的收益 | 第一次获得**可以创建和编辑实体**的能力：基本体、布尔、圆角/倒角、抽壳/偏置、扫掠、healing、精确质量属性；并把"导入的 ACIS 实体"与"新建实体"统一到同一条 `Body3d` + `BrepData` 通道。 |
 | 代价 | 新增一个大型纯 Rust 依赖和一层独立的转换/服务 crate；无 STEP/IGES、无精确算术谓词、无取消钩子、无公开 BRep→网格接口；wasm 栈与线程需要实测。 |
-| SKP / STL 能变成实体吗 | **不能。** 两者都是三角网格格式，没有 BRep。正确映射是继续进入 `SemanticGeometry::Mesh`（各自 `type_key`），**不要**伪造 `Body3d`/`BodyKind::Solid`。要"可编辑"只能做**网格布尔**（产物仍是网格）。 |
+| SKP / STL 能变成实体吗 | **不能。** 两者都是三角网格格式，没有 BRep。正确映射是继续进入 `SemanticGeometry::Mesh`（各自 `type_key`），**不要**伪造 `Body3d`/`BodyKind::Solid`。要"可编辑"只能做**网格布尔**（产物仍是网格）；网格内核选择见 [ADR-0061](adr/0061-mesh-kernel-selection.md)（决策已接受，P-MESH-0 未实现）。 |
 | STEP 能变成实体吗 | **能，而且不需要 OCCT。** `cadmpeg-ir` 0.6.12 已经解出精确拓扑（Body/Region/Shell/Face/Loop/EdgeUse/Pcurve + 解析/NURBS 曲面），只是当前适配器只取三角面。写一个 `cadmpeg-ir → BrepData` lifter 即可让 STEP 进入 `Body3d`，再交给 solidcore 编辑。详见 §6。 |
 
 ---
@@ -45,7 +45,10 @@
   - `UNION`/`SUBTRACT`/`INTERSECT`/`BOX` 等已由 C1/C2 接成真实命令（见 §4.3）；
     `EXTRUDE`/`REVOLVE`/`SWEEP`/`LOFT`/`FILEDGE` 等仍是具名拒绝；
   - 仓库里**没有任何**网格布尔/修复/mesh→BRep 依赖（`manifold3d`/`baby_shark`/`parry3d`/
-    `truck`/`opencascade` 均未出现）。
+    `truck`/`opencascade` 均未出现）。网格内核已选定 `manifold-rust =0.19.6`（纯 Rust，
+    robust 引擎 + 修复 + 取消），见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；
+    **P-MESH-0 已实现（2026-11-26）：接缝 + `cad-kernel-manifold` + 门禁 + 真实内核测试；
+    P-MESH-1a 之前仍无用户可见命令**。
 
 **2026-11-17 更新（命令侧）**：`MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线（C3a，见 §4.3）；
 `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`（C3b）；`VSCURRENT` 已是
@@ -423,7 +426,7 @@ solidcore 1.0.1 的公开 API 覆盖（详见 ADR-0036 与 docs.rs）：
 | SKP tag | 扁平化到 layer 0 | **P-SKP-2**：tag → `Layer` | 已有诊断；改后可按图层显隐/过滤 |
 | SKP 材质/透明度 | 逐实体颜色 | 保持 | `Mesh.colors` 目前未用；纹理平均色已是诚实降级 |
 | SKP 边/曲线 | **已实现（2026-11-23，ADR-0049）**：真实 `MeshEdge` 记录进 `Body3d` 载体（完整边记录的面组 → `SkpPreviewMesh` body 的 `BodyDisplay.edges`；游离/未被 body 或已三角化面环覆盖的边 → `SkpPreviewEdges` wire 体），`hidden`/`soft`/不可见图层剔除，曲线存两点弦，边只作显示/拾取 | **P-SKP-3 完成**：不新增 `LineSegments` 图元，复用既有 `Body3d` + `BodyDisplay.edges` | 不做边 id/子元素与编辑；端点/中点吸附与 `measure = Partial` 已实现（ADR-0050 的窄声明：只为**实际携带存储边**的载体，无面/三角/中心/象限/交点吸附、无面积/体积；三角-only 组仍 `Unsupported`）；纯边文件不再拒绝，导入为 `Partial` wire 体 |
-| STL/SKP 的"实体编辑" | 无 | **P-MESH-1**（可选）：独立的网格体类别 + 网格布尔 | 产物仍是网格；**不要**复用 `BodyKind::Solid` |
+| STL/SKP 的"实体编辑" | 无 | **P-MESH-0…3**（[ADR-0061](adr/0061-mesh-kernel-selection.md)，均未实现）：`MeshModeler` + `manifold-rust` 网格布尔/修复，SKP 面身份 + 共享层编辑 | 产物仍是网格；**不要**复用 `BodyKind::Solid`；open shell 不自动补洞 |
 
 **SKP 写出（2026-11-23，ADR-0051）**：所有源写进**一个**合并的 root `GeometryRun`——钉死的
 `skpwright` 0.6.0 写出器只发第一个 root run（`build26.rs` 的 `find(|r| r.def_index.is_none())`），
@@ -444,22 +447,26 @@ wire 体按 `export.skp.wire_body_no_writable_edges` 整实体丢弃）；
 
 三条路，按诚实度排序：
 
-**A. 保持网格（推荐，零新依赖）**
+**A. 保持网格（当前基线，零新依赖）**
 
 - 能做的：显示、拾取、面积、图层/材质、导出。
 - 不能做的：布尔、圆角、体积、精确质量属性。
 - 这是今天的行为；只要 UI 不写"实体"就没有过度承诺。
 
-**B. 网格布尔（可选，P-MESH-1）**
+**B. 网格布尔/修复（选定，见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；P-MESH-0 已实现，P-MESH-1a/1b 未实现）**
 
-- 依赖 `manifold3d`（Apache-2.0/MIT，稳健网格 CSG）或 `baby_shark`（表面重建/重网格）。
-- 需要新的域概念，例如：
-  ```rust
-  pub enum MeshTopology { OpenShell, ClosedShell, NonManifold }
-  pub struct MeshBody { pub topology: MeshTopology, pub mesh: Mesh, pub repair: RepairStatus }
-  ```
+- 内核固定为纯 Rust 的 `manifold-rust =0.19.6`（Apache-2.0；exact + robust 引擎；
+  `repair_orientation`/`rebuild_solid`/`merge`；`CancelToken`/进度；wasm32 可编译）。
+  **不启用 `parallel`**，默认顺序执行以保持确定性。
+- 接缝是 `cad-kernel-adapter::mesh` 的 `MeshModeler`（无内核默认 → `unsupported-runtime:
+  mesh-modeler`），唯一实现是 `cad-kernel-manifold`；它只允许被载体注入，不进入共享层。
+- 域里不新增持久化字段：拓扑/修复报告是派生数据；面身份复用已持久化的
+  `Mesh.face_sources`（P-MESH-2 让 SKP 源面写入 `skp:face:<n>`）。
+- **robust 引擎要求输入闭合且可定向**：open shell 返回 `Error::NotClosed`，按
+  `mesh.not_closed` 显式拒绝，**不自动补洞**（补洞是 P-MESH-3）。
 - 布尔结果仍是 `Mesh`；**不得**写成 `Body3d.exact`，也不得让 `MASSPROP` 报精确体积。
-- 适用于 3D 打印/可视化，不适用于工程精确编辑。
+- SketchUp 式的面/边直接编辑（移动、推拉、细分、平滑、撤销）由共享层
+  `cad-mesh-edit` 承担，需要 CSG 时再调 `MeshModeler`；内核本身不是拓扑编辑器。
 
 **C. mesh→BRep 重建（不推荐）**
 
@@ -631,7 +638,11 @@ StepImporter::import
 |---|---|---|
 | P0.1 | 存储边线直送 `RenderBatch.edges`；拆分到限文件（**已完成**，Linux 契约/单元证据） | 表示/场景契约测试；无三角形重推 |
 | P-SKP-1/2/3 | SKP 组件实例、tag 图层、边线（**P-SKP-3 已实现 2026-11-23，ADR-0049**：真实边进 `Body3d`/`BodyDisplay.edges`；显示边吸附/测量按 ADR-0050 的窄声明，SKP 写出按 ADR-0051 合并单 run + 自由边） | 导入契约测试 + 同一文件重复导入稳定；`Partial` 理由收窄；边证据仅契约测试，corpus 重跑 **NOT RUN**；导出证据仅 `skpwright` 自洽往返 |
-| P-MESH-1（可选） | `manifold3d` 网格布尔 + `MeshBody` | 网格布尔样本 + 显式"非精确"标记；`MASSPROP` 仍拒绝精确体积 |
+| P-MESH-0（**已实现 2026-11-26**） | [ADR-0061](adr/0061-mesh-kernel-selection.md)：`cad-kernel-adapter::mesh` 的 `MeshModeler` 接缝 + `cad-kernel-manifold`（`manifold-rust =0.19.6`）+ 架构门禁 + 许可证登记；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`check-architecture.py`；无 modeler 时 `unsupported-runtime: mesh-modeler` |
+| P-MESH-1a（未实现） | `concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质），必须是 `ClosedManifold`；mesh/solid 布尔互斥；仍非精确 | 闭合 cube∪/∖/∩ cube；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/运行期取消不写库；一条事务/一步撤销 |
+| P-MESH-1b（未实现） | 网格修复命令（`Orientation`/`Rebuild`）+ `Partial` 报告；补洞仍属 P-MESH-3 | 非流形闭合汤 → `Partial` + `MeshRepair`；open → `mesh.not_closed`；一条事务/一步撤销 |
+| P-MESH-2（未实现） | SKP 源面身份写 `Mesh.face_sources`（`skp:face:<n>`）+ 按面/边拾取 + 移动/推拉/细分/平滑（共享层 `cad-mesh-edit`） | 同一源面三角形共享 id；编辑后 `cad-db` 校验通过；无面身份 → `mesh.face_identity_unavailable` |
+| P-MESH-3（未实现） | 补洞/更大范围修复（boundary loop fill、非闭合输入） | 逐洞报告、输出仍非精确；未实现前不得声称支持 open shell 修复 |
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |
 | P-STEP-2 | STEP 装配改为 `BlockDefinition` + `Insert` | 同一 body 两次实例 → 两个 `Insert`，不是两份网格 |
@@ -653,8 +664,8 @@ StepImporter::import
   P2.0 的倒角、P2.1a 的圆弧 lift 与 P2.1b 的曲面 lift 都只有 Linux 契约/单元与固定 revision 内核
   证据；`CHAMFEREDGE` 的宿主/命令接线是合成契约（UI 只由前端套件覆盖），无 GPU/像素/非 Linux
   证据。P3a/P3b 的写出证据是本仓库自写 + acadrust 自读往返，**没有第三方 CAD 读取器**。
-- SKP/STL 的映射结论基于已提交的导入器代码；`P-SKP-1/2` 与 `P-MESH-1` 仍未实现（`P-SKP-3`
-  已实现，见 §5.3/ADR-0049–0051）。
+- SKP/STL 的映射结论基于已提交的导入器代码；`P-SKP-1/2` 与 `P-MESH-0…3` 仍未实现（`P-SKP-3`
+  已实现，见 §5.3/ADR-0049–0051；网格内核选择见 [ADR-0061](adr/0061-mesh-kernel-selection.md)）。
 - STEP 的 §6 是**方案**：lifter 未实现。"`cadmpeg-ir` 已含精确拓扑"来自 0.6.12 源码
   （`topology.rs` / `geometry.rs` 的公开枚举），不是运行结果；样本上的保留率/精确率
   **NOT VERIFIED**。

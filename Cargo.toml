@@ -15,6 +15,7 @@ members = [
     "crates/cad-geometry",
     "crates/cad-kernel-adapter",
     "crates/cad-kernel-solidcore",
+    "crates/cad-kernel-manifold",
     "crates/cad-representation",
     "crates/cad-spatial",
     "crates/cad-scene",
@@ -77,6 +78,7 @@ cad-history = { path = "crates/cad-history" }
 cad-geometry = { path = "crates/cad-geometry" }
 cad-kernel-adapter = { path = "crates/cad-kernel-adapter" }
 cad-kernel-solidcore = { path = "crates/cad-kernel-solidcore" }
+cad-kernel-manifold = { path = "crates/cad-kernel-manifold" }
 cad-representation = { path = "crates/cad-representation" }
 cad-spatial = { path = "crates/cad-spatial" }
 cad-scene = { path = "crates/cad-scene" }
@@ -236,6 +238,14 @@ gltf = { version = "=1.4.1", default-features = false, features = ["utils", "nam
 # It is a **preview** reader: triangles only (no edge geometry), no UV/texture
 # sampling, no measurement semantics.
 skpwright = "=0.6.0"
+
+# Mesh geometry kernel (`cad-kernel-manifold`, ADR-0061). Pure Rust port of the
+# C++ Manifold v3.5.4 boolean engine plus its robust exact-rational engine;
+# Apache-2.0. Pinned exactly: pre-1.0, first release 2026-07, and the seam's
+# contract tests pin the behaviour. **Do not enable `parallel`**: the default
+# sequential path is deterministic and wasm-parity; revisit only with measured
+# evidence.
+manifold-rust = "=0.19.6"
 
 # Base64 for glTF data URIs (`.gltf` embedded buffers) and GLB decoding.
 # Already in the lock as a transitive dependency; MIT/Apache-2.0.

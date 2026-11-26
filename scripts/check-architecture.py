@@ -316,6 +316,30 @@ def check(root: pathlib.Path) -> int:
     for dependency in sorted(forbidden_solidcore_dependencies):
         forbid_dependency("cad-kernel-solidcore", dependency)
 
+    # Mesh modelling adapter (ADR-0061): `cad-kernel-manifold` implements the
+    # `MeshModeler` seam over the pinned `manifold-rust` kernel. Same shape as
+    # the solid adapter: neutral domain + seam only, no database/app/host/UI/
+    # renderer/platform edge, so it stays a stateless content-in/content-out
+    # service.
+    require_dependency("cad-kernel-manifold", "cad-domain")
+    require_dependency("cad-kernel-manifold", "cad-kernel-adapter")
+    forbidden_manifold_dependencies = {
+        "cad-db",
+        "cad-app",
+        "cad-host",
+        "cad-ui-core",
+        "cad-desktop-shell",
+        "cad-render-wgpu",
+        "tauri",
+        "wgpu",
+        "web-sys",
+        "jni",
+        "ndk",
+        "android-activity",
+    }
+    for dependency in sorted(forbidden_manifold_dependencies):
+        forbid_dependency("cad-kernel-manifold", dependency)
+
     # The kernel **host** crate is a carrier-owned dependency: only a concrete
     # app host (today `app-linux`) links it at runtime. No `cad-*` shared layer
     # may, because that would fold the pinned kernel into a reusable layer
@@ -326,13 +350,22 @@ def check(root: pathlib.Path) -> int:
     # prove create/undo/tolerance behaviour, and its manifest carries an explicit
     # comment. The ban therefore checks the runtime graph only.
     for name in sorted(packages):
-        if name == "cad-kernel-solidcore" or not name.startswith("cad-"):
+        if name in {"cad-kernel-solidcore", "cad-kernel-manifold"} or not name.startswith(
+            "cad-"
+        ):
             continue
         assert "cad-kernel-solidcore" not in runtime_dependencies(
             packages[name], workspace_dependencies
         ), (
             f"{name} must not depend on cad-kernel-solidcore at runtime "
             "(only a carrier app links the kernel; a dev-dependency for a "
+            "contract test is allowed)"
+        )
+        assert "cad-kernel-manifold" not in runtime_dependencies(
+            packages[name], workspace_dependencies
+        ), (
+            f"{name} must not depend on cad-kernel-manifold at runtime "
+            "(only a carrier app links the mesh kernel; a dev-dependency for a "
             "contract test is allowed)"
         )
 
@@ -452,6 +485,11 @@ def check(root: pathlib.Path) -> int:
                 "solidcore-tess",
             }
             assert not escaped, f"solid kernel escaped adapter: {name} -> {sorted(escaped)}"
+        # The mesh kernel (ADR-0061) is owned by `cad-kernel-manifold` alone.
+        # Every declared table is checked, exactly as for `solidcore`.
+        if name != "cad-kernel-manifold":
+            escaped = declared & {"manifold-rust"}
+            assert not escaped, f"mesh kernel escaped adapter: {name} -> {sorted(escaped)}"
         # The cadkit DGN reader (and its neutral document model) is owned by
         # `cad-connector-dgn` only. `cadkit-core` is not a shared domain model: it
         # is the parser's document type, and leaking it into another crate would

@@ -190,7 +190,10 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   过期快照（`revision <= saved_revision`）直接丢弃而不是提示——**不得**用旧快照回滚文档。
 
   连接器与导出（2026-11-20；导出入口 2026-11-23）：`cad-app::ConnectorRegistry` 是唯一派发表（导入有序 probe、导出按
-  `format_id`）；`ConnectorDescriptor` 由实现 crate 声明，`cad-app` 只接线。写出一律读 `cad-db` 并
+  `format_id`）；`ConnectorDescriptor` 由实现 crate 声明，`cad-app` 只接线。网格内核按 ADR-0061：
+  `manifold-rust =0.19.6` 只由 `cad-kernel-manifold` 依赖，P-MESH-0 的 `MeshModeler` 接缝已实现；
+  网格布尔/修复命令（P-MESH-1）与 SketchUp 面编辑（P-MESH-2）仍未实现，open shell 按
+  `mesh.not_closed` 拒绝，网格结果永不写成精确 B-Rep。写出一律读 `cad-db` 并
   返回 `CompatReport`：DXF/DWG/STL/OBJ/PLY/OFF/IFC4/SKP/glTF（GLB + JSON `.gltf`）已接线；
   STEP/DGN/RVT 为稳定拒绝
   `export.<id>.not_implemented`。`EXPORT` 是单个规范命令：裸 `EXPORT` 打开全格式选择器且建议名取

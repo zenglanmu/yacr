@@ -895,3 +895,4 @@ fn the_same_written_model_without_a_texture_reports_nothing_texture_related() {
 }
 
 mod edges;
+mod sources;

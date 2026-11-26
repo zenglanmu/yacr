@@ -1,0 +1,20 @@
+[package]
+name = "cad-kernel-manifold"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "MeshModeler adapter: stateless mesh booleans/repair over the pinned manifold-rust kernel."
+
+[dependencies]
+cad-domain.workspace = true
+cad-kernel-adapter.workspace = true
+
+# `manifold-rust` is the pure Rust port of Manifold 3.5.4 (ADR-0061): exact
+# boolean engine plus the robust exact-rational engine, repair primitives,
+# cancellation/progress, and a wasm32 build with no C++ toolchain. Apache-2.0.
+# It is pinned exactly; no `[patch.crates-io]` entry and no other crate may name
+# it (`scripts/check-architecture.py` enforces both).
+manifold-rust.workspace = true

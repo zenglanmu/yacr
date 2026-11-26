@@ -76,3 +76,32 @@ pub const SOLID_EXTRUDE_PROFILE_FAILED: &str = "solid.extrude_profile_failed";
 /// The kernel ran but produced no usable body (for example an empty boolean
 /// result). Never an empty success.
 pub const SOLID_FAILED: &str = "solid.failed";
+
+// ---------------------------------------------------------------------------
+// Mesh modelling seam (`MeshModeler`, ADR-0061 / P-MESH-0).
+//
+// These are input/repair categories of the mesh seam, separate from the solid
+// codes above: a mesh boolean is not an exact B-rep operation, and an open
+// shell is a named refusal rather than a failure.
+// ---------------------------------------------------------------------------
+
+/// A mesh operand has no vertices or no triangles.
+pub const MESH_EMPTY: &str = "mesh.empty";
+/// A mesh operand has a non-finite position, an out-of-range index or a
+/// triangle that repeats an index.
+pub const MESH_INVALID: &str = "mesh.invalid_mesh";
+/// The kernel/repair requires a geometrically closed and orientable mesh;
+/// this one is open (a boundary edge exists). Hole filling is P-MESH-3 and is
+/// deliberately not attempted here.
+pub const MESH_NOT_CLOSED: &str = "mesh.not_closed";
+/// A pairing-dependent kernel operation was asked of a closed triangle soup
+/// that is not a 2-manifold. The robust boolean may still accept it; operations
+/// that need halfedge pairing do not.
+pub const MESH_NOT_MANIFOLD: &str = "mesh.not_manifold";
+/// The modeler was asked for a capability it does not declare.
+pub const MESH_UNSUPPORTED: &str = "mesh.unsupported";
+/// The kernel ran but produced no usable mesh (for example an empty boolean
+/// result). Never an empty success.
+pub const MESH_FAILED: &str = "mesh.failed";
+/// The mesh result exceeded the kernel's index/result limits.
+pub const MESH_RESULT_TOO_LARGE: &str = "mesh.result_too_large";

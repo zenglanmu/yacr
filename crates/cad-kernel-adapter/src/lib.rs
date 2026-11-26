@@ -28,6 +28,7 @@ pub use brep::{BrepCurve, BrepData, BrepFace, BrepLoop, BrepPlacement, BrepShell
 
 pub mod codes;
 
+pub mod mesh;
 pub mod solid;
 
 mod brep_tessellator;
@@ -40,6 +41,7 @@ mod solid_tolerance;
 
 pub use brep_tessellator::*;
 pub use exchange::*;
+pub use mesh::*;
 pub use no_kernel::*;
 pub use outcome::*;
 pub use request::*;
