@@ -361,6 +361,58 @@ fn fit_opened_document_keeps_a_flat_drawing_in_plan() {
 }
 
 #[test]
+fn fit_opened_document_keeps_a_dwg_in_plan_even_with_3d_geometry() {
+    let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
+    // A 2D sheet that also contains a catalog 3D solid: the geometry-based rule
+    // would choose the isometric observation. A DWG/DXF open must not.
+    install_extent(
+        &mut controller,
+        Point3 {
+            x: -4.0,
+            y: -2.0,
+            z: -3.0,
+        },
+        Point3 {
+            x: 4.0,
+            y: 2.0,
+            z: 3.0,
+        },
+    );
+    // The viewport is reused across documents: leave it in the 3D observation a
+    // previous drawing could have selected, so the DWG branch must actively
+    // reset it rather than merely skip the isometric step.
+    controller.fit_opened_document().unwrap();
+    assert_eq!(
+        controller.application.workspace.viewports[&controller.viewport_id]
+            .view_mode
+            .kind(),
+        ProjectionKind::ThreeD,
+        "precondition: a 3D document left the viewport in 3D"
+    );
+    controller.last_import_report = Some(ImportReport {
+        identity: DocumentIdentity::Temporary(1),
+        capabilities: Vec::new(),
+        completeness: Completeness::Complete,
+        diagnostics: Vec::new(),
+        connector: Some("dwg"),
+        parse_ms: None,
+        object_xdata: Vec::new(),
+    });
+
+    controller.fit_opened_document().unwrap();
+
+    let viewport = &controller.application.workspace.viewports[&controller.viewport_id];
+    assert_eq!(
+        viewport.view_mode.kind(),
+        ProjectionKind::TwoD,
+        "a DWG/DXF open stays in the plan view"
+    );
+    assert!(viewport.camera.projection.is_orthographic());
+    assert!((viewport.camera.eye.x - viewport.camera.target.x).abs() < 1e-12);
+    assert!((viewport.camera.eye.y - viewport.camera.target.y).abs() < 1e-12);
+}
+
+#[test]
 fn fit_command_reports_the_empty_diagnostic_only_when_nothing_is_framed() {
     let mut controller = HostController::with_demo_document([800.0, 600.0]).unwrap();
     let fit = |controller: &mut HostController| {

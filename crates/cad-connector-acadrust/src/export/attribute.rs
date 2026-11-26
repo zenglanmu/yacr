@@ -116,34 +116,90 @@ pub(super) fn emit_definition(
     Ok(())
 }
 
+/// Name the one placement loss the reference transform can cause: a collapsed
+/// instance scale leaves no defined world height for the value.
+const ATTRIBUTE_INSTANCE_TRANSFORM_DEGENERATE: &str =
+    "attribute value text cannot be mapped to world coordinates: the reference transform \
+     collapses an axis";
+
+/// Apply the reference placement to a stored block-local text placement.
+///
+/// The model keeps [`AttributeValue::text`] in the referenced block's local
+/// frame, while each `ATTRIB` record a DXF writer emits is in the frame the
+/// reference is drawn in. The point is mapped directly; the baseline direction
+/// gives the world rotation and the world length of the local glyph-up vector
+/// gives the height scale (exactly the inverse of the import mapping).
+fn attribute_text_to_world(
+    text: &mut AttributeText,
+    transform: &Transform3,
+) -> Option<&'static str> {
+    let (sin, cos) = text.rotation.sin_cos();
+    let baseline = Point3 {
+        x: cos,
+        y: sin,
+        z: 0.0,
+    };
+    let up = Point3 {
+        x: -sin,
+        y: cos,
+        z: 0.0,
+    };
+    let world_baseline = transform.apply_vector(baseline);
+    let world_up = transform.apply_vector(up);
+    let baseline_len = world_baseline.x.hypot(world_baseline.y);
+    let height_scale = world_up.x.hypot(world_up.y);
+    if !baseline_len.is_finite()
+        || baseline_len <= 1e-12
+        || !height_scale.is_finite()
+        || height_scale <= 1e-12
+    {
+        return Some(ATTRIBUTE_INSTANCE_TRANSFORM_DEGENERATE);
+    }
+    let position = transform.apply_point(text.position);
+    if !position.x.is_finite() || !position.y.is_finite() || !position.z.is_finite() {
+        return Some(ATTRIBUTE_INSTANCE_TRANSFORM_DEGENERATE);
+    }
+    text.position = position;
+    text.rotation = world_baseline.y.atan2(world_baseline.x);
+    text.height *= height_scale;
+    None
+}
+
 /// Build the `ATTRIB` children one reference carries.
 ///
-/// The values are already block-local (the model stores them in the same frame
-/// as the `ATTDEF` they mirror), so no transform is applied here. Returns the
-/// reference-level conversion reasons: every placement/value field is written,
-/// so the only losses are the text fields DXF cannot carry.
+/// The values are stored block-local (the model keeps them in the same frame as
+/// the `ATTDEF` they mirror), so each placement is mapped through the
+/// reference's `transform` before it is written; a DXF `ATTRIB`'s group-10
+/// point and height are world-space. Returns the reference-level conversion
+/// reasons: every placement/value field is written, so the only losses are the
+/// text fields DXF cannot carry plus a collapsed reference transform.
 pub(super) fn attributes_for(
     doc: &mut acadrust::CadDocument,
     values: &[AttributeValue],
+    transform: &Transform3,
     ctx: &EntityContext,
 ) -> (Vec<AttributeEntity>, Vec<String>) {
     let mut output = Vec::with_capacity(values.len());
     let mut reasons = Vec::new();
     for value in values {
+        let mut text = value.text.clone();
+        if let Some(reason) = attribute_text_to_world(&mut text, transform) {
+            reasons.push(reason.to_string());
+        }
         let mut attrib = AttributeEntity::new(value.tag.clone(), value.value.clone());
-        attrib.insertion_point = v3(value.text.position);
-        attrib.alignment_point = v3(value.text.position);
-        attrib.height = value.text.height;
-        attrib.rotation = value.text.rotation;
-        attrib.width_factor = value.text.width_factor;
-        attrib.oblique_angle = value.text.oblique;
-        attrib.text_style = style_name(ctx, value.text.style);
-        attrib.horizontal_alignment = h_align_to_dxf(value.text.h_align);
-        attrib.vertical_alignment = v_align_to_dxf(value.text.v_align);
+        attrib.insertion_point = v3(text.position);
+        attrib.alignment_point = v3(text.position);
+        attrib.height = text.height;
+        attrib.rotation = text.rotation;
+        attrib.width_factor = text.width_factor;
+        attrib.oblique_angle = text.oblique;
+        attrib.text_style = style_name(ctx, text.style);
+        attrib.horizontal_alignment = h_align_to_dxf(text.h_align);
+        attrib.vertical_alignment = v_align_to_dxf(text.v_align);
         attrib.flags = flags_to_dxf(value.flags);
         attrib.normal = Vector3::UNIT_Z;
         attrib.common = common_for_appearance(doc, value, ctx);
-        reasons.extend(text_losses(&value.text));
+        reasons.extend(text_losses(&text));
         output.push(attrib);
     }
     (output, reasons)

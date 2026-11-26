@@ -19,6 +19,7 @@ use acadrust::entities::attribute_definition::{
 const ATTRIBUTE_HEIGHT_DEGENERATE: &str = "attribute.height_degenerate";
 const ATTRIBUTE_TEXT_NONFINITE: &str = "attribute.text_nonfinite";
 const ATTRIBUTE_WIDTH_FACTOR_DEGENERATE: &str = "attribute.width_factor_degenerate";
+const ATTRIBUTE_INSTANCE_TRANSFORM_DEGENERATE: &str = "attribute.instance_transform_degenerate";
 
 /// Map acadrust's `ATTDEF` flags onto the domain's named flags.
 fn map_attribute_flags(flags: acadrust::entities::AttributeFlags) -> AttributeFlags {
@@ -168,16 +169,78 @@ impl<'a> ImporterBuilder<'a> {
         (geometry, completeness)
     }
 
+    /// Convert an `ATTRIB` text placement from the file's world frame into the
+    /// owning reference's block-local frame.
+    ///
+    /// A DXF/DWG `ATTRIB` is a separate entity whose group-10 point, rotation
+    /// and height are stored in the coordinate system it is drawn in (world or
+    /// the containing block's space), while [`AttributeValue::text`] is defined
+    /// in the same block-local frame as the `ATTDEF` it mirrors. Storing the
+    /// world placement verbatim would make the representation apply the
+    /// reference transform a second time.
+    ///
+    /// The inverse affine map is applied to the point; the baseline direction
+    /// (through the inverse linear part) gives the local rotation, and the
+    /// height is divided by the world length of the local glyph-up vector. That
+    /// is exact for the placements this importer builds (rotation × per-axis
+    /// scale, no shear) and remains well-defined for a non-uniform scale. A
+    /// singular or non-finite transform is refused by name instead of storing an
+    /// invented placement.
+    fn attribute_text_to_block_local(
+        text: &mut AttributeText,
+        transform: &Transform3,
+    ) -> Option<&'static str> {
+        let Some(inverse) = transform.inverse() else {
+            return Some(ATTRIBUTE_INSTANCE_TRANSFORM_DEGENERATE);
+        };
+        let (sin, cos) = text.rotation.sin_cos();
+        let baseline = Point3 {
+            x: cos,
+            y: sin,
+            z: 0.0,
+        };
+        let up = Point3 {
+            x: -sin,
+            y: cos,
+            z: 0.0,
+        };
+        let local_baseline = inverse.apply_vector(baseline);
+        let local_up = inverse.apply_vector(up);
+        let baseline_len = local_baseline.x.hypot(local_baseline.y);
+        let inverse_up_len = local_up.x.hypot(local_up.y);
+        if !baseline_len.is_finite()
+            || baseline_len <= 1e-12
+            || !inverse_up_len.is_finite()
+            || inverse_up_len <= 1e-12
+        {
+            return Some(ATTRIBUTE_INSTANCE_TRANSFORM_DEGENERATE);
+        }
+        let position = inverse.apply_point(text.position);
+        if !position.x.is_finite() || !position.y.is_finite() || !position.z.is_finite() {
+            return Some(ATTRIBUTE_TEXT_NONFINITE);
+        }
+        text.position = position;
+        text.rotation = local_baseline.y.atan2(local_baseline.x);
+        // |L^-1 * world_up| = 1 / (world length of the local height vector), so
+        // multiplying by it is dividing by the instance's height scale.
+        text.height *= inverse_up_len;
+        None
+    }
+
     /// Convert one `ATTRIB` carried by an `INSERT` into a block-local value.
     ///
     /// The acadrust reader already attached the value to its reference, so no
     /// owner is guessed. Duplicate tags stay allowed: the vector keeps every
-    /// value in source order, exactly as the model permits.
+    /// value in source order, exactly as the model permits. `transform` is the
+    /// owning reference's cell placement (block base included); the file stores
+    /// the value's placement in world space, so it is mapped back into the
+    /// block frame here.
     pub(crate) fn attribute_value(
         &mut self,
         a: &acadrust::entities::AttributeEntity,
+        transform: &Transform3,
     ) -> (AttributeValue, Completeness) {
-        let (text, losses) = self.attribute_text_fields(
+        let (mut text, mut losses) = self.attribute_text_fields(
             &a.text_style,
             a.normal,
             a.insertion_point,
@@ -189,6 +252,9 @@ impl<'a> ImporterBuilder<'a> {
             a.horizontal_alignment,
             a.vertical_alignment,
         );
+        if let Some(reason) = Self::attribute_text_to_block_local(&mut text, transform) {
+            losses.push(reason.to_string());
+        }
         let layer = self
             .layer_ids
             .get(&a.common.layer)

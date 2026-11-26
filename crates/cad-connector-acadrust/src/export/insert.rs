@@ -152,11 +152,12 @@ pub(super) fn emit_insert(
     insert.common.handle = doc.allocate_handle();
     let handle = insert.common.handle;
 
-    // ADR-0055: the reference's concrete attribute values are block-local, so
-    // they attach to this `INSERT` unchanged. acadrust then writes group `66`,
-    // the `ATTRIB` children and the terminating `SEQEND`.
+    // ADR-0055: the reference's concrete attribute values are stored block-local;
+    // they are mapped into this reference's drawn frame before attaching to the
+    // `INSERT`, whose `ATTRIB` children DXF stores in world coordinates.
     if let SemanticGeometry::Insert { attributes, .. } = &entity.geometry {
-        let (written, attribute_reasons) = super::attribute::attributes_for(doc, attributes, ctx);
+        let (written, attribute_reasons) =
+            super::attribute::attributes_for(doc, attributes, placement, ctx);
         insert.attributes = written;
         reasons.extend(attribute_reasons);
     }

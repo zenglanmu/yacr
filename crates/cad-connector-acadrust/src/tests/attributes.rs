@@ -14,6 +14,9 @@ use super::*;
 
 /// The block definition's local frame: the definition and the value share it.
 const ATTDEF_POSITION: (f64, f64) = (1.5, 2.5);
+/// The reference that carries the value. A DXF `ATTRIB` stores its point in the
+/// frame the reference is drawn in, so the fixture writes `INSERT + ATTDEF`.
+const INSERT_POSITION: (f64, f64) = (10.0, 20.0);
 
 fn fixture_document() -> acadrust::CadDocument {
     fixture_with_values(&[("PART", "PN-42")])
@@ -54,16 +57,26 @@ fn fixture_with_values(values: &[(&str, &str)]) -> acadrust::CadDocument {
     doc.add_entity(EntityType::AttributeDefinition(definition))
         .expect("add ATTDEF member");
 
-    let mut insert =
-        acadrust::entities::Insert::new("TAGGED", acadrust::types::Vector3::new(10.0, 20.0, 0.0));
+    let mut insert = acadrust::entities::Insert::new(
+        "TAGGED",
+        acadrust::types::Vector3::new(INSERT_POSITION.0, INSERT_POSITION.1, 0.0),
+    );
     insert.common.layer = "0".into();
     for (tag, text) in values {
         let mut value = acadrust::entities::AttributeEntity::new((*tag).into(), (*text).into());
         value.common.layer = "ATTRIBS".into();
-        value.insertion_point =
-            acadrust::types::Vector3::new(ATTDEF_POSITION.0, ATTDEF_POSITION.1, 0.0);
-        value.alignment_point =
-            acadrust::types::Vector3::new(ATTDEF_POSITION.0, ATTDEF_POSITION.1, 0.0);
+        // ATTRIB group 10 is in the drawn (world) frame, not the block's local
+        // frame: with a translation-only reference this is just the offset.
+        value.insertion_point = acadrust::types::Vector3::new(
+            INSERT_POSITION.0 + ATTDEF_POSITION.0,
+            INSERT_POSITION.1 + ATTDEF_POSITION.1,
+            0.0,
+        );
+        value.alignment_point = acadrust::types::Vector3::new(
+            INSERT_POSITION.0 + ATTDEF_POSITION.0,
+            INSERT_POSITION.1 + ATTDEF_POSITION.1,
+            0.0,
+        );
         value.height = 2.5;
         value.rotation = 0.3;
         value.width_factor = 0.8;
@@ -244,6 +257,112 @@ fn attdef_and_insert_attrib_import_export_and_reimport_equal() {
         },
         "the value is equal after re-import"
     );
+}
+
+#[test]
+fn attributes_store_block_local_placements_under_a_rotated_scaled_reference() {
+    // A real DWG/DXF `ATTRIB` is written in the frame the reference is drawn in
+    // (world), with a height already scaled by the insert. The model keeps it
+    // block-local, so the importer must undo the reference transform exactly.
+    // The regression this pins: storing the world placement verbatim made the
+    // representation apply the reference scale a second time, producing text
+    // hundreds of millions of units away and stretching the fit bounds.
+    let mut doc = fixture_document();
+    let rotation = 0.5_f64;
+    // A large reference scale makes a double transform catastrophic (the real
+    // `complex-test.dwg` insert used ~1600), so the bounds assertion below
+    // directly pins the user-visible symptom rather than only the fields.
+    let scale = 100.0_f64;
+    let insertion = (1_000.0_f64, 2_000.0_f64);
+    for entity in doc.entities_mut() {
+        let EntityType::Insert(insert) = entity else {
+            continue;
+        };
+        insert.insert_point = acadrust::types::Vector3::new(insertion.0, insertion.1, 0.0);
+        insert.rotation = rotation;
+        insert.set_x_scale(scale);
+        insert.set_y_scale(scale);
+        insert.set_z_scale(scale);
+        let (sin, cos) = rotation.sin_cos();
+        let local_x = ATTDEF_POSITION.0 * scale;
+        let local_y = ATTDEF_POSITION.1 * scale;
+        let world_x = insertion.0 + cos * local_x - sin * local_y;
+        let world_y = insertion.1 + sin * local_x + cos * local_y;
+        for value in &mut insert.attributes {
+            value.insertion_point = acadrust::types::Vector3::new(world_x, world_y, 0.0);
+            value.alignment_point = acadrust::types::Vector3::new(world_x, world_y, 0.0);
+            value.height = 2.5 * scale;
+            value.rotation = 0.3 + rotation;
+        }
+    }
+
+    let bytes = acadrust::DxfWriter::new(&doc)
+        .write_to_vec()
+        .expect("acadrust writes the rotated/scaled fixture");
+    let db = import(bytes);
+    let (_, values) = insert_of(&db);
+    assert_eq!(values.len(), 1);
+    let value = &values[0];
+    assert!(
+        (value.text.position.x - ATTDEF_POSITION.0).abs() < 1e-9,
+        "x {:?}",
+        value.text.position
+    );
+    assert!(
+        (value.text.position.y - ATTDEF_POSITION.1).abs() < 1e-9,
+        "y {:?}",
+        value.text.position
+    );
+    assert!(
+        (value.text.height - 2.5).abs() < 1e-9,
+        "{:?}",
+        value.text.height
+    );
+    assert!(
+        (value.text.rotation - 0.3).abs() < 1e-9,
+        "{:?}",
+        value.text.rotation
+    );
+
+    // The drawing bounds stay around the reference instead of growing by the
+    // scale a second time (the fixture's circle is a 50-unit radius here). A
+    // double transform puts the attribute near 1.1e5, well past this bound.
+    let (min, max) = db.bounds().expect("the drawing has bounds");
+    let furthest = min
+        .x
+        .abs()
+        .max(min.y.abs())
+        .max(max.x.abs())
+        .max(max.y.abs());
+    assert!(furthest < 10_000.0, "bounds stretched to {furthest}");
+
+    // Export writes the value back into the reference's drawn frame; a re-import
+    // must recover the same block-local placement (the two mappings are inverse).
+    let (bytes, _report) = crate::export::export(&crate::export::ExportRequest {
+        database: &db,
+        document_id: DocumentId(1),
+        space: crate::export::ExportSpace::Model,
+        format: crate::export::ExportFormat::DxfText,
+        acis_version: crate::export::AcisVersion::default(),
+        dxf_target: crate::export::DxfTarget::default(),
+        limits: crate::export::ExportLimits::default(),
+        units: None,
+    })
+    .expect("the rotated/scaled drawing exports");
+    let round_trip = import(bytes.to_vec());
+    let (_, values_again) = insert_of(&round_trip);
+    assert_eq!(values_again.len(), 1);
+    let again = &values_again[0];
+    assert_eq!(again.tag, value.tag);
+    assert_eq!(again.value, value.value);
+    assert_eq!(again.flags, value.flags);
+    assert_eq!(again.layer, value.layer);
+    // Exact float equality is not promised across a rotation/scale export; the
+    // placement must agree within the writer's numeric tolerance.
+    assert!((again.text.position.x - value.text.position.x).abs() < 1e-9);
+    assert!((again.text.position.y - value.text.position.y).abs() < 1e-9);
+    assert!((again.text.height - value.text.height).abs() < 1e-9);
+    assert!((again.text.rotation - value.text.rotation).abs() < 1e-9);
 }
 
 #[test]

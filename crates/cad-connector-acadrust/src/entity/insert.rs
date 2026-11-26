@@ -34,13 +34,19 @@ impl<'a> ImporterBuilder<'a> {
     ) -> (SemanticGeometry, Completeness) {
         let name = i.block_name.clone();
         let base = self.block_base(&name);
+        // The reference's first-cell placement maps block-local geometry to the
+        // container's frame. The file's `ATTRIB` records carry world-space
+        // placements, so this is the transform their block-local copies are
+        // recovered from; every array cell then clones the same local values.
+        let instance_local_transform = insert_array_transform(i, base, 0.0, 0.0);
         let mut completeness = Completeness::Complete;
         // ADR-0055: the concrete ATTRIB values the reference carries are stored
         // block-local on every instance cell. Their tags/flags/placements are
         // copied; the owning ATTDEF is never duplicated here.
         let mut attributes = Vec::with_capacity(i.attributes.len());
         for attribute in &i.attributes {
-            let (value, value_completeness) = self.attribute_value(attribute);
+            let (value, value_completeness) =
+                self.attribute_value(attribute, &instance_local_transform);
             completeness = completeness.combine(value_completeness);
             attributes.push(value);
         }

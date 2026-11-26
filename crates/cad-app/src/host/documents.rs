@@ -176,10 +176,19 @@ impl HostController {
     /// Fit a freshly opened document and enter its default observation.
     ///
     /// The plan fit runs first, so every open has a valid, bounded framing (and
-    /// an empty document keeps the documented no-op). If the document is a 3D
-    /// model ([`Application::document_is_3d`]), the isometric standard view is
-    /// applied next: it re-orients and re-frames from the bounds, which is where
-    /// a 3D model should start instead of a top-down plan of its XY footprint.
+    /// an empty document keeps the documented no-op).
+    ///
+    /// A drawing opened from the 2D CAD connectors (`dwg`/`dxf`) **always** stays
+    /// in the plan view. Those formats routinely carry a few 3D bodies (catalog
+    /// fixtures, survey solids) inside an otherwise two-dimensional drawing, and
+    /// [`Application::document_is_3d`] would otherwise reorient the whole sheet
+    /// into an isometric perspective. A user who wants the 3D observation can
+    /// still pick a standard view explicitly.
+    ///
+    /// Every other document (a native `.ymodel`, a BIM/mesh/STEP source) keeps
+    /// the previous rule: a 3D model ([`Application::document_is_3d`]) opens in
+    /// the isometric standard view, which re-orients and re-frames from the
+    /// bounds for a 3D start instead of a top-down plan of its XY footprint.
     ///
     /// The isometric step is applied **directly** rather than through
     /// [`Self::execute`]: it is the open path's default observation, not a user
@@ -187,9 +196,33 @@ impl HostController {
     /// the first `ZOOM PREVIOUS` after opening would restore a view the user
     /// never saw.
     pub fn fit_opened_document(&mut self) -> CadResult<()> {
+        let opened_in_plan = self.opened_from_2d_connector();
+        if opened_in_plan {
+            // Opening a DWG/DXF is a request for the 2D drawing view. The
+            // viewport is reused across documents, so a previous 3D observation
+            // would otherwise make the fit below stay 3D (and a front/side eye
+            // can even leave the plan camera degenerate). Reset to the same
+            // canonical top view a fresh viewport gets, then frame it. An
+            // already-plan viewport is left untouched.
+            if let Some(viewport) = self
+                .application
+                .workspace
+                .viewports
+                .get_mut(&self.viewport_id)
+            {
+                let already_plan = matches!(viewport.view_mode, crate::ViewMode2d3d::TwoD { .. })
+                    && viewport.camera.projection.is_orthographic();
+                if !already_plan {
+                    let camera = crate::Camera::top_view_2d();
+                    viewport.camera = camera;
+                    viewport.view_mode = crate::ViewMode2d3d::TwoD { saved: camera };
+                    viewport.work_plane = crate::xy_work_plane(0.0);
+                }
+            }
+        }
         self.application
             .fit_viewport(&mut self.session, &self.viewport_id)?;
-        if self.application.document_is_3d(self.document_id) {
+        if !opened_in_plan && self.application.document_is_3d(self.document_id) {
             let command = Command {
                 schema_version: 1,
                 id: crate::CommandId::StandardView,
@@ -204,6 +237,21 @@ impl HostController {
             )?;
         }
         Ok(())
+    }
+
+    /// Whether the active drawing was opened through a two-dimensional CAD
+    /// connector (`dwg`/`dxf`), which keeps the open path in the plan view.
+    ///
+    /// Derived from the document's own import report, never from the file name
+    /// extension: a `.ymodel` open and a blank document report `None` and keep
+    /// the geometry-based default.
+    fn opened_from_2d_connector(&self) -> bool {
+        matches!(
+            self.last_import_report
+                .as_ref()
+                .and_then(|report| report.connector),
+            Some("dwg" | "dxf")
+        )
     }
 
     /// The provenance of the connector that opened the current document

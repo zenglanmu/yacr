@@ -1165,12 +1165,16 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   **证据边界**：只有编译 + 契约测试（`cad-ui-core` 的 admission/wire/`CadSession::orbit` 测试、
   `app-web` 双 sink 等价矩阵）。轨道**手感**、方位球（ViewCube 组件）交互、真机输入、GPU/像素、性能一律
   **NOT VERIFIED**；Windows/macOS/Android 只有编译门禁（未构建的平台写 NOT RUN），不得写成已验收。
-- **3D 默认观察 / 3D FIT / 透视缩放（2026-11-22）**：native 载体（`native-below`：Wayland /
-  Windows / macOS / Android）打开文档后，若 model space 含 `SemanticGeometry::Body3d`，或包围盒
-  `z` 范围显著（`extent_z > max(diagonal × 1e-6, 1e-9)`），默认应用等轴测 3D
+- **3D 默认观察 / 3D FIT / 透视缩放（2026-11-22；DWG/DXF 例外 2026-11-26）**：native 载体
+  （`native-below`：Wayland / Windows / macOS / Android）打开文档后，若 model space 含
+  `SemanticGeometry::Body3d`，或包围盒 `z` 范围显著
+  （`extent_z > max(diagonal × 1e-6, 1e-9)`），默认应用等轴测 3D
   （`StandardView::Isometric`）；纯 2D 文档仍是俯视 plan。判定在 `cad-app::document_is_3d`，
   打开漏斗是 `cad-host::HostCore::fit_opened_document`（同步 deliver / 异步 publish /
-  `.ymodel` / demo）。自动进入 3D **不额外记录** `ZOOM PREVIOUS`；plan fit 自身仍按既有规则记一步。
+  `.ymodel` / demo）。**`dwg` / `dxf` 连接器打开的文档是例外：始终停在 plan 视图**，即使它含
+  少量 3D body 或显著 z 范围——二维图纸常带目录块里的实体/测量体，不能把整张图转成等轴测；
+  其它来源（`.ymodel`、BIM/mesh/STEP/glTF 等）仍按 `document_is_3d` 选择默认观察。自动进入 3D
+  **不额外记录** `ZOOM PREVIOUS`；plan fit 自身仍按既有规则记一步。
   **3D `FIT` 只重取景**：保持当前 eye 方向与 `up`，target 移到包围盒中心（含 `z`），距离按
   `radius / tan(fov/2) × FIT_3D_MARGIN` 重算，`view_mode` 保持 3D；2D FIT 不变（plan + `1.05`）。
   **透视 `zoom_at`**：target 固定做 dolly（距离 `/factor`），再在屏幕平面平移 eye+target，使光标下
@@ -1180,6 +1184,13 @@ Unsupported 语义。**0.6.5 → 0.6.8 的差异**单列在表后的「0.6.8 增
   （`docs/validation-3d-view-2026-11-22.md`）；真实 GUI/像素、真实 3D DWG 打开手感、
   Windows/macOS/Android/Web 运行时 **NOT VERIFIED**。Web/`dom-canvas` 仍是 2D-only
   （`hostProfile.orbit=false`、`standardViews: []`），不套用这套 3D 默认。
+- **块属性 ATTRIB 的坐标系（2026-11-26 修复）**：DXF/DWG 的 `ATTRIB` 把插入点、旋转和字高写在
+  引用被绘制的坐标系里，而域模型 `AttributeValue::text` 定义在块局部（与 `ATTDEF` 同帧）。导入
+  用引用变换的逆映射回块局部（旋转取逆线性部分的基线方向，字高乘逆 glyph-up 向量长度；奇异变换
+  具名记 `attribute.instance_transform_degenerate`），导出时正向映射回 `ATTRIB` 的 group
+  10/40/50。修复前 `fixtures/complex-test.dwg` 的一个缩放/旋转块属性被二次缩放，把 model
+  bounds 从约 53 万单位拉到 2.7 亿，FIT 后整张图纸不可见；修复后同一 fixture 的 model bounds
+  为 x `[-9864, 419018]`、y `[-268126, 266619]`、z `±13470`。
 - **方位球（2026-11-22）**：ViewCube 从 56px 导航列移到绘图区独立浮层（桌面右上、列左侧；
   **紧凑布局同为右上**，让开右上角导航卡），渲染为不透明球面 + 六个方向帽 + 网格；`--navrail-w` 仍为 **56px**，
   导航列宽度与 CAD 分区矩形不变。点击方向帽 / Home 仍走 `cad_standard_view`，拖动仍走
