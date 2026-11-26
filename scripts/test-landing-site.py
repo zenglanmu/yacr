@@ -27,11 +27,9 @@ HEADERS = LANDING / "_headers"
 
 RELEASE = "v0.1.20"
 GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.20/"
-# `None` is a deliberate value, not a placeholder: the committed manifest keeps
-# the GitHub Release fallback, while the CI R2 mirror rewrites `cdnBase` on the
-# runner before the landing deploy. After `upload-r2-downloads.sh` runs locally,
-# set this to the CDN base it wrote.
-CDN_BASE = None
+# Written by the `upload-r2-downloads.sh` run that mirrored v0.1.20 to R2 and
+# pruned the older releases; the committed manifest mirrors what the site serves.
+CDN_BASE = "https://dl-yacr.snakeheartgo.top/releases/v0.1.20"
 KNOWN_ASSETS = {
     "linux": ("yacr-0.1.20-linux-x86_64.flatpak", 130000072),
     "windows": ("yacr-0.1.20-windows-x86_64.zip", 119529551),
