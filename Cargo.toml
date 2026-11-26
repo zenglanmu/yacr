@@ -50,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.19"
+version = "0.1.20"
 edition = "2021"
 # True MSRV floor, not a preference: `structured-zstd` 0.4.3 (the entry payload
 # codec, ADR-0046) declares `rust-version = "1.92"`, above `cadmpeg-*` 0.6.12
