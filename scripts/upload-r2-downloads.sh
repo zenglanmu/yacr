@@ -9,7 +9,15 @@
 #   4. create the bucket idempotently and enable its managed r2.dev domain;
 #   5. upload every artifact to `releases/<tag>/` with wrangler v4 (`--remote`!);
 #   6. HEAD the four primary packages through r2.dev;
-#   7. atomically rewrite `<landing>/downloads.json` with the CDN base and hashes.
+#   7. delete every older `releases/<other-tag>/...` object, keeping only the
+#      tag just uploaded (`R2_PRUNE_OLD_RELEASES=0` opts out) and re-list the
+#      prefix to prove nothing else remains;
+#   8. atomically rewrite `<landing>/downloads.json` with the CDN base and hashes.
+#
+# GitHub is the archive: this script never deletes a GitHub Release or its
+# assets. `publish-release.yml` only attaches assets, so every published version
+# stays downloadable from github.com forever; R2 is only the small live mirror
+# for the latest release.
 #
 # Prerequisites:
 #   CLOUDFLARE_API_TOKEN   token with "Workers R2 Storage Write".
@@ -28,6 +36,9 @@
 #   R2_PUBLIC_BASE     public download base written to `cdnBase`
 #                      (default: https://dl-yacr.snakeheartgo.top). Set it to the
 #                      literal `managed` to use the rate-limited r2.dev domain.
+#   R2_PRUNE_OLD_RELEASES  `1` (default) deletes older `releases/<tag>/` objects
+#                      after the new release is uploaded and verified; `0` keeps
+#                      them. GitHub Releases are never pruned.
 #
 # Honesty rules:
 #   * the preferred host is the bucket's custom domain (`dl-yacr.snakeheartgo.top`),
@@ -49,6 +60,7 @@ LANDING_DIR="${LANDING_DIR:-$ROOT/apps/landing}"
 ASSETS_DIR_OVERRIDE="${ASSETS_DIR:-}"
 WRANGLER_VERSION="${WRANGLER_VERSION:-4}"
 PUBLIC_BASE="${R2_PUBLIC_BASE:-https://dl-yacr.snakeheartgo.top}"
+PRUNE_OLD_RELEASES="${R2_PRUNE_OLD_RELEASES:-1}"
 API="https://api.cloudflare.com/client/v4"
 
 die() {
@@ -186,6 +198,82 @@ for file in "$LINUX" "$WINDOWS" "$MACOS" "$ANDROID"; do
     "$CDN_BASE/$file" >/dev/null \
     || die "HEAD probe failed for $CDN_BASE/$file; bind the custom download domain in Cloudflare (R2 -> bucket -> Custom Domains) and add the Cache Rule, or set R2_PUBLIC_BASE=managed to fall back to r2.dev"
 done
+
+# --- prune older releases ---------------------------------------------------
+
+list_release_objects() {
+  # Emit every object key under `releases/`, following the API cursor. A failed
+  # page is a loud exit: a partial list must never look like "nothing to do".
+  local cursor="" response
+  local args
+  while :; do
+    args=(-sS -G -H "$AUTH_HEADER"
+      --data-urlencode "prefix=releases/"
+      --data-urlencode "per_page=1000")
+    if [ -n "$cursor" ]; then
+      args+=(--data-urlencode "cursor=$cursor")
+    fi
+    response="$(curl "${args[@]}" \
+      "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET/objects")" \
+      || die "failed to list R2 objects under releases/"
+    printf '%s' "$response" | jq -e '.success == true' >/dev/null \
+      || {
+        echo "failed to list R2 objects under releases/:" >&2
+        printf '%s\n' "$response" >&2
+        exit 1
+      }
+    printf '%s' "$response" | jq -r '.result[]?.key // empty'
+    [ "$(printf '%s' "$response" | jq -r '.result_info.is_truncated // false')" = "true" ] \
+      || break
+    cursor="$(printf '%s' "$response" | jq -r '.result_info.cursor // empty')"
+    [ -n "$cursor" ] || die "R2 object list is truncated without a cursor"
+  done
+}
+
+# R2 is only the **live** mirror. GitHub Releases keep every published version
+# (this script and `publish-release.yml` never delete one); the bucket is pruned
+# so it does not grow by a few hundred MiB per release. Only the tag uploaded
+# above survives, and a re-list proves it before the manifest is rewritten.
+if [ "$PRUNE_OLD_RELEASES" = "1" ]; then
+  KEEP_PREFIX="releases/$TAG/"
+  LIST_FILE="$(mktemp "${TMPDIR:-/tmp}/yacr-r2-objects.XXXXXX")"
+  trap 'rm -f "$LIST_FILE"' EXIT
+  list_release_objects >"$LIST_FILE"
+  mapfile -t ALL_KEYS <"$LIST_FILE"
+  STALE_KEYS=()
+  for key in "${ALL_KEYS[@]}"; do
+    if [ "${key#"$KEEP_PREFIX"}" = "$key" ]; then
+      STALE_KEYS+=("$key")
+    fi
+  done
+  for key in "${STALE_KEYS[@]}"; do
+    echo "deleting stale R2 object: $key"
+    response="$(curl -sS -X DELETE -H "$AUTH_HEADER" \
+      "$API/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$BUCKET/objects/$key")" \
+      || die "failed to delete stale R2 object: $key"
+    printf '%s' "$response" | jq -e '.success == true' >/dev/null \
+      || {
+        echo "failed to delete stale R2 object '$key':" >&2
+        printf '%s\n' "$response" >&2
+        exit 1
+      }
+  done
+  list_release_objects >"$LIST_FILE"
+  mapfile -t ALL_KEYS <"$LIST_FILE"
+  REMAINING_KEYS=()
+  for key in "${ALL_KEYS[@]}"; do
+    if [ "${key#"$KEEP_PREFIX"}" = "$key" ]; then
+      REMAINING_KEYS+=("$key")
+    fi
+  done
+  [ "${#REMAINING_KEYS[@]}" -eq 0 ] \
+    || die "R2 still has objects outside ${KEEP_PREFIX}: ${REMAINING_KEYS[*]}"
+  rm -f "$LIST_FILE"
+  trap - EXIT
+  echo "pruned ${#STALE_KEYS[@]} stale R2 object(s); kept ${KEEP_PREFIX}"
+else
+  echo "R2_PRUNE_OLD_RELEASES=$PRUNE_OLD_RELEASES; keeping older R2 releases"
+fi
 
 # --- manifest --------------------------------------------------------------
 

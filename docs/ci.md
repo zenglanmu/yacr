@@ -337,6 +337,9 @@ Linux Flatpak 的本地运行方式见 `docs/flatpak.md`；Windows/macOS 打包�
 ## 宣传页部署（Landing site）
 
 静态宣传页 `apps/landing/` 部署到 Cloudflare Pages（`https://yacr.pages.dev/`），安装包镜像到
-R2 桶 `yacr-downloads`。`.github/workflows/site.yml` 是**手动 dispatch**（发布完成后再跑），
+R2 桶 `yacr-downloads`。R2 只是**最新版**的在线镜像：`upload-r2-downloads.sh` 上传并 HEAD 验证
+新 tag 后删除 `releases/` 下其它 tag 的对象并重新列出一遍确认。GitHub Release 才是归档，
+`publish-release.yml` 只追加资产，**不删除任何版本**；两个 workflow 与上传脚本都不含
+`gh release delete`。`.github/workflows/site.yml` 是**手动 dispatch**（发布完成后再跑），
 先 R2 后 Pages；契约测试 `python3 scripts/test-landing-site.py` 已接入 `core-quality`。
 入口/凭据/诚实边界见 [`docs/landing-site.md`](landing-site.md)。

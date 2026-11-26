@@ -8,7 +8,9 @@ workspace；它只是 `index.html` / `styles.css` / `main.js` / `downloads.json`
 - 线上地址：<https://yacr.pages.dev/>（Cloudflare Pages 项目 `yacr`）
 - 安装包镜像：Cloudflare R2 桶 `yacr-downloads`，主下载域名 `https://dl-yacr.snakeheartgo.top`
   （自定义域名 + Cache Rule），`r2.dev` 托管域名只作显式回退
-- 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.16/yacr-0.1.16-linux-x86_64.flatpak`）
+- 对象前缀：`releases/<tag>/`（例如 `releases/v0.1.16/yacr-0.1.16-linux-x86_64.flatpak`）。
+  桶里只保留**当前** tag 的对象：上传并验证成功后删除旧 tag 的对象；GitHub Release 才是归档，
+  保留全部已发布版本。
 
 > 部署/上传成功只是**分发**证据，不是运行时、GPU、真机或像素验收。页面与下载清单也不构成
 > DWG/DXF 兼容性承诺。
@@ -67,6 +69,10 @@ Cloudflare 账户的 zone `snakeheartgo.top` 上，因此可以套用 Cloudflare
   `${R2_PUBLIC_BASE}/releases/<tag>`，默认 `https://dl-yacr.snakeheartgo.top`；写入前会对 4 个主包做
   **HEAD 探测**，自定义域名不可达时**非零退出**（不会静默退回 r2.dev）。显式回退：
   `R2_PUBLIC_BASE=managed`。
+- 同一脚本在 HEAD 成功后**清理旧版本**：列出 `releases/` 前缀下不属于当前 tag 的对象并逐个删除，
+  然后重新列出一遍；仍有残留即非零退出。`R2_PRUNE_OLD_RELEASES=0` 可保留旧对象（调试用）。
+  它**只删 R2**，绝不删除 GitHub Release 或其资产——GitHub 保留每个已发布版本，
+  `publish-release.yml` 只追加，`scripts/test-landing-site.py` 锁定这一契约。
 - `.github/workflows/site.yml` 的 `public_base` 输入（默认 `https://dl-yacr.snakeheartgo.top`）传给该
   脚本；因此在自定义域名 Active 之前，`upload_downloads=true` 的部署会 fail-closed。
   只改文案/布局时用 `upload_downloads=false`，部署仓库里已提交的 `downloads.json`。
@@ -93,7 +99,8 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... bash scripts/deploy-landing-p
 3. 幂等创建 `yacr-downloads` 桶并启用 r2.dev 托管域名（显式回退用）；
 4. 用 wrangler v4 `r2 object put ... --remote` 上传（**必须** `--remote`，v4 默认写本地模拟）；
 5. 对 4 个主包在选定的公共 base（默认 `dl-yacr.snakeheartgo.top`）做 `curl -fsI` HEAD；
-6. 全部成功后用临时文件 + `mv` 原子重写 `apps/landing/downloads.json`。
+6. 删除 `releases/` 下其它 tag 的对象，并重新列出确认只剩当前 tag（`R2_PRUNE_OLD_RELEASES=0` 跳过）；
+7. 全部成功后用临时文件 + `mv` 原子重写 `apps/landing/downloads.json`。
 
 `deploy-landing-pages.sh` 会先校验静态目录（文件非空、`index.html` 引用 `styles.css`/`main.js`、
 `downloads.json` 与 `changelog.json` 可解析、`changelog.json` 与 release notes 未被改旧、`assets/`

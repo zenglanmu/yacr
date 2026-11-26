@@ -19,6 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LANDING = ROOT / "apps" / "landing"
 DEPLOY = ROOT / "scripts" / "deploy-landing-pages.sh"
 UPLOAD = ROOT / "scripts" / "upload-r2-downloads.sh"
+PUBLISH = ROOT / ".github" / "workflows" / "publish-release.yml"
 WORKFLOW = ROOT / ".github" / "workflows" / "site.yml"
 BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
@@ -339,9 +340,20 @@ def check_scripts(errors: list[str]) -> None:
             "app-universal-release.apk",
             "R2_PUBLIC_BASE",
             "dl-yacr.snakeheartgo.top",
+            "R2_PRUNE_OLD_RELEASES",
+            "R2 still has objects outside",
         ):
             if fragment not in upload:
                 fail(f"scripts/upload-r2-downloads.sh is missing {fragment!r}", errors)
+
+    # GitHub Releases are the archive and must never be pruned; R2 is only the
+    # live mirror of the newest release.
+    if "gh release delete" in upload:
+        fail(
+            "scripts/upload-r2-downloads.sh must not delete GitHub Releases or "
+            "assets; only R2 is pruned",
+            errors,
+        )
 
 
 def check_workflow(errors: list[str]) -> None:
@@ -381,6 +393,29 @@ def check_workflow(errors: list[str]) -> None:
         )
 
 
+def check_release_retention(errors: list[str]) -> None:
+    """GitHub Releases keep every published version.
+
+    R2 is pruned to the live release by `upload-r2-downloads.sh`, but the
+    public archive is GitHub: neither the publisher nor the landing workflow may
+    delete a release or its assets.
+    """
+    for label, path in (
+        ("publish-release.yml", PUBLISH),
+        ("site.yml", WORKFLOW),
+    ):
+        text = non_empty(path, errors)
+        if text is None:
+            continue
+        for forbidden in ("gh release delete", "--delete-assets"):
+            if forbidden in text:
+                fail(
+                    f".github/workflows/{label} must keep every GitHub release "
+                    f"(found {forbidden!r}); only R2 is pruned",
+                    errors,
+                )
+
+
 def main() -> int:
     errors: list[str] = []
     texts: dict[str, str] = {}
@@ -416,6 +451,7 @@ def main() -> int:
         check_headers(headers, errors)
     check_scripts(errors)
     check_workflow(errors)
+    check_release_retention(errors)
 
     if errors:
         print(f"FAIL: {len(errors)} landing-site contract problem(s):", file=sys.stderr)
