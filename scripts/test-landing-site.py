@@ -25,17 +25,18 @@ BUILD_CHANGELOG = ROOT / "scripts" / "build-landing-changelog.py"
 CHANGELOG = LANDING / "changelog.json"
 HEADERS = LANDING / "_headers"
 
-RELEASE = "v0.1.19"
-GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.19/"
-# `None` is a deliberate value, not a placeholder: v0.1.19 was published without
-# an R2 mirror, so the committed manifest falls back to the GitHub Release URLs.
-# After `upload-r2-downloads.sh` runs, set this to the CDN base it wrote.
+RELEASE = "v0.1.20"
+GITHUB_BASE = "https://github.com/zenglanmu/yacr/releases/download/v0.1.20/"
+# `None` is a deliberate value, not a placeholder: the committed manifest keeps
+# the GitHub Release fallback, while the CI R2 mirror rewrites `cdnBase` on the
+# runner before the landing deploy. After `upload-r2-downloads.sh` runs locally,
+# set this to the CDN base it wrote.
 CDN_BASE = None
 KNOWN_ASSETS = {
-    "linux": ("yacr-0.1.19-linux-x86_64.flatpak", 128177896),
-    "windows": ("yacr-0.1.19-windows-x86_64.zip", 119258488),
-    "macos": ("yacr-0.1.19-macos-universal.tar.gz", 174001894),
-    "android": ("app-universal-release.apk", 128685916),
+    "linux": ("yacr-0.1.20-linux-x86_64.flatpak", 130000072),
+    "windows": ("yacr-0.1.20-windows-x86_64.zip", 119529551),
+    "macos": ("yacr-0.1.20-macos-universal.tar.gz", 174489706),
+    "android": ("app-universal-release.apk", 128939868),
 }
 
 # The page shows five genuine product screenshots (one hero plate plus a
