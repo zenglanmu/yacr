@@ -956,6 +956,10 @@ impl ExtendedCommandId {
                 // selected mesh (one transaction / one undo step).
                 | Self::MeshRepair
                 | Self::MeshRebuild
+                // ADR-0061 P-MESH-2/3: refine/smooth/cap rewrite mesh rows.
+                | Self::MeshRefine
+                | Self::MeshSmooth
+                | Self::MeshCap
                 // ADR-0036: CHAMFEREDGE and PRESSPULL rewrite one exact body in
                 // place (one transaction / one undo step), so they are drawing
                 // writes too.

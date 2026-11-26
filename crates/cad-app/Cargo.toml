@@ -60,6 +60,7 @@ cad-resources.workspace = true
 # depends on the **trait** only, never on a kernel. The carrier injects an
 # `Arc<dyn SolidModeler>`; a carrier without one refuses by name.
 cad-kernel-adapter.workspace = true
+cad-mesh-edit.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 serde.workspace = true

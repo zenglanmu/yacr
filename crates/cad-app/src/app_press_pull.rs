@@ -62,6 +62,12 @@ impl Application {
             ));
         }
 
+        // P-MESH-2: a mesh face pick is edited by the shared mesh layer; an
+        // exact body falls through to the kernel path below.
+        if let Some(outcome) = self.press_pull_mesh_face(session, command)? {
+            return Ok(outcome);
+        }
+
         // The body is re-resolved here: it may have been erased or replaced
         // between the pick and Enter.
         let target = press_pull_target(self, command.document, std::slice::from_ref(&body))?;

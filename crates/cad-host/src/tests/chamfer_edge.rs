@@ -22,6 +22,65 @@ use cad_kernel_adapter::{
     SolidUnsupportedReason,
 };
 
+const MESH_BODY: u128 = 96;
+
+/// A 10×10×10 mesh row whose top faces carry a source key (P-MESH-2).
+fn mesh_body(id: u128) -> DbEntity {
+    let corners = [
+        p3(0.0, 0.0, 0.0),
+        p3(10.0, 0.0, 0.0),
+        p3(10.0, 10.0, 0.0),
+        p3(0.0, 10.0, 0.0),
+        p3(0.0, 0.0, 10.0),
+        p3(10.0, 0.0, 10.0),
+        p3(10.0, 10.0, 10.0),
+        p3(0.0, 10.0, 10.0),
+    ];
+    let indices: [[u32; 3]; 12] = [
+        [0, 3, 2],
+        [0, 2, 1],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [1, 2, 6],
+        [1, 6, 5],
+        [2, 3, 7],
+        [2, 7, 6],
+        [3, 0, 4],
+        [3, 4, 7],
+    ];
+    let mut face_sources = vec![None; indices.len()];
+    let top = SubElementId {
+        source_key: "top".into(),
+        topology_revision: Revision(0),
+    };
+    face_sources[2] = Some(top.clone());
+    face_sources[3] = Some(top);
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbSubDMesh".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Mesh(Mesh {
+            vertices: corners.to_vec(),
+            triangles: indices.to_vec(),
+            normals: Vec::new(),
+            face_sources,
+            colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
+            pbr: None,
+        }),
+        draw_order: 0,
+    }
+}
+
 const BODY_A: u128 = 94;
 const BODY_B: u128 = 95;
 
@@ -587,6 +646,36 @@ fn press_pull_captures_the_pixel_hit_point_and_refuses_another_body() {
         "the seed is the pixel hit point, got {:?}",
         points[0]
     );
+}
+
+#[test]
+fn press_pull_starts_on_a_mesh_face_without_a_solid_modeler() {
+    let core = core();
+    install_bodies(&core, vec![mesh_body(MESH_BODY)]);
+    perspective_view(&core);
+    select_body(
+        &core,
+        MESH_BODY,
+        Some(SubElementId {
+            source_key: "top".into(),
+            topology_revision: Revision(0),
+        }),
+    );
+    // No exact-solid modeler is installed: a mesh face edit is kernel-free.
+    EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::BeginDraw(DrawToolKind::PressPull)),
+    )
+    .expect("a mesh face starts the kernel-free capture");
+    assert_eq!(
+        core.controller.borrow().session.draw_kind(),
+        Some(DrawToolKind::PressPull)
+    );
+    let top = p3(5.0, 5.0, 10.0);
+    click_logical(&core, screen_of(&core, top)).expect("the mesh face is picked");
+    let points = captured_points(&core);
+    assert_eq!(points.len(), 1);
+    assert!((points[0].z - top.z).abs() < 1e-6);
 }
 
 #[test]

@@ -16,6 +16,7 @@ members = [
     "crates/cad-kernel-adapter",
     "crates/cad-kernel-solidcore",
     "crates/cad-kernel-manifold",
+    "crates/cad-mesh-edit",
     "crates/cad-representation",
     "crates/cad-spatial",
     "crates/cad-scene",
@@ -79,6 +80,7 @@ cad-geometry = { path = "crates/cad-geometry" }
 cad-kernel-adapter = { path = "crates/cad-kernel-adapter" }
 cad-kernel-solidcore = { path = "crates/cad-kernel-solidcore" }
 cad-kernel-manifold = { path = "crates/cad-kernel-manifold" }
+cad-mesh-edit = { path = "crates/cad-mesh-edit" }
 cad-representation = { path = "crates/cad-representation" }
 cad-spatial = { path = "crates/cad-spatial" }
 cad-scene = { path = "crates/cad-scene" }

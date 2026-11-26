@@ -500,6 +500,33 @@ fn screen_pick_propagates_the_mesh_face_sub_element() {
 }
 
 #[test]
+fn screen_pick_propagates_a_mesh_edge_sub_element() {
+    let db = mesh_database();
+    let options = PickOptions::new(1e-6).unwrap();
+    let hit = pick_ray(
+        &db,
+        DocumentId(9),
+        &Ray3 {
+            origin: p(-1.0, -1.0, 0.0),
+            direction: p(0.0, 0.0, 1.0),
+        },
+        &options,
+    )
+    .unwrap()
+    .hit
+    .expect("the shared bottom edge is hit");
+    let key = cad_domain::mesh_edge_key(p(-2.0, -1.0, 2.0), p(0.0, -1.0, 2.0));
+    assert_eq!(
+        hit.source
+            .sub_element
+            .as_ref()
+            .map(|sub| sub.source_key.as_str()),
+        Some(key.as_str())
+    );
+    assert!(hit.sub_element_reason.is_none());
+}
+
+#[test]
 fn mesh_without_a_face_source_is_unresolved_with_a_reason() {
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(10));
     b.insert_layer(Layer {

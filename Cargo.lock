@@ -711,6 +711,7 @@ dependencies = [
  "cad-history",
  "cad-kernel-adapter",
  "cad-measure",
+ "cad-mesh-edit",
  "cad-platform",
  "cad-query",
  "cad-representation",
@@ -738,6 +739,7 @@ dependencies = [
  "cad-kernel-manifold",
  "cad-kernel-solidcore",
  "cad-measure",
+ "cad-mesh-edit",
  "cad-platform",
  "cad-proxy",
  "cad-render-wgpu",
@@ -1003,6 +1005,13 @@ dependencies = [
  "cad-domain",
  "cad-geometry",
  "cad-spatial",
+]
+
+[[package]]
+name = "cad-mesh-edit"
+version = "0.1.19"
+dependencies = [
+ "cad-domain",
 ]
 
 [[package]]

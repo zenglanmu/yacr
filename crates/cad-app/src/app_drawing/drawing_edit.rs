@@ -41,6 +41,12 @@ impl Application {
                 "MoveEntities delta must be finite".into(),
             ));
         }
+        // P-MESH-2: a MOVE whose refs are mesh face sub-elements moves the face
+        // region (and adds side walls) instead of the whole row. `None` keeps the
+        // ordinary whole-entity path below.
+        if let Some(outcome) = self.move_mesh_faces(command)? {
+            return Ok(outcome);
+        }
         let document_id = command.document;
         let document = self
             .workspace

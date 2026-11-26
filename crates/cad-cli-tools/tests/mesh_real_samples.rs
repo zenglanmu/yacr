@@ -110,6 +110,9 @@ fn every_online_mesh_sample_is_classified_and_repaired_when_supplied() {
     let mut non_manifold_repaired = 0usize;
     let mut non_manifold_failed = 0usize;
     let mut non_manifold_refused = 0usize;
+    let mut fill_filled = 0usize;
+    let mut fill_refused = 0usize;
+    let mut fill_no_loop = 0usize;
     let mut closed_samples: Vec<MeshData> = Vec::new();
 
     for path in samples(dir) {
@@ -170,6 +173,31 @@ fn every_online_mesh_sample_is_classified_and_repaired_when_supplied() {
                     });
                     assert_eq!(reason.code, codes::MESH_NOT_CLOSED);
                     refused_open += 1;
+                    // P-MESH-3: a real open sample through the planar hole-fill
+                    // layer. A refused hole is a report, not a crash or a fake
+                    // close.
+                    let domain = cad_domain::Mesh {
+                        vertices: data.vertices.clone(),
+                        triangles: data.triangles.clone(),
+                        ..Default::default()
+                    };
+                    match cad_mesh_edit::fill_holes(&domain) {
+                        Ok(result) => {
+                            fill_filled += result.filled;
+                            fill_refused += result.refused;
+                            for hole in &result.holes {
+                                println!(
+                                    "  fill {}: {}",
+                                    hole.code.unwrap_or("filled"),
+                                    hole.detail
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            fill_no_loop += 1;
+                            println!("  fill error: {error}");
+                        }
+                    }
                 }
                 MeshTopology::NonManifold => {
                     // A closed non-manifold soup may be repaired (Partial), or
@@ -250,7 +278,8 @@ fn every_online_mesh_sample_is_classified_and_repaired_when_supplied() {
         "SUMMARY files={files} meshes={meshes} triangles={triangles} closed={closed} open={open} \
          non_manifold={non_manifold} repaired={repaired} refused_open={refused_open} \
          non_manifold_repaired={non_manifold_repaired} non_manifold_failed={non_manifold_failed} \
-         non_manifold_refused={non_manifold_refused} {boolean}"
+         non_manifold_refused={non_manifold_refused} fill_filled={fill_filled} \
+         fill_refused={fill_refused} fill_no_loop={fill_no_loop} {boolean}"
     );
     assert!(
         files > 0,

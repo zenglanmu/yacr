@@ -455,20 +455,22 @@ wire 体按 `export.skp.wire_body_no_writable_edges` 整实体丢弃）；
 - 不能做的：布尔、圆角、体积、精确质量属性。
 - 这是今天的行为；只要 UI 不写"实体"就没有过度承诺。
 
-**B. 网格布尔/修复（选定，见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；P-MESH-0/1a/1b 已实现）**
+**B. 网格布尔/修复/编辑/补洞（选定，见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；P-MESH-0/1a/1b/2/3 已实现）**
 
 - 内核固定为纯 Rust 的 `manifold-rust =0.19.6`（Apache-2.0；exact + robust 引擎；
   `repair_orientation`/`rebuild_solid`/`merge`；`CancelToken`/进度；wasm32 可编译）。
   **不启用 `parallel`**，默认顺序执行以保持确定性。
 - 接缝是 `cad-kernel-adapter::mesh` 的 `MeshModeler`（无内核默认 → `unsupported-runtime:
   mesh-modeler`），唯一实现是 `cad-kernel-manifold`；它只允许被载体注入，不进入共享层。
-- 域里不新增持久化字段：拓扑/修复报告是派生数据；面身份复用已持久化的
-  `Mesh.face_sources`（P-MESH-2 让 SKP 源面写入 `skp:face:<n>`）。
+- 域里不新增持久化字段：拓扑/修复/补洞报告是派生数据；面身份复用已持久化的
+  `Mesh.face_sources`（SKP 导入已写入 `skp:face:<n>`）。
 - **robust 引擎要求输入闭合且可定向**：open shell 返回 `Error::NotClosed`，按
-  `mesh.not_closed` 显式拒绝，**不自动补洞**（补洞是 P-MESH-3）。
+  `mesh.not_closed` 显式拒绝。P-MESH-3 的 `MESHCAP` 在编辑层补**简单平面**边界环；
+  非平面、自交、退化环逐洞拒绝，不会把失败补洞当成功。
 - 布尔结果仍是 `Mesh`；**不得**写成 `Body3d.exact`，也不得让 `MASSPROP` 报精确体积。
-- SketchUp 式的面/边直接编辑（移动、推拉、细分、平滑、撤销）由共享层
-  `cad-mesh-edit` 承担，需要 CSG 时再调 `MeshModeler`；内核本身不是拓扑编辑器。
+- SketchUp 式的面/边编辑（移动、推拉、细分、平滑、撤销）由共享层 `cad-mesh-edit` 承担，
+  需要 CSG 时再调 `MeshModeler`；边用几何派生 `mesh:edge:<bits>` key，wire-only 边不可编辑。
+  补洞也在该层（`MESHCAP`），不进入内核。
 
 **C. mesh→BRep 重建（不推荐）**
 
@@ -643,8 +645,8 @@ StepImporter::import
 | P-MESH-0（**已实现 2026-11-26**） | [ADR-0061](adr/0061-mesh-kernel-selection.md)：`cad-kernel-adapter::mesh` 的 `MeshModeler` 接缝 + `cad-kernel-manifold`（`manifold-rust =0.19.6`）+ 架构门禁 + 许可证登记；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`check-architecture.py`；无 modeler 时 `unsupported-runtime: mesh-modeler` |
 | P-MESH-1a（**已实现 2026-11-26**） | `concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质），必须是 `ClosedManifold`；mesh/solid 布尔互斥；仍非精确 | 闭合 cube∪/∖/∩ cube；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/运行期取消不写库；一条事务/一步撤销 |
 | P-MESH-1b（**已实现 2026-11-26**） | 网格修复命令（`MESHREPAIR` Orientation / `MESHREBUILD` Rebuild）+ `Partial` 报告；补洞仍属 P-MESH-3 | 非流形闭合汤 → `Partial` + `MeshRepair`；open → `mesh.not_closed`；一条事务/一步撤销 |
-| P-MESH-2（未实现） | SKP 源面身份写 `Mesh.face_sources`（`skp:face:<n>`）+ 按面/边拾取 + 移动/推拉/细分/平滑（共享层 `cad-mesh-edit`） | 同一源面三角形共享 id；编辑后 `cad-db` 校验通过；无面身份 → `mesh.face_identity_unavailable` |
-| P-MESH-3（未实现） | 补洞/更大范围修复（boundary loop fill、非闭合输入） | 逐洞报告、输出仍非精确；未实现前不得声称支持 open shell 修复 |
+| P-MESH-2（**已实现 2026-11-26**） | SKP 源面身份写 `Mesh.face_sources`（`skp:face:<n>`）+ 面选择 + 移动/推拉/细分/平滑（共享层 `cad-mesh-edit`）；边身份为几何派生 `mesh:edge:<bits>`，`MOVE` 可平移两端点；wire-only/跨多三角形边 polyline 仍不可编辑 | 同一源面三角形共享 id；面/边编辑后 `cad-db` 校验通过；无面身份 → `mesh.face_identity_unavailable`；`cad-mesh-edit` 20 + `cad-app` 9 + `cad-host` 捕获 1 passed |
+| P-MESH-3（**已实现 2026-11-26**） | `MESHCAP` 补简单边界环 + 逐洞报告；平面直补、非平面投影补并标 `non_planar`、多个独立环各自补；自交/退化/嵌套岛环拒绝 | 去掉顶/底面的 cube → 两环闭合、体积 8；非平面环 → 填充 + `non_planar=true`；真实 r1.obj open → `fill_refused=1`（退化环） |
 | P-STEP-1a | `cadmpeg-ir → BrepData` 解析曲面 lifter（Plane/Cylinder/Cone/Sphere/Torus + Line/Circle） | 解析样本 → `Body3d{Solid,Exact}`；三角面与现 `StepTessellatedMesh` 一致；失败面显式 |
 | P-STEP-1b | NURBS/椭圆/部分圆弧/pcurve | 依赖 P2；逐面计数，禁止无样本证据的"全部精确" |
 | P-STEP-2 | STEP 装配改为 `BlockDefinition` + `Insert` | 同一 body 两次实例 → 两个 `Insert`，不是两份网格 |

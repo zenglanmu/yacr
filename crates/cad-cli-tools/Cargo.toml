@@ -47,3 +47,4 @@ cad-connector-core.workspace = true
 cad-connector-skp.workspace = true
 cad-connector-mesh.workspace = true
 cad-kernel-manifold.workspace = true
+cad-mesh-edit.workspace = true

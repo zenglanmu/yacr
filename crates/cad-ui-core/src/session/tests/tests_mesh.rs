@@ -8,6 +8,9 @@ fn mesh_repair_selectors_are_admitted_once_and_work_only() {
     for (selector, id) in [
         ("MESHREPAIR", ExtendedCommandId::MeshRepair),
         ("MESHREBUILD", ExtendedCommandId::MeshRebuild),
+        ("MESHREFINE", ExtendedCommandId::MeshRefine),
+        ("MESHSMOOTH", ExtendedCommandId::MeshSmooth),
+        ("MESHCAP", ExtendedCommandId::MeshCap),
     ] {
         assert_eq!(
             normalize_command(selector),

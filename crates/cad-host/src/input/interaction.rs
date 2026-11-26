@@ -810,12 +810,28 @@ impl HostCore {
                 c.session.selection.refs().to_vec(),
             )
         };
-        if !has_modeler {
+        // P-MESH-2: a PRESSPULL on a mesh face is a kernel-free topology edit, so
+        // it does not need the exact-solid modeler or the exact-body target
+        // resolver. It still needs a real selected face id.
+        let mesh_press_pull = kind == cad_app::DrawToolKind::PressPull
+            && refs.len() == 1
+            && refs[0].sub_element.is_some()
+            && refs[0].instance.0.is_empty()
+            && {
+                let c = self.controller.borrow();
+                c.application
+                    .workspace
+                    .documents
+                    .get(&document)
+                    .and_then(|document| document.drawing.entity(refs[0].entity))
+                    .is_some_and(mesh_face_edit_target)
+            };
+        if !has_modeler && !mesh_press_pull {
             return Err(CadError::Unsupported(
                 cad_app::SOLID_MODELER_UNSUPPORTED.into(),
             ));
         }
-        {
+        if !mesh_press_pull {
             let c = self.controller.borrow();
             (pick.target)(&c.application, document, &refs)?;
         }
@@ -845,24 +861,57 @@ impl HostCore {
                 pick.code
             ))
         })?;
-        let target = {
+        // A mesh face capture is kernel-free and has no exact-body target; its
+        // identity is the selected row + face sub-element. The exact path still
+        // resolves the body through the command's own target resolver.
+        let mesh_target = {
             let c = self.controller.borrow();
-            (pick.target)(&c.application, c.document_id, c.session.selection.refs())?
+            let refs = c.session.selection.refs();
+            (kind == cad_app::DrawToolKind::PressPull
+                && refs.len() == 1
+                && refs[0].sub_element.is_some()
+                && refs[0].instance.0.is_empty()
+                && c.application
+                    .workspace
+                    .documents
+                    .get(&c.document_id)
+                    .and_then(|document| document.drawing.entity(refs[0].entity))
+                    .is_some_and(mesh_face_edit_target))
+            .then(|| refs[0].clone())
         };
-        if hit.source.document != target.body.document
-            || hit.source.entity != target.body.entity
-            || hit.source.instance != target.body.instance
+        let (target_document, target_entity, target_instance, selected) = if let Some(selected) =
+            mesh_target
+        {
+            (
+                selected.document,
+                selected.entity,
+                selected.instance.clone(),
+                selected,
+            )
+        } else {
+            let c = self.controller.borrow();
+            let target = (pick.target)(&c.application, c.document_id, c.session.selection.refs())?;
+            (
+                target.body.document,
+                target.body.entity,
+                target.body.instance.clone(),
+                target.body,
+            )
+        };
+        if hit.source.document != target_document
+            || hit.source.entity != target_entity
+            || hit.source.instance != target_instance
         {
             return Err(CadError::InvalidInput(format!(
                 "{}.pick_not_selected_body: the pick hit entity {} but the selected body is \
                  entity {}; select the body you want to edit",
-                pick.code, hit.source.entity.0, target.body.entity.0
+                pick.code, hit.source.entity.0, target_entity.0
             )));
         }
         self.controller
             .borrow_mut()
             .session
-            .capture_draw_pick(hit.point, target.body)
+            .capture_draw_pick(hit.point, selected)
     }
 
     /// One `SelectAt`/`CapturePoint` input as logical canvas coordinates.
@@ -946,36 +995,5 @@ impl HostCore {
         }
         drop(c);
         self.immediate_command(CommandId::Select, CommandPayload::Selection(refs))
-    }
-}
-
-/// The command, refusal code and target resolver of a one-pick solid face edit.
-struct SolidFaceTool {
-    command: cad_app::CommandId,
-    code: &'static str,
-    target: fn(
-        &cad_app::Application,
-        cad_domain::DocumentId,
-        &[cad_domain::SelectionRef],
-    ) -> cad_domain::CadResult<cad_app::SolidEditTarget>,
-}
-
-/// Map a face-edit capture kind to its command, code prefix and target resolver.
-fn solid_face_tool(kind: cad_app::DrawToolKind) -> CadResult<SolidFaceTool> {
-    match kind {
-        cad_app::DrawToolKind::ChamferEdge => Ok(SolidFaceTool {
-            command: cad_app::CommandId::Extended(cad_app::ExtendedCommandId::ChamferEdge),
-            code: "chamferedge",
-            target: cad_app::chamfer_edge_target,
-        }),
-        cad_app::DrawToolKind::PressPull => Ok(SolidFaceTool {
-            command: cad_app::CommandId::Extended(cad_app::ExtendedCommandId::PressPull),
-            code: "presspull",
-            target: cad_app::press_pull_target,
-        }),
-        other => Err(CadError::Invariant(format!(
-            "solid_face_tool: {} is not a solid face edit",
-            other.key()
-        ))),
     }
 }

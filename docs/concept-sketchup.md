@@ -25,17 +25,19 @@
 
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
-| `full` | 51 | **73.9%** |
-| `partial` | 5 | 7.2% |
+| `full` | 52 | **75.4%** |
+| `partial` | 4 | 5.8% |
 | `pending` | 13 | 18.8% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（51/69 = 73.9%）。
+- **50% 线已满足**（52/69 = 75.4%）。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
-  结果仍是**非精确**网格。`PRESSPULL` 仍只对精确实体（网格编辑是 P-MESH-2）。
-  因此本表的“73.9%”不是“SketchUp 已复刻七成”的营销结论；网格编辑/补洞由 P-MESH-2/3 补齐。
+  结果仍是**非精确**网格。`PRESSPULL` 现在同时支持精确面与带 `face_sources` 的网格面；
+  `MOVE` 面选择、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 平面闭环补洞已接线。
+  边身份使用几何派生 `mesh:edge:<bits>` key，`MOVE` 可移动边；wire-only 边/跨多个三角形边的
+  stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
 - P-MESH-1a/1b 已实现（2026-11-26）：Linux 原生注入 `ManifoldMeshModeler`；其它载体按
   `unsupported-runtime: mesh-modeler` 显式拒绝。
 
@@ -79,7 +81,7 @@
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
 | Move | `MOVE` | full | |
-| Push/Pull | `PRESSPULL` | partial | 只对精确 `Body3d{Solid,Exact}` 的单个面；网格体走 P-MESH-2 |
+| Push/Pull | `PRESSPULL` | full | 精确面或带 `face_sources` 的网格面；无面身份拒绝；边移动由 `MOVE` 处理 |
 | Rotate | `ROTATE` | full | |
 | Follow Me | `FOLLOWME` | pending | 没有沿路径扫掠 |
 | Scale | `SCALE` | full | |
@@ -158,9 +160,13 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   （结果写新的 `AcDbSubDMesh`，不冒充来源/精确）；`MESHREPAIR`（orientation）与
   `MESHREBUILD`（winding rebuild）修复闭合网格，返回 `Partial` 报告；worker + 取消 +
   陈旧检查 + 一条事务/一步撤销。open shell 仍按 `mesh.not_closed` 拒绝。
-- **之后（P-MESH-2）**：SKP 面身份（已导入 `Mesh.face_sources`）+ 网格 `PRESSPULL` +
-  `cad-mesh-edit` 的移动/推拉/细分/平滑。
-- **P-MESH-3**：补洞与更大范围修复；未实现前不得声称支持 open shell 修复。
+- **P-MESH-2（已实现 2026-11-26）**：SKP 面身份（`Mesh.face_sources`）+ 面选择
+  `MOVE`/`PRESSPULL` + `MESHREFINE` 细分 + `MESHSMOOTH` 平滑；边选中使用几何派生
+  `mesh:edge:<bits>` key，`MOVE` 平移两个端点，全部在无内核共享层 `cad-mesh-edit`。
+  wire-only 边/跨多个三角形边的 stored polyline 仍不可编辑。
+- **P-MESH-3（已实现 2026-11-26）**：`MESHCAP` 对简单边界环做补片并逐洞报告；平面环直接补，
+  非平面环投影到最佳拟合平面后补并标 `non_planar`；多个独立环各自补；自交/退化/嵌套岛环
+  仍按名拒绝且保持开口。
 - **真实 SKP 样本（2026-11-26）**：本地 `house.skp`（2,237,796 bytes，SHA-256
   `9cd2689df7c1bf0d1ce0d496e4e83c9367abab6d8ff3e21dc9bb8162e982dd30`，不入库）导入
   64 meshes / 1440 triangles；`face_sources` 1440 条、28 个 distinct keys；网格内核拓扑

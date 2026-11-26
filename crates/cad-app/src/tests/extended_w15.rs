@@ -6,7 +6,7 @@
 
 use super::*;
 
-const REFUSALS: [(ExtendedCommandId, &str); 25] = [
+const REFUSALS: [(ExtendedCommandId, &str); 22] = [
     (
         ExtendedCommandId::SurfBlend,
         "surfblend.unsupported: surface blending is not implemented",
@@ -52,10 +52,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 25] = [
         "mesh.unsupported: free-form mesh creation is not implemented",
     ),
     (
-        ExtendedCommandId::MeshCap,
-        "meshcap.unsupported: mesh capping is not implemented",
-    ),
-    (
         ExtendedCommandId::MeshCollapse,
         "meshcollapse.unsupported: mesh collapse is not implemented",
     ),
@@ -78,14 +74,6 @@ const REFUSALS: [(ExtendedCommandId, &str); 25] = [
     (
         ExtendedCommandId::MeshPrimitiveOptions,
         "meshprimitiveoptions.unsupported: no mesh primitive options model",
-    ),
-    (
-        ExtendedCommandId::MeshRefine,
-        "meshrefine.unsupported: mesh refinement is not implemented",
-    ),
-    (
-        ExtendedCommandId::MeshSmooth,
-        "meshsmooth.unsupported: mesh smoothing conversion is not implemented",
     ),
     (
         ExtendedCommandId::MeshSmoothLess,

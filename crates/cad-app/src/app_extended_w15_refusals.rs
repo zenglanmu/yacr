@@ -53,7 +53,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         ExtendedCommandId::MeshCreate => {
             "mesh.unsupported: free-form mesh creation is not implemented"
         }
-        ExtendedCommandId::MeshCap => "meshcap.unsupported: mesh capping is not implemented",
         ExtendedCommandId::MeshCollapse => {
             "meshcollapse.unsupported: mesh collapse is not implemented"
         }
@@ -67,12 +66,6 @@ fn reason(ext: ExtendedCommandId) -> String {
         }
         ExtendedCommandId::MeshPrimitiveOptions => {
             "meshprimitiveoptions.unsupported: no mesh primitive options model"
-        }
-        ExtendedCommandId::MeshRefine => {
-            "meshrefine.unsupported: mesh refinement is not implemented"
-        }
-        ExtendedCommandId::MeshSmooth => {
-            "meshsmooth.unsupported: mesh smoothing conversion is not implemented"
         }
         ExtendedCommandId::MeshSmoothLess => {
             "meshsmoothless.unsupported: no mesh smoothness level model"

@@ -531,6 +531,38 @@ pub struct Mesh {
     pub pbr: Option<MeshPbr>,
 }
 
+/// A stable, geometry-derived identity for one mesh edge (P-MESH-2).
+///
+/// The key is the two endpoint positions, canonicalised (`-0.0` == `0.0`) and
+/// sorted, written as exact IEEE-754 bits. It is persistent for as long as the
+/// edge's endpoints do not move: a picked edge can be stored in a
+/// `SelectionRef.sub_element` and resolved again by recomputing the keys of the
+/// mesh's welded edges. It is deliberately derivable without a schema field, so
+/// `.ymodel` does not change; a moved endpoint produces a new key.
+pub fn mesh_edge_key(a: Point3, b: Point3) -> String {
+    let key = |point: Point3| {
+        (
+            canonical_edge_bits(point.x),
+            canonical_edge_bits(point.y),
+            canonical_edge_bits(point.z),
+        )
+    };
+    let (ka, kb) = (key(a), key(b));
+    let (lo, hi) = if ka <= kb { (ka, kb) } else { (kb, ka) };
+    format!(
+        "mesh:edge:{:016x}{:016x}{:016x}:{:016x}{:016x}{:016x}",
+        lo.0, lo.1, lo.2, hi.0, hi.1, hi.2
+    )
+}
+
+fn canonical_edge_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0.0f64.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Defaults and helpers.
 //

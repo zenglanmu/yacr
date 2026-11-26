@@ -36,6 +36,26 @@ fn mesh_face_hit_resolves_the_stable_sub_element() {
 }
 
 #[test]
+fn a_hit_on_a_mesh_edge_resolves_the_derived_edge_key() {
+    let options = PickOptions::new(1e-6).unwrap();
+    let mesh = SemanticGeometry::Mesh(two_face_mesh());
+    let transform = Transform3::identity();
+    // The ray lands on the y = -1 edge shared by the first triangle's boundary.
+    let r = ray(p(-1.0, -1.0, 0.0), p(0.0, 0.0, 1.0));
+    let key = cad_domain::mesh_edge_key(p(-2.0, -1.0, 2.0), p(0.0, -1.0, 2.0));
+    match hit_geometry(&r, &mesh, &transform, &options).unwrap() {
+        PickOutcome::Hit(hit) => {
+            assert_eq!(
+                hit.sub_element.as_ref().map(|s| s.source_key.as_str()),
+                Some(key.as_str())
+            );
+            assert!(hit.sub_element_reason.is_none());
+        }
+        other => panic!("expected an edge hit, got {other:?}"),
+    }
+}
+
+#[test]
 fn mesh_face_without_a_source_is_unresolved_with_a_reason() {
     let options = PickOptions::new(1e-6).unwrap();
     let transform = Transform3::identity();

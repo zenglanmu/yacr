@@ -417,6 +417,7 @@ mod selection_reconcile;
 // ADR-0036 phase C3a: MASSPROP for exact 3D solid bodies (fake modeler).
 mod massprop_solid;
 // ADR-0036 phase C1: the seven primitive create commands (fake modeler).
+mod mesh_edit;
 mod mesh_solids;
 mod solids;
 // ADR-0036 phase C2: the three boolean commands (validation + job start).

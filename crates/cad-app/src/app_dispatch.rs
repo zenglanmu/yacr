@@ -505,6 +505,10 @@ impl Application {
             | ExtendedCommandId::Edge
             | ExtendedCommandId::Mirror3D
             | ExtendedCommandId::Rotate3D => self.extended_w14_refusals(command, ext)?,
+            // P-MESH-2/3: real mesh edits through the kernel-free shared layer.
+            ExtendedCommandId::MeshRefine => self.refine_meshes(session, command)?,
+            ExtendedCommandId::MeshSmooth => self.smooth_meshes(session, command)?,
+            ExtendedCommandId::MeshCap => self.cap_mesh(session, command)?,
             // Wave 15: stable named refusals.
             ExtendedCommandId::SurfBlend
             | ExtendedCommandId::SurfExtend
@@ -517,15 +521,12 @@ impl Application {
             | ExtendedCommandId::SurfTrim
             | ExtendedCommandId::SurfUntrim
             | ExtendedCommandId::MeshCreate
-            | ExtendedCommandId::MeshCap
             | ExtendedCommandId::MeshCollapse
             | ExtendedCommandId::MeshCrease
             | ExtendedCommandId::MeshExtrude
             | ExtendedCommandId::MeshMerge
             | ExtendedCommandId::MeshOptions
             | ExtendedCommandId::MeshPrimitiveOptions
-            | ExtendedCommandId::MeshRefine
-            | ExtendedCommandId::MeshSmooth
             | ExtendedCommandId::MeshSmoothLess
             | ExtendedCommandId::MeshSmoothMore
             | ExtendedCommandId::MeshSpin

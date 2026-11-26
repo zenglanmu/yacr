@@ -195,8 +195,11 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   P-MESH-1a/1b（网格布尔复用 `UNION`/`SUBTRACT`/`INTERSECT`，修复命令 `MESHREPAIR`/`MESHREBUILD`）
   已接线：Linux 原生注入 `ManifoldMeshModeler`，worker + 取消 + 陈旧检查 + 一条事务/撤销，结果写
   `AcDbSubDMesh`（无 `face_sources`/UV/材质）；其它载体按 `unsupported-runtime: mesh-modeler`
-  显式拒绝。SketchUp 面编辑（P-MESH-2）仍未实现，open shell 按 `mesh.not_closed` 拒绝，
-  网格结果永不写成精确 B-Rep。写出一律读 `cad-db` 并
+  显式拒绝。P-MESH-2/3 已实现于无内核共享层 `cad-mesh-edit`：面区域 `MOVE`/`PRESSPULL`
+  （依赖 `Mesh.face_sources`）、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 边界环补洞；
+  边身份为几何派生 `mesh:edge:<bits>` key，`MOVE` 可平移边两端点；wire-only 边/跨多三角形边
+  polyline 仍不可编辑。补洞支持平面环、非平面投影环与多个独立环；自交/退化/嵌套岛环拒绝。
+  open shell 仍按 `mesh.not_closed` 拒绝，网格结果永不写成精确 B-Rep。写出一律读 `cad-db` 并
   返回 `CompatReport`：DXF/DWG/STL/OBJ/PLY/OFF/IFC4/SKP/glTF（GLB + JSON `.gltf`）已接线；
   STEP/DGN/RVT 为稳定拒绝
   `export.<id>.not_implemented`。`EXPORT` 是单个规范命令：裸 `EXPORT` 打开全格式选择器且建议名取

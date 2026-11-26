@@ -317,7 +317,8 @@ fn hit_validated(
         }
         SemanticGeometry::Mesh(mesh) => match mesh_hit(ray, mesh, transform, options) {
             Some((t, point, triangle)) => {
-                let (sub_element, sub_element_reason) = face_sub_element(mesh, triangle);
+                let (sub_element, sub_element_reason) =
+                    mesh_sub_element(mesh, triangle, transform, point, options.tolerance);
                 PickOutcome::Hit(GeometryHit {
                     point,
                     distance: t,
@@ -351,7 +352,13 @@ fn hit_validated(
             let mut best: Option<GeometryHit> = None;
             let display = &body.display;
             if let Some((t, point, triangle)) = mesh_hit(ray, &display.mesh, transform, options) {
-                let (sub_element, sub_element_reason) = face_sub_element(&display.mesh, triangle);
+                let (sub_element, sub_element_reason) = mesh_sub_element(
+                    &display.mesh,
+                    triangle,
+                    transform,
+                    point,
+                    options.tolerance,
+                );
                 best = Some(GeometryHit {
                     point,
                     distance: t,
@@ -376,7 +383,13 @@ fn hit_validated(
                             offset,
                             precision: display.precision.clone(),
                             geometry_source: geometry_source.clone(),
-                            sub_element: None,
+                            sub_element: stored_edge_sub_element(
+                                edge,
+                                &display.mesh,
+                                transform,
+                                point,
+                                options.tolerance,
+                            ),
                             sub_element_reason: None,
                         });
                     }
@@ -704,10 +717,29 @@ fn hit(
 
 /// Map a hit triangle to its stable sub-element.
 ///
-/// The mapping is a pure read of [`Mesh::face_sources`], indexed by triangle.
-/// It never invents an id: a missing/short/`None` source yields `None` plus a
-/// machine reason.
-fn face_sub_element(mesh: &Mesh, triangle: usize) -> (Option<SubElementId>, Option<&'static str>) {
+/// A hit close to one of the triangle's edges resolves the geometry-derived
+/// edge key (P-MESH-2), so the same click target can be moved as an edge. A hit
+/// nearer the interior falls back to [`Mesh::face_sources`], indexed by
+/// triangle. It never invents a face id: a missing/short/`None` source yields
+/// `None` plus a machine reason.
+fn mesh_sub_element(
+    mesh: &Mesh,
+    triangle: usize,
+    transform: &Transform3,
+    point: Point3,
+    tolerance: f64,
+) -> (Option<SubElementId>, Option<&'static str>) {
+    if let Some((key, distance)) = nearest_triangle_edge(mesh, triangle, transform, point) {
+        if distance <= tolerance {
+            return (
+                Some(SubElementId {
+                    source_key: key,
+                    topology_revision: Revision(0),
+                }),
+                None,
+            );
+        }
+    }
     if mesh.face_sources.is_empty() {
         return (None, Some(REASON_FACE_SOURCES_ABSENT));
     }
@@ -716,6 +748,106 @@ fn face_sub_element(mesh: &Mesh, triangle: usize) -> (Option<SubElementId>, Opti
         Some(None) => (None, Some(REASON_FACE_SOURCE_MISSING)),
         None => (None, Some(REASON_FACE_SOURCE_OUT_OF_RANGE)),
     }
+}
+
+/// The nearest triangle edge to `point`, with its geometry-derived key.
+fn nearest_triangle_edge(
+    mesh: &Mesh,
+    triangle: usize,
+    transform: &Transform3,
+    point: Point3,
+) -> Option<(String, f64)> {
+    let tri = *mesh.triangles.get(triangle)?;
+    let mut best: Option<(String, f64)> = None;
+    for (a, b) in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])] {
+        let (Some(pa), Some(pb)) = (mesh.vertices.get(a as usize), mesh.vertices.get(b as usize))
+        else {
+            continue;
+        };
+        let wa = transform.apply_point(*pa);
+        let wb = transform.apply_point(*pb);
+        let distance = point_segment_distance(point, wa, wb);
+        if best.as_ref().is_none_or(|(_, current)| distance < *current) {
+            best = Some((cad_domain::mesh_edge_key(*pa, *pb), distance));
+        }
+    }
+    best
+}
+
+/// The key of the polyline segment closest to a stored-edge hit.
+fn stored_edge_sub_element(
+    edge: &[Point3],
+    mesh: &Mesh,
+    transform: &Transform3,
+    point: Point3,
+    tolerance: f64,
+) -> Option<SubElementId> {
+    let mut best: Option<(String, f64)> = None;
+    for window in edge.windows(2) {
+        let wa = transform.apply_point(window[0]);
+        let wb = transform.apply_point(window[1]);
+        let distance = point_segment_distance(point, wa, wb);
+        if best.as_ref().is_none_or(|(_, current)| distance < *current) {
+            best = Some((cad_domain::mesh_edge_key(window[0], window[1]), distance));
+        }
+    }
+    best.filter(|(key, distance)| *distance <= tolerance && mesh_has_edge_key(mesh, key))
+        .map(|(key, _)| SubElementId {
+            source_key: key,
+            topology_revision: Revision(0),
+        })
+}
+
+/// Whether `key` names one of the mesh's welded triangle edges.
+///
+/// A wire-only body has no triangles, so its display polylines stay whole-body
+/// targets (there is no mesh edge to move).
+fn mesh_has_edge_key(mesh: &Mesh, key: &str) -> bool {
+    mesh.triangles.iter().any(|triangle| {
+        [
+            (triangle[0], triangle[1]),
+            (triangle[1], triangle[2]),
+            (triangle[2], triangle[0]),
+        ]
+        .into_iter()
+        .any(|(a, b)| {
+            let (Some(pa), Some(pb)) =
+                (mesh.vertices.get(a as usize), mesh.vertices.get(b as usize))
+            else {
+                return false;
+            };
+            cad_domain::mesh_edge_key(*pa, *pb) == key
+        })
+    })
+}
+
+/// Distance from a point to a finite segment.
+fn point_segment_distance(point: Point3, a: Point3, b: Point3) -> f64 {
+    let ab = Point3 {
+        x: b.x - a.x,
+        y: b.y - a.y,
+        z: b.z - a.z,
+    };
+    let ap = Point3 {
+        x: point.x - a.x,
+        y: point.y - a.y,
+        z: point.z - a.z,
+    };
+    let length2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
+    let t = if length2 <= f64::EPSILON {
+        0.0
+    } else {
+        ((ap.x * ab.x + ap.y * ab.y + ap.z * ab.z) / length2).clamp(0.0, 1.0)
+    };
+    let closest = Point3 {
+        x: a.x + ab.x * t,
+        y: a.y + ab.y * t,
+        z: a.z + ab.z * t,
+    };
+    let dx = point.x - closest.x;
+    let dy = point.y - closest.y;
+    let dz = point.z - closest.z;
+    (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
 fn tessellation_precision(options: &PickOptions) -> Precision {
