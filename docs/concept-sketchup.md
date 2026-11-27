@@ -54,6 +54,8 @@
   **场景阴影/雾快照**（2026-11-27，ADR-0080）：`SCENE SAVE` 把文档 `tables/display.json`
   记录存进场景行的 `display`（minor 24）；`SCENE RESTORE` 在记录有差异时执行一次与
   `SHADOWS`/`FOG` 相同的显示写入（一步撤销），Viewer 下有差异则在改动前拒绝。
+  **Outliner 分组改名**（2026-11-28，ADR-0088）：分组行内输入 dispatch 既有
+  `GROUPEDIT "<name>" RENAME "<new>"`，一步撤销；重排/拖拽归组/建组/隐藏仍未实现。
   **自动参考线点**（2026-11-28，ADR-0087）：`DIST GUIDE` 的两个拾取点重合时写 point 标记
   （不是退化为错误），测量仍返回 0 距离。
   **参考线点与单条删除**（2026-11-28，ADR-0085）：`GUIDE POINT` 写 point-only 行（minor 27，
@@ -230,7 +232,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Match Photo | partial | 真实面板 + host read（`cad_match_photo` / `kind:"matchPhoto"`）：明确报告 `modeled:false` 与稳定原因（照片匹配模型未建模：无照片导入/相机求解/照片背景），动作按钮 dispatch `MATCHPHOTO`，命令以 `matchphoto.not_implemented` 具名拒绝；不伪造照片列表 |
 | Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化/场景快照 |
 | Overlays | partial | 真实面板 + host read（`cad_overlays` / `kind:"overlays"`）：只读列出**渲染器实际拥有**的叠加通道（坐标轴/网格/选中高亮/捕捉提示/选择框/悬停高亮/测量读数/绘制预览）及其当前开关；没有用户管理的叠加定义模型，动作按钮 dispatch `OVERLAYS`，以 `overlays.not_implemented` 具名拒绝 |
-| Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**只读**：改名/重排/拖拽归组/建组/隐藏都未实现，只投影模型空间、只展开一层 |
+| Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**分组行可改名**：行内输入 dispatch 既有 `GROUPEDIT "<name>" RENAME "<new>"`（一步撤销；名称含 `"`/换行时按钮不提供）；重排/拖拽归组/建组/隐藏都未实现，只投影模型空间、只展开一层 |
 
 ## 5. 本轮验收与后续
 

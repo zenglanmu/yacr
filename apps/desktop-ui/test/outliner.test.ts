@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
   OUTLINER_COMMAND,
+  groupRenameCommand,
   outlinerRowKey,
   parseOutlinerAnswer,
   readOutliner,
@@ -79,4 +80,22 @@ test('the read goes through the one frozen command', async () => {
   });
   assert.deepEqual(seen, [OUTLINER_COMMAND]);
   assert.equal(answer.rows.length, 5);
+});
+
+test('a group rename uses the quoted GROUPEDIT grammar', () => {
+  assert.equal(
+    groupRenameCommand('walls', 'Walls 2'),
+    'GROUPEDIT "walls" RENAME "Walls 2"',
+  );
+  assert.equal(
+    groupRenameCommand('  walls  ', '  walls  '),
+    'GROUPEDIT "walls" RENAME "walls"',
+  );
+});
+
+test('a group name with a quote or line break cannot be addressed', () => {
+  for (const value of ['a"b', 'a\nb', 'a\rb', '   ', null, 3]) {
+    assert.equal(groupRenameCommand('walls', value), null, String(value));
+    assert.equal(groupRenameCommand(value, 'walls'), null, String(value));
+  }
 });

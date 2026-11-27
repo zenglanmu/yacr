@@ -61,6 +61,22 @@ function idOf(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+/**
+ * The `GROUPEDIT "<name>" RENAME "<new>"` line for a group row.
+ *
+ * Group names are addressed with double quotes in the typed grammar; a name
+ * that itself contains a quote (or a line break) cannot be expressed by that
+ * grammar and is refused here instead of being escaped into a different name.
+ */
+export function groupRenameCommand(from: unknown, to: unknown): string | null {
+  const name = typeof from === 'string' ? from.trim() : '';
+  const next = typeof to === 'string' ? to.trim() : '';
+  const unsafe = (value: string) => value === '' || value.includes('"')
+    || value.includes('\n') || value.includes('\r');
+  if (unsafe(name) || unsafe(next)) return null;
+  return `GROUPEDIT "${name}" RENAME "${next}"`;
+}
+
 /** The stable key for one row (its kind and id are unique in one tree). */
 export function outlinerRowKey(row: Pick<OutlinerRow, 'kind' | 'id'>): string {
   return `${row.kind}:${row.id}`;

@@ -39,7 +39,7 @@ import { readScenes } from '../concept/scenes.ts';
 import type { ScenesAnswer } from '../concept/scenes.ts';
 import { readDisplay } from '../concept/display.ts';
 import type { DisplayAnswer } from '../concept/display.ts';
-import { outlinerRowKey, readOutliner, visibleOutlinerRows } from '../concept/outliner.ts';
+import { groupRenameCommand, outlinerRowKey, readOutliner, visibleOutlinerRows } from '../concept/outliner.ts';
 import type { OutlinerAnswer, OutlinerRow } from '../concept/outliner.ts';
 import { selectBimEntities } from '../../bim/selection.ts';
 
@@ -689,6 +689,8 @@ function OutlinerBody() {
   const [nonce, setNonce] = useState(0);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [selectionError, setSelectionError] = useState('');
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [state, setState] = useState<{
     phase: 'ready' | 'loading' | 'error';
     answer: OutlinerAnswer | null;
@@ -735,6 +737,17 @@ function OutlinerBody() {
       else setNonce(value => value + 1);
     });
   };
+  const beginRename = (row: OutlinerRow) => {
+    setSelectionError('');
+    setRenameValue(row.label);
+    setRenaming(outlinerRowKey(row));
+  };
+  const commitRename = (row: OutlinerRow) => {
+    const command = groupRenameCommand(row.label, renameValue);
+    if (command === null) return;
+    shell.runCommand(command);
+    setRenaming(null);
+  };
   return (
     <>
       <p className="concept-panel__hint">{t('concept.outliner.hint')}</p>
@@ -771,7 +784,37 @@ function OutlinerBody() {
                 ) : (
                   <span className="concept-outliner__toggle" aria-hidden="true" />
                 )}
-                {row.selectable ? (
+                {renaming === key ? (
+                  <>
+                    <input
+                      type="text"
+                      className="concept-scenes__name"
+                      value={renameValue}
+                      aria-label={t('concept.outliner.rename')}
+                      onChange={event => setRenameValue(event.currentTarget.value)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') commitRename(row);
+                        if (event.key === 'Escape') setRenaming(null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="concept-panel__action"
+                      disabled={groupRenameCommand(row.label, renameValue) === null
+                        || !shell.canCommand('GROUPEDIT')}
+                      onClick={() => commitRename(row)}
+                    >
+                      {t('concept.outliner.rename_save')}
+                    </button>
+                    <button
+                      type="button"
+                      className="concept-panel__action"
+                      onClick={() => setRenaming(null)}
+                    >
+                      {t('concept.outliner.rename_cancel')}
+                    </button>
+                  </>
+                ) : row.selectable ? (
                   <button
                     type="button"
                     className="concept-rows__label concept-outliner__name"
@@ -788,6 +831,17 @@ function OutlinerBody() {
                     {row.label}
                   </span>
                 )}
+                {renaming !== key && row.kind === 'group'
+                  && groupRenameCommand(row.label, row.label) !== null ? (
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={!shell.canCommand('GROUPEDIT')}
+                    onClick={() => beginRename(row)}
+                  >
+                    {t('concept.outliner.rename')}
+                  </button>
+                ) : null}
               </li>
             );
           })}
