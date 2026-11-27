@@ -13,6 +13,7 @@ mod lasso;
 mod mesh_target;
 mod pointer;
 mod queue;
+mod solid_face;
 
 pub(crate) use face_tool::solid_face_tool;
 pub(crate) use mesh_target::mesh_face_edit_target;

@@ -7,6 +7,11 @@
 //! layer; the profile entities stay exactly as they were (this build has no
 //! first-class face entity, so the 2D loop is the durable input).
 //!
+//! The host also reaches this command from the **Push/Pull** tool when the
+//! selection is such a profile (there is no solid face to pick yet), through
+//! [`Application::closed_profile_selection`]; the command, its validation and
+//! its single transaction are the same either way.
+//!
 //! # Supported profiles (first cut)
 //!
 //! * LINEs forming exactly one closed chain (every endpoint used twice);
@@ -146,6 +151,21 @@ impl Application {
             ),
         });
         Ok(outcome)
+    }
+
+    /// Whether the selected top-level rows are one closed XY-parallel profile.
+    ///
+    /// This is [`Self::profile_from_refs`]'s predicate, exposed read-only so the
+    /// host can start **Push/Pull** on a drawn rectangle or circle the way
+    /// SketchUp does (there is no face to pick before the first extrusion) and
+    /// route it to `EXTRUDE`. It builds nothing, opens no transaction and bumps
+    /// no revision; the command validates the same rows again at execute time,
+    /// so a document that changed between start and Enter still refuses by name.
+    ///
+    /// A sub-element or block-instance reference is never a profile: those name
+    /// existing geometry, not the loop the user drew.
+    pub fn closed_profile_selection(&self, document: DocumentId, refs: &[SelectionRef]) -> bool {
+        !refs.is_empty() && self.profile_from_refs(document, refs).is_ok()
     }
 
     /// Build the one closed XY-parallel profile the selected rows describe.

@@ -154,6 +154,13 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 // DIMREASSOC clears a dimension text override (a drawing
                 // write); DIMREASSOCIATE stays a payload-free report.
                 | ExtendedCommandId::DimReassoc
+                // ADR-0061 P-MESH-1b/2/3: repair/rebuild/refine/smooth/cap all
+                // rewrite the selected mesh row (one transaction, one undo).
+                | ExtendedCommandId::MeshRepair
+                | ExtendedCommandId::MeshRebuild
+                | ExtendedCommandId::MeshRefine
+                | ExtendedCommandId::MeshSmooth
+                | ExtendedCommandId::MeshCap
         );
         assert_eq!(
             variant.requires_work_mode(),

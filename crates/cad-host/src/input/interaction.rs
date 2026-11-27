@@ -784,59 +784,8 @@ impl HostCore {
         Ok(self.pick_hit_at(point)?.map(|hit| hit.source))
     }
 
-    /// Start a one-pick **solid face edit** capture (`CHAMFEREDGE` or
-    /// `PRESSPULL`) after failing fast on its prerequisites.
-    ///
-    /// The order is the command path's order: **authorize first** (the extended
-    /// command is Work-only, so a Viewer session gets the same
-    /// `PermissionDenied` a typed command would), then the carrier capability
-    /// (`unsupported-runtime: solid-modeler`), then the selection (the shared
-    /// target resolver, with the command's own `*.selection_required`-family
-    /// codes).
-    ///
-    /// All of it runs before the session arms a capture, so a refused start
-    /// leaves no tool and consumes no click.
-    fn begin_solid_face_tool(&self, kind: cad_app::DrawToolKind) -> CadResult<()> {
-        let pick = solid_face_tool(kind)?;
-        {
-            let c = self.controller.borrow();
-            c.session.authorize(pick.command)?;
-        }
-        let (has_modeler, document, refs) = {
-            let c = self.controller.borrow();
-            (
-                c.application.has_solid_modeler(),
-                c.document_id,
-                c.session.selection.refs().to_vec(),
-            )
-        };
-        // P-MESH-2: a PRESSPULL on a mesh face is a kernel-free topology edit, so
-        // it does not need the exact-solid modeler or the exact-body target
-        // resolver. It still needs a real selected face id.
-        let mesh_press_pull = kind == cad_app::DrawToolKind::PressPull
-            && refs.len() == 1
-            && refs[0].sub_element.is_some()
-            && refs[0].instance.0.is_empty()
-            && {
-                let c = self.controller.borrow();
-                c.application
-                    .workspace
-                    .documents
-                    .get(&document)
-                    .and_then(|document| document.drawing.entity(refs[0].entity))
-                    .is_some_and(mesh_face_edit_target)
-            };
-        if !has_modeler && !mesh_press_pull {
-            return Err(CadError::Unsupported(
-                cad_app::SOLID_MODELER_UNSUPPORTED.into(),
-            ));
-        }
-        if !mesh_press_pull {
-            let c = self.controller.borrow();
-            (pick.target)(&c.application, document, &refs)?;
-        }
-        self.controller.borrow_mut().begin_draw_tool(kind)
-    }
+    // `begin_solid_face_tool` lives in `input/solid_face.rs`; the BeginDraw
+    // call site above reaches it through the same `impl HostCore`.
 
     /// Capture a solid face edit's one step: the pixel pick hit point on the
     /// selected body.

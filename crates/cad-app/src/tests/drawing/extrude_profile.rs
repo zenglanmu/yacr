@@ -289,3 +289,80 @@ fn a_carrier_without_a_modeler_refuses_by_name() {
     let text = refusal_text(execute(&mut app, &mut session, id, payload).unwrap_err());
     assert!(text.contains("solid-modeler"), "{text}");
 }
+
+// ---- the Push/Pull entry's read-only profile predicate ---------------------
+//
+// The host arms `EXTRUDE` when Push/Pull starts on this selection. The
+// predicate must accept exactly the rows the command would accept, and it must
+// not write anything: these tests read it on a live application and then assert
+// the revision and undo stack are untouched.
+
+fn closed_rect(id: u128) -> DbEntity {
+    ent(
+        id,
+        SemanticGeometry::Polyline {
+            points: vec![
+                p(0.0, 0.0, 0.0),
+                p(2.0, 0.0, 0.0),
+                p(2.0, 3.0, 0.0),
+                p(0.0, 3.0, 0.0),
+            ],
+            bulges: vec![0.0; 4],
+            closed: true,
+            width: 0.0,
+        },
+        id as i64,
+    )
+}
+
+#[test]
+fn a_closed_polyline_is_a_push_pull_profile_and_the_probe_writes_nothing() {
+    let (app, _session) = app_with(vec![closed_rect(LINE_A)]);
+    let before = revision(&app);
+    assert!(app.closed_profile_selection(DocumentId(1), &[ref_of(LINE_A)]));
+    assert_eq!(revision(&app), before, "the probe is a pure read");
+    assert!(!app.can_undo(&DocumentId(1)));
+}
+
+#[test]
+fn a_line_ring_is_a_push_pull_profile() {
+    let (app, _session) = app_with(rectangle(0.0));
+    assert!(app.closed_profile_selection(DocumentId(1), &refs()));
+}
+
+#[test]
+fn a_circle_is_a_push_pull_profile_but_an_open_chain_is_not() {
+    let (app, _session) = app_with(vec![
+        ent(
+            LINE_A,
+            SemanticGeometry::Circle {
+                center: p(1.0, 1.0, 0.0),
+                normal: p(0.0, 0.0, 1.0),
+                radius: 1.0,
+            },
+            LINE_A as i64,
+        ),
+        line(LINE_B, p(0.0, 0.0, 0.0), p(2.0, 0.0, 0.0)),
+    ]);
+    assert!(app.closed_profile_selection(DocumentId(1), &[ref_of(LINE_A)]));
+    assert!(!app.closed_profile_selection(DocumentId(1), &[ref_of(LINE_B)]));
+    assert!(
+        !app.closed_profile_selection(DocumentId(1), &[]),
+        "an empty selection is not a profile"
+    );
+}
+
+#[test]
+fn a_sub_element_or_instance_reference_is_never_a_profile() {
+    let (app, _session) = app_with(vec![closed_rect(LINE_A)]);
+    let mut face = ref_of(LINE_A);
+    face.sub_element = Some(SubElementId {
+        source_key: "face-0".into(),
+        topology_revision: Revision(0),
+    });
+    assert!(!app.closed_profile_selection(DocumentId(1), &[face]));
+
+    let mut instance = ref_of(LINE_A);
+    instance.instance = InstancePath(vec![EntityId(77)]);
+    assert!(!app.closed_profile_selection(DocumentId(1), &[instance]));
+}

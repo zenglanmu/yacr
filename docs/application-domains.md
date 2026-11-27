@@ -18,7 +18,7 @@
 | `bim` 参考结构 | 实现（阶段 4，初步）：顶部 Revit 式域 ribbon（**文件** / 建筑 / 结构 / 插入 / 注释 / 分析 / 体量和场地 / 协作 / 视图 / 管理），**左侧**属性、项目浏览器（pending）、可见性、BIM 浏览、明细表（pending）、操作提示托盘（可隐藏）；无命令行。真实命令（通用编辑、标注、文字、导入 / 链接、实体、视图导航、管理、BIM 浏览）走统一入口；墙体 / 门窗 / 族 / 钢筋 / 房间 / 工作共享等无内核的 Revit 工具显式 pending | `test/bim-domain.test.ts` + `test/fixtures/revit-2024-bim.json`；视觉/真机 **NOT RUN** |
 | `cad_set_view` / BIM 视图 | 实现（typed IPC，ADR-0059）：绝对 `eye/target/up/projection/mode` 或宿主按活动空间拟合的 `overview/plan/front/back/left/right`；BIM“视图”面板 6 个预设；真实变化记一步 `ZOOM PREVIOUS`，空图按 `view.set.empty` 拒绝 | `view_set` 7 项 + `tests_admission` 2 项 + `test/set-view.test.ts`；真实窗口/GPU **NOT VERIFIED** |
 | `concept` 参考结构 | 实现（阶段 3）：顶部菜单栏（File/Edit/View/Camera/Draw/Tools/Window/Extensions/Help）、左侧 Large Tool Set、右侧默认托盘（Window → Default tray 可隐藏/恢复）；真实命令走统一入口，未实现工具显式 pending 并给出稳定理由 | `test/concept-domain.test.ts` + `test/fixtures/sketchup-2024-concept.json`；视觉/真机 **NOT RUN** |
-| `concept` 操作逻辑 | 实现：Space=Select（取消活动工具）、官方单键 L/R/C/A/M/Q/S/F/T/O/H/Z/E/P/B/G、Shift+Z=FIT；状态栏 Measurements 复用宿主真实 `tool.params`，LINE 已支持输入长度/角度，RECTANG 宽/高，CIRCLE 半径，ROTATE 角度，MOVE 距离，SCALE 比例（0 为未设置，LINE 角度仅在长度为正时生效），其余无参数的工具显示真实步骤提示而不是假输入框。推拉、跟随、剖面、相机、材质、场景、推断/吸附锁定等宿主未实现的能力仍是具名拒绝/显式 pending | `concept-domain.test.ts` + `tests_typed_dimensions` + `docs/shortcuts.md` §3；宿主运行 **NOT VERIFIED** |
+| `concept` 操作逻辑 | 实现：Space=Select（取消活动工具）、官方单键 L/R/C/A/M/Q/S/F/T/O/H/Z/E/P/B/G、Shift+Z=FIT；状态栏 Measurements 复用宿主真实 `tool.params`，LINE 已支持输入长度/角度，RECTANG 宽/高，CIRCLE 半径，ROTATE 角度，MOVE 距离，SCALE 比例（0 为未设置，LINE 角度仅在长度为正时生效），其余无参数的工具显示真实步骤提示而不是假输入框。**P（Push/Pull）在所选是闭合平面轮廓时先把轮廓拉成新精确实体**（2026-11-27，`EXTRUDE` 同一命令），对已有实体仍拾取面移动。跟随、剖面、相机、材质、场景、推断/吸附锁定等宿主未实现的能力仍是具名拒绝/显式 pending | `concept-domain.test.ts` + `tests_typed_dimensions` + `cad-host` press_pull 路由契约 + `docs/shortcuts.md` §3；宿主运行 **NOT VERIFIED** |
 | 域/插件 UI 插槽 | 实现（客户端）：`domains/ui/` 的 `ribbon`/`menu`/`toolbar`/`tray` 槽、域注册与插件增量 patch（功能区/菜单/工具组/托盘可扩展，命令仍过共享准入）。公开插件面 `@yacr/plugin-api` 的 `api.ui.register` 已发布：声明式贡献、字面标签、`deactivate` 自动卸载、client-local 无描述符行 | `concept-domain.test.ts` + `plugin-api/ui.test.ts` + 插件包 `test/ui.test.ts`；视觉 **NOT RUN** |
 | `mechanical` 参考结构 | 实现（阶段 5，初步）：SolidWorks 式域 ribbon（**文件** / 草图 / 特征 / 装配体 / 工程图 / 评估 / 视图 / 选项），**左侧** FeatureManager 设计树（读宿主 `cad_mechanical_tree` 投影）、PropertyManager、ConfigurationManager（pending）、操作提示托盘；无命令行，数值入口是状态栏真实工具参数 | `test/mechanical-domain.test.ts` + `test/fixtures/solidworks-2024-mechanical.json`；视觉/真机 **NOT RUN** |
 | FeatureManager 树读取 `cad_mechanical_tree`（`mechanicalTree` host read） | 实现：按 `tables/features.json` 的求值顺序投影特征（`schema_only`，无求值器），其后按实体 id 投影 `Body3d`（`ready` / `unavailable`）；页大小上限 1024，`total` 与 `truncated` 如实报告；无文档返回空树 | `cad-host` 投影契约 + `host_read` 往返/无 seam 拒绝 + 前端解析契约；真实窗口 **NOT VERIFIED** |
@@ -64,8 +64,9 @@
 - **宿主未实现、仍显式拒绝**：`SWEEP`/`SECTIONPLANE`/`CAMERA`/`MATERIALS` 等保持稳定拒绝；
   `EXTRUDE` 自 2026-11-25 起把所选闭合平面轮廓拉成新精确实体（LINE 闭环 / 闭合直线
   LWPOLYLINE / CIRCLE，+Z 或 -Z），`PRESSPULL` 自同日移动已有实体的面；二者都**不会**把
-  任意 2D 线框自动识别成面。（选中一个精确实体、拾取一个面、在
-  Measurements 输入带符号距离），但它**只移动已有实体的面**，不会把 2D 闭合轮廓拉成新实体。
+  任意 2D 线框自动识别成面。2026-11-27 起 Push/Pull 在所选**是**闭合平面轮廓时（矩形/圆等）
+  先把轮廓拉成新实体——工具在起点识别这个选择并改走 `EXTRUDE` 的同一命令与事务（一次撤销），
+  轮廓行保持原位；其它平面/扫描路径仍按 `extrude.not_planar` 等具名拒绝。
   SketchUp 的推断锁定、场景/阴影/雾/照片匹配、`FOLLOWME` 仍没有实现，不以按钮或空成功冒充。`concept` 的紧凑布局把同一批工具组折进现有抽屉
   （`MobileRibbonDrawer`），没有菜单栏/托盘的第二套实现；移动端视觉与真机 **NOT VERIFIED**。
 

@@ -39,6 +39,10 @@
   已接线。
   边身份使用几何派生 `mesh:edge:<bits>` key，`MOVE` 可移动边；wire-only 边/跨多个三角形边的
   stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
+- **矩形→推拉的核心回路已闭环**（2026-11-27）：Push/Pull 在所选是闭合平面轮廓时（闭合直线
+  LWPOLYLINE、LINE 闭环、单个 CIRCLE）先把轮廓拉成新的精确实体，再对实体继续推拉；轮廓本身
+  仍是文档里的持久输入。轮廓必须平行 XY、沿 ±Z 拉伸（这是 `EXTRUDE` 的既有边界），其它平面
+  按 `extrude.not_planar` 具名拒绝，不静默换轴。
 - P-MESH-1a/1b 已实现（2026-11-26；2026-11-27 起四个 `native-below` 载体均注入
   `ManifoldMeshModeler`）：Linux 有运行/契约证据，Windows/macOS/Android 只有跨目标编译/契约
   证据（运行时 NOT VERIFIED）；`dom-canvas`（Web、X11/XWayland）注入同一内核但走**同步例外**
@@ -84,7 +88,7 @@
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
 | Move | `MOVE` | full | |
-| Push/Pull | `PRESSPULL` | full | 精确面或带 `face_sources` 的网格面；无面身份拒绝；边移动由 `MOVE` 处理 |
+| Push/Pull | `PRESSPULL` | full | 精确面或带 `face_sources` 的网格面；**所选为闭合平面轮廓时把轮廓拉成新精确实体**（矩形/圆的第一次推拉，走 `EXTRUDE` 的同一命令与事务，轮廓保持原位）；无面身份且非轮廓时拒绝；边移动由 `MOVE` 处理 |
 | Rotate | `ROTATE` | full | |
 | Follow Me | `FOLLOWME` | pending | 没有沿路径扫掠 |
 | Scale | `SCALE` | full | |

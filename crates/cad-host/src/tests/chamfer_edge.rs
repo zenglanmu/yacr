@@ -696,3 +696,141 @@ fn press_pull_start_refuses_a_carrier_without_a_modeler_by_name() {
     }
     assert_eq!(core.controller.borrow().session.draw_kind(), None);
 }
+
+// ---- Push/Pull on a drawn profile -----------------------------------------
+//
+// SketchUp's first push/pull starts on a closed planar profile, not on a solid
+// face: the tool must arm the **EXTRUDE** command (one transaction, the same
+// named refusals) instead of the one-pick face capture. The profile row stays
+// the durable input.
+
+const PROFILE: u128 = 940;
+
+fn closed_rect_profile(id: u128) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbPolyline".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Polyline {
+            points: vec![
+                p3(0.0, 0.0, 0.0),
+                p3(4.0, 0.0, 0.0),
+                p3(4.0, 3.0, 0.0),
+                p3(0.0, 3.0, 0.0),
+            ],
+            bulges: vec![0.0; 4],
+            closed: true,
+            width: 0.0,
+        },
+        draw_order: id as i64,
+    }
+}
+
+#[test]
+fn press_pull_starts_the_extrusion_on_a_closed_profile_selection() {
+    let core = core();
+    install_bodies(&core, vec![closed_rect_profile(PROFILE)]);
+    inject_fake_modeler(&core);
+    select_body(&core, PROFILE, None);
+    EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::BeginDraw(DrawToolKind::PressPull)),
+    )
+    .expect("a closed profile starts Push/Pull");
+    // No face to pick: the armed capture is the zero-point extrusion, so the
+    // signed distance is the Measurements channel and Enter commits EXTRUDE.
+    assert_eq!(
+        core.controller.borrow().session.draw_kind(),
+        Some(DrawToolKind::Extrude)
+    );
+    assert!(captured_points(&core).is_empty());
+}
+
+#[test]
+fn press_pull_keeps_the_face_capture_for_a_body_selection() {
+    let core = core();
+    install_bodies(
+        &core,
+        vec![box_body(BODY_A, 0.0), closed_rect_profile(PROFILE)],
+    );
+    inject_fake_modeler(&core);
+    // The profile is installed too: the route must be decided by the selection,
+    // not by what happens to be in the drawing.
+    select_body(&core, BODY_A, None);
+    EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::BeginDraw(DrawToolKind::PressPull)),
+    )
+    .expect("a body is still the one-pick face capture");
+    assert_eq!(
+        core.controller.borrow().session.draw_kind(),
+        Some(DrawToolKind::PressPull)
+    );
+}
+
+#[test]
+fn confirming_push_pull_on_a_profile_asks_the_kernel_for_the_extrusion() {
+    let core = core();
+    install_bodies(&core, vec![closed_rect_profile(PROFILE)]);
+    inject_fake_modeler(&core);
+    select_body(&core, PROFILE, None);
+    {
+        let mut controller = core.controller.borrow_mut();
+        controller
+            .session
+            .set_tool_parameter(
+                cad_app::ToolParameter::ExtrudeDistance,
+                cad_app::ToolValue::Number(2.0),
+            )
+            .unwrap();
+    }
+    // The real start path (not `session.begin_draw`, which would arm the face
+    // capture): Push/Pull on a closed profile arms the zero-point extrusion.
+    EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::BeginDraw(DrawToolKind::PressPull)),
+    )
+    .expect("the profile starts Push/Pull");
+    // Enter reaches the real command through the intent map; the fake modeler
+    // names itself, so the refusal proves `ExtrudeProfile` is the request.
+    let error = core
+        .controller
+        .borrow_mut()
+        .confirm_draw()
+        .expect_err("the test modeler never executes a real extrusion");
+    match error {
+        CadError::Unsupported(text) => {
+            assert!(text.contains("test.modeler_not_called"), "{text}")
+        }
+        other => panic!("expected the modeler's own refusal, got {other:?}"),
+    }
+    assert_eq!(
+        core.controller.borrow().drawing().unwrap().revision(),
+        Revision(0)
+    );
+}
+
+#[test]
+fn a_carrier_without_a_modeler_refuses_push_pull_on_a_profile_first() {
+    let core = core();
+    install_bodies(&core, vec![closed_rect_profile(PROFILE)]);
+    select_body(&core, PROFILE, None);
+    let error = EngineClient::dispatch(
+        &core,
+        EngineRequest::Interaction(InteractionRequest::BeginDraw(DrawToolKind::PressPull)),
+    )
+    .expect_err("extruding a profile needs the kernel");
+    match error {
+        RequestError::Execution(CadError::Unsupported(text)) => {
+            assert!(text.contains("solid-modeler"), "{text}")
+        }
+        other => panic!("expected the named capability refusal, got {other:?}"),
+    }
+    assert_eq!(core.controller.borrow().session.draw_kind(), None);
+}
