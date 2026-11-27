@@ -97,6 +97,8 @@ impl HostController {
                 "mesh.job_invalid_plan: a mesh job carries no operands".into(),
             ));
         }
+        // Trim keeps every cutter (operand 1..) and replaces only the target.
+        let trim = matches!(plan.kind, crate::tasks::MeshJobKind::Trim);
         let (candidate, operands, display_states, change_set, new_id, entity) = {
             let document = self
                 .application
@@ -142,8 +144,10 @@ impl HostController {
             let change_set = {
                 let mut staged =
                     candidate.begin_drawing_transaction("mesh operation", transaction)?;
-                for operand in &operands {
-                    staged.delete_entity(operand.id)?;
+                for (index, operand) in operands.iter().enumerate() {
+                    if !trim || index == 0 {
+                        staged.delete_entity(operand.id)?;
+                    }
                 }
                 staged.insert_entity(entity.clone())?;
                 if let Some(state) = inherited_display_state(&display_states) {
@@ -161,11 +165,19 @@ impl HostController {
             )
         };
 
-        let inherited = inherited_display_state(&display_states).cloned();
+        // A trim result inherits the target's display state; a boolean merges
+        // the group's. Only the operands the commit really deleted get a patch.
+        let inherited = if trim {
+            display_states.first().cloned()
+        } else {
+            inherited_display_state(&display_states).cloned()
+        };
         let mut patches: Vec<DrawingPatch> = operands
             .iter()
             .zip(display_states)
-            .map(|(operand, state)| drawing_patch_deleted(operand.id, operand.clone(), state))
+            .enumerate()
+            .filter(|(index, _)| !trim || *index == 0)
+            .map(|(_, (operand, state))| drawing_patch_deleted(operand.id, operand.clone(), state))
             .collect();
         patches.push(DrawingPatch {
             id: new_id,

@@ -142,6 +142,13 @@ pub(crate) enum MeshJobKind {
         mode: MeshRepairMode,
         rule: MeshWindingRule,
     },
+    /// SketchUp Solid Tools **Trim**: subtract the cutters (operands 1..) from
+    /// the target (operand 0) and keep every cutter row untouched.
+    ///
+    /// The kernel operation is the same subtract fold as `Boolean(Subtract)`;
+    /// only the commit differs (it deletes the target alone and keeps the
+    /// cutters), so the kind is the single authority for both halves.
+    Trim,
 }
 
 impl MeshJobKind {
@@ -150,6 +157,7 @@ impl MeshJobKind {
         match self {
             MeshJobKind::Boolean(op) => op.as_str(),
             MeshJobKind::Repair { mode, .. } => mode.as_str(),
+            MeshJobKind::Trim => "trim",
         }
     }
 }
@@ -513,6 +521,8 @@ fn run_job(
 ) -> Terminal {
     match plan.kind {
         MeshJobKind::Boolean(op) => run_boolean(plan, op, modeler, stamp, cancelled),
+        // Trim is the same subtract fold; the commit keeps the cutters.
+        MeshJobKind::Trim => run_boolean(plan, MeshBooleanOp::Subtract, modeler, stamp, cancelled),
         MeshJobKind::Repair { mode, rule } => {
             run_repair(plan, mode, rule, modeler, stamp, cancelled)
         }

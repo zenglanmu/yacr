@@ -41,6 +41,9 @@ pub enum CommandId {
     /// `OUTERSHELL`: union the selected closed mesh bodies into one
     /// `AcDbSubDMesh`, keeping only the outer surface (SketchUp Outer Shell).
     OuterShell,
+    /// `TRIMSOLID`: subtract the selected cutters from the first selected mesh
+    /// body, keeping the cutters (SketchUp Solid Tools Trim).
+    TrimSolid,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

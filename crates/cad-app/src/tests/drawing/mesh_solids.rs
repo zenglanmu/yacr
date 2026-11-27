@@ -673,3 +673,150 @@ fn outer_shell_refuses_without_a_mesh_modeler_and_over_budget() {
     .expect_err("over the shell budget");
     assert!(invalid_text(error).contains("outershell.budget"));
 }
+
+#[test]
+fn trim_solid_starts_one_subtract_job_and_keeps_the_cutters() {
+    let (mut app, mut session, ids) = app_with_meshes(3);
+    let ops = attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect("a valid trim must start a job");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "mesh.trim_started")
+        .expect("the outcome names the trim job");
+    assert!(
+        diagnostic.message.contains("cutters are kept"),
+        "{diagnostic:?}"
+    );
+    assert!(
+        ops.lock().expect("op log").is_empty(),
+        "the worker runs later"
+    );
+    assert_eq!(entity_count(&app), 3, "the command writes nothing itself");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match app.poll_mesh_job_take() {
+            MeshJobTake::Running => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the trim job did not settle"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            MeshJobTake::Done { plan, topology, .. } => {
+                assert_eq!(topology.topology, MeshTopology::ClosedManifold);
+                assert_eq!(plan.kind, crate::tasks::MeshJobKind::Trim);
+                break;
+            }
+            other => panic!("the fake trim job must succeed, got {other:?}"),
+        }
+    }
+    assert_eq!(
+        ops.lock().expect("op log").as_slice(),
+        &[
+            "boolean:subtract".to_string(),
+            "boolean:subtract".to_string()
+        ],
+        "trim folds subtract over the two cutters, left to right"
+    );
+}
+
+#[test]
+fn trim_solid_refuses_invalid_operands_before_the_kernel() {
+    // Fewer than two bodies.
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids[..1]);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect_err("one body cannot be trimmed");
+    assert!(invalid_text(error).contains("trimsolid.needs_two"));
+
+    // An open shell.
+    let (mut app, mut session, ids) =
+        app_with_entities(vec![mesh_entity(10, 0), open_mesh_entity(11, 1)]);
+    let ops = attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect_err("an open shell cannot be trimmed");
+    assert!(invalid_text(error).contains("trimsolid.open_shell"));
+    assert!(ops.lock().expect("op log").is_empty(), "no worker started");
+
+    // An exact solid.
+    let (mut app, mut session, ids) =
+        app_with_entities(vec![mesh_entity(10, 0), exact_entity(11, 1)]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect_err("trim is mesh-only");
+    assert!(invalid_text(error).contains("trimsolid.not_mesh"));
+
+    // Viewer.
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    session.switch_mode(AppMode::Viewer).expect("Viewer");
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect_err("a document write is work-only");
+    assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
+}
+
+#[test]
+fn trim_solid_refuses_without_a_modeler_and_over_budget() {
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect_err("no mesh modeler");
+    assert!(unsupported_text(error).contains("unsupported-runtime: mesh-modeler"));
+
+    let mut huge = domain_mesh();
+    huge.triangles =
+        vec![[0, 1, 2]; crate::app_drawing::mesh_solids::TRIMSOLID_MAX_INPUT_TRIANGLES + 1];
+    let huge_entity = DbEntity {
+        geometry: SemanticGeometry::Mesh(huge),
+        ..mesh_entity(12, 0)
+    };
+    let (mut app, mut session, ids) = app_with_entities(vec![mesh_entity(10, 0), huge_entity]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::TrimSolid,
+        CommandPayload::None,
+    )
+    .expect_err("over the trim budget");
+    assert!(invalid_text(error).contains("trimsolid.budget"));
+}

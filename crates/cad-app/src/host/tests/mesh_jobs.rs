@@ -443,3 +443,72 @@ fn outer_shell_commits_one_mesh_row_and_one_undo_step_through_the_command() {
         .expect("the shell is undoable");
     assert_eq!(entity_count(&controller), 2);
 }
+
+#[test]
+fn trim_solid_keeps_the_cutter_and_replaces_only_the_target() {
+    let mut controller = controller_with(&[(40, cube_data()), (41, cube_data())]);
+    controller
+        .application
+        .set_mesh_modeler(Some(Arc::new(FakeMeshModeler { refusal: None })));
+    let cutter_before = controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entity(EntityId(41))
+        .expect("the cutter row")
+        .clone();
+    let references: Vec<cad_domain::SelectionRef> = [40_u128, 41]
+        .into_iter()
+        .map(|id| cad_domain::SelectionRef {
+            document: controller.document_id,
+            entity: EntityId(id),
+            instance: cad_domain::InstancePath::default(),
+            sub_element: None,
+        })
+        .collect();
+    controller.session.selection.replace(references);
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::TrimSolid,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: CommandPayload::None,
+        })
+        .expect("TRIMSOLID starts the subtract job");
+
+    let MeshJobPoll::Done { object, .. } = wait(&mut controller) else {
+        panic!("the fake trim must commit");
+    };
+    assert_eq!(
+        entity_count(&controller),
+        2,
+        "the target is replaced and the cutter is kept"
+    );
+    let document = &controller.application.workspace.documents[&controller.document_id];
+    let cutter_after = document
+        .drawing
+        .entity(EntityId(41))
+        .expect("the cutter survives");
+    assert_eq!(cutter_after.object.revision, cutter_before.object.revision);
+    assert_eq!(cutter_after.geometry, cutter_before.geometry);
+    let result = document
+        .drawing
+        .entity(EntityId(object.0))
+        .expect("the trimmed row");
+    assert_eq!(result.object.type_key, "AcDbSubDMesh");
+    assert_ne!(result.id, EntityId(41));
+    assert_eq!(undo_depth(&controller), 1);
+
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::Undo,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: CommandPayload::None,
+        })
+        .expect("the trim commit is undoable");
+    assert_eq!(entity_count(&controller), 2, "the original pair is back");
+    let document = &controller.application.workspace.documents[&controller.document_id];
+    assert!(document.drawing.entity(EntityId(40)).is_some());
+    assert!(document.drawing.entity(EntityId(object.0)).is_none());
+}

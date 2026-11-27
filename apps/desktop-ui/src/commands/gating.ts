@@ -774,6 +774,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // OUTERSHELL unions the selected closed mesh bodies into one shell, so two is
   // the real minimum; the host refuses non-mesh/open/budget operands by name.
   OUTERSHELL: Object.freeze({ count: 2, reasonKey: 'draw.kind.outershell.hint' }),
+  // TRIMSOLID subtracts the cutters from the first selected body and keeps the
+  // cutters, so a target plus at least one cutter is the real minimum.
+  TRIMSOLID: Object.freeze({ count: 2, reasonKey: 'draw.kind.trimsolid.hint' }),
   SUBTRACT: Object.freeze({ count: 2, reasonKey: 'draw.kind.subtract.hint' }),
   INTERSECT: Object.freeze({ count: 2, reasonKey: 'draw.kind.intersect.hint' }),
   // CHAMFEREDGE (ADR-0036 P2.0) cuts one edge of the **one** selected exact

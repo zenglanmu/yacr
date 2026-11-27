@@ -97,7 +97,7 @@ const SOLID = group('concept.solid', 'concept.toolbar.solid', [
   { id: 'SUBTRACT', labelKey: 'draw.kind.subtract', icon: 'dot', command: 'SUBTRACT' },
   { id: 'INTERSECT', labelKey: 'draw.kind.intersect', icon: 'dot', command: 'INTERSECT' },
   { id: 'OUTERSHELL', labelKey: 'concept.tool.outer_shell', icon: 'dot', command: 'OUTERSHELL', hintKey: 'concept.tool.outer_shell.hint' },
-  pending('TRIMSOLID', 'concept.tool.trim_solid', 'trim'),
+  { id: 'TRIMSOLID', labelKey: 'concept.tool.trim_solid', icon: 'trim', command: 'TRIMSOLID', hintKey: 'concept.tool.trim_solid.hint' },
   pending('SPLITSOLID', 'concept.tool.split_solid', 'explode'),
 ]);
 

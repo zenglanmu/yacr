@@ -230,6 +230,7 @@ command_selector_contract! {
     Fog => "FOG",
     Text3d => "TEXT3D",
     OuterShell => "OUTERSHELL",
+    TrimSolid => "TRIMSOLID",
     ViewGo => "VIEWGO",
     ViewBack => "VIEWBACK",
     ViewForward => "VIEWFORWARD",
@@ -275,7 +276,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 253,
+        EXPECTED_COMMAND_COUNT, 254,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

@@ -46,5 +46,6 @@ mod tests_text;
 mod tests_text3d;
 mod tests_tools;
 mod tests_tools_routing;
+mod tests_trimsolid;
 mod tests_typed_dimensions;
 mod tests_wire;

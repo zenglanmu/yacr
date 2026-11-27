@@ -77,6 +77,7 @@ mod text3d;
 mod text_tool;
 mod texture_round_trip;
 mod tolerance;
+mod trim_solid;
 mod wipeout_frames;
 mod ymodel;
 mod ymodel_bim;

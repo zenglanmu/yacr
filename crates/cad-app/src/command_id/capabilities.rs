@@ -155,6 +155,8 @@ impl CommandId {
                 | Self::Text3d
                 // OUTERSHELL replaces >=2 mesh bodies with one union mesh.
                 | Self::OuterShell
+                // TRIMSOLID replaces the target and keeps the cutters.
+                | Self::TrimSolid
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock

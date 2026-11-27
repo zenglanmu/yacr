@@ -240,6 +240,9 @@ impl Application {
 /// per-carrier `mesh.sync_budget` (dom-canvas inline execution) still applies.
 pub(crate) const OUTERSHELL_MAX_INPUT_TRIANGLES: usize = 1_000_000;
 
+/// The safety valve on the combined TRIMSOLID input (same shape as OUTERSHELL).
+pub(crate) const TRIMSOLID_MAX_INPUT_TRIANGLES: usize = 1_000_000;
+
 impl Application {
     /// `OUTERSHELL`: union the selected closed mesh bodies into one shell.
     ///
@@ -404,5 +407,208 @@ impl Application {
             diagnostics,
             "OUTERSHELL",
         )
+    }
+}
+
+impl Application {
+    /// `TRIMSOLID`: subtract every cutter from the first selected mesh body and
+    /// keep the cutters as their own rows.
+    ///
+    /// SketchUp Solid Tools **Trim** keeps both results: the trimmed target and
+    /// the cutting solid. The kernel run is the same subtract fold `SUBTRACT`
+    /// uses; the commit (this function's plan kind) deletes only the target and
+    /// inserts the result, leaving each cutter row untouched. One transaction /
+    /// one undo step, exactly like the other mesh operations.
+    ///
+    /// The **first** selected body is the target; every other selected body is a
+    /// cutter. Every operand must be a closed manifold mesh (an exact solid is
+    /// refused with a pointer to `SUBTRACT`), on the target's space, and the
+    /// combined input is capped by [`TRIMSOLID_MAX_INPUT_TRIANGLES`].
+    ///
+    /// Refusals (nothing written, no worker): `trimsolid.payload`,
+    /// `trimsolid.needs_two`, `trimsolid.sub_element_not_supported`,
+    /// `trimsolid.space_mismatch`, `trimsolid.not_mesh`, `trimsolid.open_shell`,
+    /// `trimsolid.non_manifold`, `trimsolid.budget`, the carrier's
+    /// `unsupported-runtime: mesh-modeler`, and Viewer's `PermissionDenied`.
+    pub(crate) fn trim_solid(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command, "TRIMSOLID")?;
+        if session.app_mode() == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
+        let refs = session.selection.refs().to_vec();
+        if refs.len() < 2 {
+            return Err(invalid(
+                "trimsolid.needs_two",
+                format!(
+                    "TRIMSOLID needs a target and at least one cutter body, got {} selection(s)",
+                    refs.len()
+                ),
+            ));
+        }
+        if refs
+            .iter()
+            .any(|reference| reference.sub_element.is_some() || !reference.instance.0.is_empty())
+        {
+            return Err(invalid(
+                "trimsolid.sub_element_not_supported",
+                "TRIMSOLID combines whole bodies; a sub-element or instance-path reference is not \
+                 a body",
+            ));
+        }
+        let (entities, diagnostics) = {
+            let Some(document) = self.workspace.documents.get(&command.document) else {
+                return Err(CadError::InvalidInput("document not open".into()));
+            };
+            let drawing = document.drawing.as_ref();
+            Self::resolve_selection(
+                drawing,
+                command.document,
+                &refs,
+                "trimsolid",
+                "TRIMSOLID",
+                "trimmed",
+                false,
+            )?
+        };
+        if entities.len() < 2 {
+            return Err(invalid(
+                "trimsolid.needs_two",
+                "TRIMSOLID needs at least two distinct selected bodies",
+            ));
+        }
+        let target_space = entities[0].space.clone();
+        let mut total_triangles = 0usize;
+        for entity in &entities {
+            if entity.space != target_space {
+                return Err(invalid(
+                    "trimsolid.space_mismatch",
+                    format!(
+                        "entity {} is in another space than the target; TRIMSOLID never crosses \
+                         model/paper space",
+                        entity.id.0
+                    ),
+                ));
+            }
+            match classify_boolean_operand(entity) {
+                Some(BooleanOperand::Mesh) => {}
+                Some(BooleanOperand::Exact(_)) => {
+                    return Err(invalid(
+                        "trimsolid.not_mesh",
+                        format!(
+                            "entity {} is an exact solid; TRIMSOLID trims closed mesh bodies (use \
+                             SUBTRACT for exact solids)",
+                            entity.id.0
+                        ),
+                    ))
+                }
+                None => {
+                    return Err(invalid(
+                        "trimsolid.not_mesh",
+                        format!(
+                            "entity {} is {}; TRIMSOLID needs closed mesh bodies",
+                            entity.id.0,
+                            describe_operand(entity)
+                        ),
+                    ))
+                }
+            }
+            let Some(mesh) = mesh_geometry(entity) else {
+                return Err(invalid(
+                    "trimsolid.not_mesh",
+                    format!("entity {} carries no mesh geometry", entity.id.0),
+                ));
+            };
+            total_triangles += mesh.triangles.len();
+            if total_triangles > TRIMSOLID_MAX_INPUT_TRIANGLES {
+                return Err(invalid(
+                    "trimsolid.budget",
+                    format!(
+                        "the selected meshes hold {total_triangles} triangles, over the \
+                         {TRIMSOLID_MAX_INPUT_TRIANGLES} TRIMSOLID input budget; reduce the \
+                         selection"
+                    ),
+                ));
+            }
+            let data = MeshData::from_parts(mesh.vertices.clone(), mesh.triangles.clone());
+            let topology = cad_kernel_adapter::inspect_topology_welded(&data);
+            match topology.topology() {
+                cad_kernel_adapter::MeshTopology::ClosedManifold => {}
+                cad_kernel_adapter::MeshTopology::OpenShell => {
+                    return Err(invalid(
+                        "trimsolid.open_shell",
+                        format!(
+                            "entity {} is an open shell ({} boundary edge(s)); TRIMSOLID needs \
+                             closed bodies",
+                            entity.id.0, topology.boundary_edges
+                        ),
+                    ))
+                }
+                cad_kernel_adapter::MeshTopology::NonManifold => {
+                    return Err(invalid(
+                        "trimsolid.non_manifold",
+                        format!(
+                            "entity {} is non-manifold ({} edge(s) shared by three or more \
+                             triangles); TRIMSOLID needs closed manifold bodies",
+                            entity.id.0, topology.non_manifold_edges
+                        ),
+                    ))
+                }
+            }
+        }
+        self.trim_meshes(command, entities, diagnostics)
+    }
+
+    /// Start the trim job for an already-validated selection.
+    ///
+    /// Same worker/commit path as the mesh booleans; the plan kind (`Trim`) is
+    /// what makes the commit keep the cutter rows. The result inherits the
+    /// target's layer, space and draw order.
+    fn trim_meshes(
+        &mut self,
+        command: &Command,
+        entities: Vec<DbEntity>,
+        mut diagnostics: Vec<Diagnostic>,
+    ) -> CadResult<CommandOutcome> {
+        let Some(modeler) = self.mesh_modeler.clone() else {
+            return Err(CadError::Unsupported(MESH_MODELER_UNSUPPORTED.into()));
+        };
+        let Some(target) = entities.first() else {
+            return Err(CadError::Invariant(
+                "trimsolid.invalid_plan: TRIMSOLID needs a target and at least one cutter".into(),
+            ));
+        };
+        let layer = target.layer;
+        let space = target.space.clone();
+        let draw_order = target.draw_order;
+        let cutter_count = entities.len() - 1;
+        let operands = entities.into_iter().map(MeshJobOperand::new).collect();
+        let plan = MeshJobPlan {
+            document: command.document,
+            kind: MeshJobKind::Trim,
+            layer,
+            space,
+            draw_order,
+            operands,
+        };
+        self.start_mesh_job(plan, modeler)?;
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "mesh.trim_started".into(),
+            message: format!(
+                "TRIMSOLID: {MESH_JOB_SETTLEMENT} (target + {cutter_count} cutter(s); the \
+                 cutters are kept)"
+            ),
+        });
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
     }
 }
