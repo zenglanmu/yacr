@@ -1,7 +1,8 @@
 # ADR-0061：网格内核选择（SketchUp 网格布尔 / 修复 / 编辑）
 
 - 状态：**已接受（决策，2026-11-26）**；**P-MESH-0 已实现（2026-11-26）**，
-  **P-MESH-1a/1b 已实现（2026-11-26，Linux 原生契约 + 真实内核命令路径）**，
+  **P-MESH-1a/1b 已实现（2026-11-26，Linux 原生契约 + 真实内核命令路径；2026-11-27
+  四个 `native-below` 载体均注入，非 Linux 仅跨目标编译/契约证据）**，
   **P-MESH-2 面/边编辑与 P-MESH-3 平面/非平面投影/共面嵌套环补洞已实现（2026-11-26，`cad-mesh-edit` + 命令契约）**
 - 关联：ADR-0036（3D 实体与 solidcore 接缝）、ADR-0033（多格式导入）、ADR-0048（格式连接器
   crate）、ADR-0049（SKP 存储边）、ADR-0053（应用域，SketchUp 对应 `concept`）、
@@ -165,7 +166,8 @@ P-MESH-2 在 `cad-connector-skp` 为每个源面写 `Mesh.face_sources`（`skp:f
   `CadError::Cancelled`，绝不写库。
 - **wasm 没有线程**：`dom-canvas` 的 mesh 布尔在 P-MESH-1 按 `unsupported-runtime:
   mesh-modeler` 显式拒绝，除非后续用 Web Worker 提供同样可取消的执行路径；不得在主线程
-  静默阻塞。`native-below`（Linux/Windows/macOS/Android）按载体注入。
+  静默阻塞。`native-below`（Linux/Windows/macOS/Android）按载体注入：**2026-11-27 起四个载体
+  都已注入**（Linux 有运行/契约证据；其余三个只有跨目标编译/契约证据，运行时 NOT VERIFIED）。
 
 ### D8 用户可见命令不在本 ADR 开放
 
@@ -194,7 +196,7 @@ P-MESH-0 只落接缝与内核 crate（无命令）。P-MESH-1/2/3 决定命令�
 | 阶段 | 内容 | 验收（必须真实运行） |
 |---|---|---|
 | **P-MESH-0** | **已实现（2026-11-26）**：`cad-kernel-adapter::mesh` 接缝 + `cad-kernel-manifold` + 架构门禁 + `THIRD_PARTY_NOTICES` 登记；原生目标用看门线程把 `cancelled` 映射到内核 `CancelToken`（wasm 只有预/后检查，已声明）；**不接命令** | `cargo test -p cad-kernel-adapter -p cad-kernel-manifold --locked`（66 + 9 passed）；`cargo check -p cad-kernel-manifold --target wasm32-unknown-unknown --locked`；`python3 scripts/check-architecture.py`；无 `MeshModeler` 时 `unsupported-runtime: mesh-modeler`（宿主接线前） |
-| **P-MESH-1a** | **已实现（2026-11-26）**：`MeshModeler` 注入 `native-below` 宿主；`concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质，类型/来源不冒充）；结果必须 `ClosedManifold`；mesh/solid 布尔互斥（共用命令面，应用层拒绝交错启动），文档替换/关闭同时中止两者；仍非精确 | `cad-app` 命令/host 契约 12 passed；`cad-cli-tools/tests/mesh_command.rs` 真实内核 5 passed（∪/∖/∩ 体积 12/4/4、`Revision(1)`、一条撤销、`Body3d{Unknown}` 操作数、闭合非流形汤重建 `Partial`）；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/宿主取消不写库；陈旧结果丢弃；宿主无 mesh modeler → `unsupported-runtime: mesh-modeler` |
+| **P-MESH-1a** | **已实现（2026-11-26；2026-11-27 起 Linux/Windows/macOS/Android 四个 `native-below` 载体都注入 `ManifoldMeshModeler`，`dom-canvas` 仍拒绝）**：`MeshModeler` 注入 `native-below` 宿主；`concept` 域网格布尔命令（复用 `UNION`/`SUBTRACT`/`INTERSECT`，混合选择具名拒绝）；worker + 取消 + 陈旧检查；结果写新 `SemanticGeometry::Mesh`（`AcDbSubDMesh`，无 `face_sources`/UV/材质，类型/来源不冒充）；结果必须 `ClosedManifold`；mesh/solid 布尔互斥（共用命令面，应用层拒绝交错启动），文档替换/关闭同时中止两者；仍非精确 | `cad-app` 命令/host 契约 12 passed；`cad-cli-tools/tests/mesh_command.rs` 真实内核 5 passed（∪/∖/∩ 体积 12/4/4、`Revision(1)`、一条撤销、`Body3d{Unknown}` 操作数、闭合非流形汤重建 `Partial`）；mixed → `boolean.operand_class_mismatch`；open → `mesh.not_closed`；预取消/宿主取消不写库；陈旧结果丢弃；宿主无 mesh modeler → `unsupported-runtime: mesh-modeler`。非 Linux 注入证据：`cargo check -p app-windows --target x86_64-pc-windows-msvc`、`-p app-macos --target aarch64-apple-darwin`、`-p app-android --target aarch64-linux-android` + Android 源码契约；运行时 NOT VERIFIED |
 | **P-MESH-1b** | **已实现（2026-11-26）**：网格修复命令 `MESHREPAIR`（`Orientation`）/`MESHREBUILD`（winding `Rebuild`）+ `Partial` 报告；补洞仍属 P-MESH-3 | 真实内核命令路径：闭合/翻转网格修复后仍 `ClosedManifold` 且外向；open → `mesh.not_closed` 不写库；非流形闭合汤可能 `Partial` 或按 `mesh.failed`/`mesh.not_manifold` 结构化拒绝（在线样本 5 例）；一条事务/一步撤销；导出仍非精确 |
 | **P-MESH-2** | **已实现（2026-11-26）**：SKP 面身份（`face_sources`）+ 面选择 + `MOVE`（面区域/边）/`PRESSPULL`（面区域，沿法向）/`MESHREFINE`（1→4 细分）/`MESHSMOOTH`（Laplacian，边界固定）；**边身份是几何派生 key**（`mesh:edge:<两端点的精确位模式>`，无 schema 变更），拾取落在三角形边附近时返回该 key，`MOVE` 平移其两个端点；wire-only/跨多个三角形边的 stored polyline 仍是整实体，不做假边。编辑层 `cad-mesh-edit` 不链接内核 | 同一 SKP 面所有三角形共享 `skp:face:<n>`；面/边编辑后 `cad-db` 校验通过、闭合/流形性保持；无面身份时 `mesh.face_identity_unavailable`；边 key 在端点移动后按设计改变；`cad-mesh-edit` 22 + `cad-app` 命令 9 + `cad-host` 捕获 1 passed |
 | **P-MESH-3** | **已实现（2026-11-26）**：`MESHCAP` 对每个简单边界环做 ear-clip 补片 + 逐洞报告；平面环直接补，**非平面环投影到最佳拟合平面后补**并标 `non_planar`；多个独立边界环各自补；**共面嵌套环按奇偶深度成组**——外环以直接内环为孔做环带（annulus）补片，深度 2 的岛再独立补，环带不覆盖孔洞；自交/退化环、同向绕行的嵌套组、找不到可见桥的嵌套组按名拒绝并保持开口，输出仍是非精确网格 | 闭合 cube 去掉顶/底面 → 两个环都补、闭合、体积 8；非平面环 → 填充 + `non_planar=true`；方形管（外 2×2、内 1×1、高 2）上下两个环带 → 闭合、体积 6；带两个孔的平板 → 3 个环都补；带岛平板 → 外环环带 + 岛独立补；退化/自交 → `mesh.hole_degenerate`/`mesh.hole_self_intersecting` + `mesh.fill_failed`；真实 open 样本 r1.obj → `fill_refused=1`；`cad-mesh-edit` 22 passed |

@@ -7,7 +7,6 @@
 //! `cad-kernel-manifold` and `cad-cli-tools/tests/mesh_real_samples.rs`.
 
 use super::*;
-use crate::app_drawing::mesh_solids::mesh_operand_data;
 use crate::host::MeshJobPoll;
 use crate::tasks::{MeshJobKind, MeshJobOperand, MeshJobPlan};
 use crate::{CommandId, CommandPayload};
@@ -175,8 +174,7 @@ fn plan(controller: &HostController, kind: MeshJobKind, ids: &[u128]) -> MeshJob
         .iter()
         .map(|id| {
             let entity = drawing.entity(EntityId(*id)).expect("operand");
-            let mesh = mesh_operand_data(entity).expect("a mesh operand");
-            MeshJobOperand::new(entity, mesh)
+            MeshJobOperand::new(entity.clone())
         })
         .collect();
     MeshJobPlan {

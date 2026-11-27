@@ -151,6 +151,22 @@ fn the_native_session_installs_the_ymodel_archive_and_recovery_store() {
 }
 
 #[test]
+fn the_native_session_installs_the_mesh_kernel() {
+    // ADR-0061 P-MESH-1a/1b: the mesh modeler is the carrier's composition, like
+    // the `.ymodel` archive. The shared layers never link the kernel, so a
+    // carrier that forgets this line silently loses mesh booleans/repairs (it
+    // still refuses by name, but the capability is gone). Pin the injection.
+    assert!(
+        TICK.contains("session.set_mesh_modeler(Some(std::sync::Arc::new("),
+        "the tick must install the carrier's mesh modeler"
+    );
+    assert!(
+        TICK.contains("cad_kernel_manifold::ManifoldMeshModeler::new()"),
+        "the injected mesh modeler must be the real manifold-rust implementation"
+    );
+}
+
+#[test]
 fn the_saf_save_path_never_claims_an_atomic_replace_or_a_backup_it_did_not_keep() {
     // SAF has no atomic replace: a write truncates, and the sibling `.bak` create
     // is best effort. The carrier therefore keeps the previous-bytes read, the

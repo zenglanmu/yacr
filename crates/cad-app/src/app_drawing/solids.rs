@@ -380,7 +380,7 @@ impl Application {
         for entity in entities {
             match classify_boolean_operand(&entity) {
                 Some(BooleanOperand::Exact(brep)) => exact.push((entity, brep)),
-                Some(BooleanOperand::Mesh(mesh)) => meshes.push((entity, mesh)),
+                Some(BooleanOperand::Mesh) => meshes.push(entity),
                 None => {
                     return Err(invalid(
                         "boolean.non_solid_operand",
@@ -410,7 +410,7 @@ impl Application {
         let draw_order = exact
             .iter()
             .map(|(entity, _)| entity.draw_order)
-            .chain(meshes.iter().map(|(entity, _)| entity.draw_order))
+            .chain(meshes.iter().map(|entity| entity.draw_order))
             .min()
             .unwrap_or(0);
         if !meshes.is_empty() {

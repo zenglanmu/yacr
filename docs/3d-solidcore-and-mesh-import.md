@@ -49,8 +49,10 @@
     robust 引擎 + 修复 + 取消），见 [ADR-0061](adr/0061-mesh-kernel-selection.md)；
     **P-MESH-0 已实现（2026-11-26）：接缝 + `cad-kernel-manifold` + 门禁 + 真实内核测试；
     P-MESH-1a/1b 也已实现（2026-11-26）：网格 `UNION`/`SUBTRACT`/`INTERSECT` 与
-    `MESHREPAIR`/`MESHREBUILD` 由 Linux 原生载体注入 `ManifoldMeshModeler`，其它载体按
-    `unsupported-runtime: mesh-modeler` 拒绝**。
+    `MESHREPAIR`/`MESHREBUILD` 由 `native-below` 载体（Linux/Windows/macOS/Android）注入
+    `ManifoldMeshModeler`；`dom-canvas`（Web、X11/XWayland）按
+    `unsupported-runtime: mesh-modeler` 拒绝**。Linux 之外只有跨目标编译/契约证据，运行时
+    **NOT VERIFIED**。
 
 **2026-11-17 更新（命令侧）**：`MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线（C3a，见 §4.3）；
 `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`（C3b）；`VSCURRENT` 已是

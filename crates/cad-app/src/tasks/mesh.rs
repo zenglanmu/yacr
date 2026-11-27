@@ -23,7 +23,8 @@ use std::thread::JoinHandle;
 
 use cad_db::DbEntity;
 use cad_domain::{
-    CadError, CadResult, Diagnostic, DocumentId, EntityId, LayerId, Revision, SpaceId, TaskStamp,
+    BodyKind, CadError, CadResult, Diagnostic, DocumentId, EntityId, LayerId, Revision,
+    SemanticGeometry, SpaceId, TaskStamp,
 };
 use cad_kernel_adapter::{
     codes, execute_mesh, MeshBooleanOp, MeshData, MeshModeler, MeshOperation, MeshOutcome,
@@ -33,26 +34,84 @@ use cad_kernel_adapter::{
 use cad_platform::CancellationToken;
 
 /// One operand as it existed when the mesh command started.
-#[derive(Clone, Debug)]
+///
+/// The frozen row is **moved** into the plan, never cloned: `DbEntity` carries
+/// the source mesh, so a clone here would duplicate every vertex/triangle on
+/// the command thread before the worker even starts. The neutral
+/// [`MeshData`](cad_kernel_adapter::MeshData) view is derived once inside the
+/// worker ([`Self::mesh`]); the same row is the exact snapshot the host compares
+/// before publishing.
+#[derive(Debug)]
 pub(crate) struct MeshJobOperand {
     pub(crate) id: EntityId,
     pub(crate) revision: Revision,
-    /// The neutral geometry handed to the worker.
-    pub(crate) mesh: MeshData,
     /// The immutable row the host compares before publishing.
     pub(crate) snapshot: DbEntity,
 }
 
 impl MeshJobOperand {
-    /// Snapshot one row. The caller has already validated that it is a mesh.
-    pub(crate) fn new(entity: &DbEntity, mesh: MeshData) -> Self {
+    /// Take ownership of one validated mesh row (no geometry clone).
+    pub(crate) fn new(entity: DbEntity) -> Self {
         MeshJobOperand {
             id: entity.id,
             revision: entity.object.revision,
-            mesh,
-            snapshot: entity.clone(),
+            snapshot: entity,
         }
     }
+
+    /// The neutral triangle data handed to the kernel, derived on the worker.
+    ///
+    /// The caller validated the row before starting the job; `None` here means
+    /// the frozen plan no longer describes a mesh and is an invariant failure,
+    /// never a silent success.
+    pub(crate) fn mesh(&self) -> Option<MeshData> {
+        mesh_operand_data(&self.snapshot)
+    }
+}
+
+/// The domain mesh behind a mesh-ish row, or `None`.
+///
+/// This accepts the two shapes the importers actually produce:
+///
+/// * `SemanticGeometry::Mesh` (STL/OBJ/PLY/OFF and any `.ymodel` mesh row);
+/// * `Body3d { kind: Unknown, exact: Unavailable }` whose display mesh is the
+///   only geometry (the SKP preview body, ADR-0049).
+///
+/// A `Sheet`/`Wire` body, or a body with exact geometry, is **not** a mesh
+/// operand: a sheet has no volume and an exact body must go through the solid
+/// seam, never be silently tessellated.
+fn mesh_geometry(entity: &DbEntity) -> Option<&cad_domain::Mesh> {
+    match &entity.geometry {
+        SemanticGeometry::Mesh(mesh) if !mesh.triangles.is_empty() && !mesh.vertices.is_empty() => {
+            Some(mesh)
+        }
+        SemanticGeometry::Body3d(body)
+            if body.kind == BodyKind::Unknown
+                && body.exact_brep().is_none()
+                && !body.display.mesh.triangles.is_empty()
+                && !body.display.mesh.vertices.is_empty() =>
+        {
+            Some(&body.display.mesh)
+        }
+        _ => None,
+    }
+}
+
+/// The neutral triangle view of a mesh-ish row, or `None`.
+///
+/// The worker calls this once per operand; the buffers are copied into the
+/// kernel-neutral `MeshData` only here, never on the command thread.
+fn mesh_operand_data(entity: &DbEntity) -> Option<MeshData> {
+    mesh_geometry(entity)
+        .map(|mesh| MeshData::from_parts(mesh.vertices.clone(), mesh.triangles.clone()))
+}
+
+/// Whether this row is a mesh operand, without copying its geometry.
+///
+/// Classification runs on the command thread; building [`MeshData`] here would
+/// clone the whole vertex/triangle buffers just to answer a yes/no question.
+pub(crate) fn is_mesh_operand(entity: &DbEntity) -> bool {
+    mesh_geometry(entity).is_some()
 }
 
 /// What the worker should compute.
@@ -78,7 +137,11 @@ impl MeshJobKind {
 }
 
 /// Everything the worker needs, frozen before the job starts.
-#[derive(Clone, Debug)]
+///
+/// Deliberately not `Clone`: the plan owns the only frozen copies of the
+/// operand rows, and the manager shares the plan itself through `Arc`. Cloning
+/// it would duplicate every operand's geometry.
+#[derive(Debug)]
 pub(crate) struct MeshJobPlan {
     pub(crate) document: DocumentId,
     pub(crate) kind: MeshJobKind,
@@ -346,28 +409,41 @@ fn run_boolean(
     stamp: &TaskStamp,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Terminal {
-    let Some(first) = plan.operands.first() else {
-        return Terminal::Failed(CadError::Invariant(
-            "mesh.boolean_invalid_plan: a mesh boolean needs at least two operands".into(),
-        ));
-    };
     if plan.operands.len() < 2 {
         return Terminal::Failed(CadError::Invariant(
             "mesh.boolean_invalid_plan: a mesh boolean needs at least two operands".into(),
         ));
     }
-    let mut accumulated = first.mesh.clone();
+    // Derive each operand's neutral view lazily on the worker: only the
+    // accumulator and the current right operand are alive at once. The first
+    // mesh is moved into the accumulator instead of cloned.
+    let mut operands = plan.operands.iter();
+    let Some(first) = operands.next() else {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.boolean_invalid_plan: a mesh boolean needs at least two operands".into(),
+        ));
+    };
+    let Some(mut accumulated) = first.mesh() else {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.boolean_invalid_plan: a frozen operand is no longer a mesh".into(),
+        ));
+    };
     let mut diagnostics = Vec::new();
-    for operand in &plan.operands[1..] {
+    for operand in operands {
         if cancelled() {
             return Terminal::Failed(CadError::Cancelled);
         }
+        let Some(mesh) = operand.mesh() else {
+            return Terminal::Failed(CadError::Invariant(
+                "mesh.boolean_invalid_plan: a frozen operand is no longer a mesh".into(),
+            ));
+        };
         let request = MeshRequest {
             stamp: stamp.clone(),
             operation: MeshOperation::Boolean {
                 op,
                 left: &accumulated,
-                right: &operand.mesh,
+                right: &mesh,
             },
         };
         let result = match execute_mesh(modeler, &request, cancelled) {
@@ -437,10 +513,15 @@ fn run_repair(
     if cancelled() {
         return Terminal::Failed(CadError::Cancelled);
     }
+    let Some(mesh) = operand.mesh() else {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.repair_invalid_plan: a frozen operand is no longer a mesh".into(),
+        ));
+    };
     let request = MeshRequest {
         stamp: stamp.clone(),
         operation: MeshOperation::Repair {
-            mesh: &operand.mesh,
+            mesh: &mesh,
             mode,
             rule,
         },

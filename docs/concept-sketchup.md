@@ -39,7 +39,9 @@
   已接线。
   边身份使用几何派生 `mesh:edge:<bits>` key，`MOVE` 可移动边；wire-only 边/跨多个三角形边的
   stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
-- P-MESH-1a/1b 已实现（2026-11-26）：Linux 原生注入 `ManifoldMeshModeler`；其它载体按
+- P-MESH-1a/1b 已实现（2026-11-26；2026-11-27 起四个 `native-below` 载体均注入
+  `ManifoldMeshModeler`）：Linux 有运行/契约证据，Windows/macOS/Android 只有跨目标编译/契约
+  证据（运行时 NOT VERIFIED）；`dom-canvas`（Web、X11/XWayland）按
   `unsupported-runtime: mesh-modeler` 显式拒绝。
 
 ## 3. Toolbar 单元

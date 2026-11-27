@@ -36,6 +36,12 @@ cad-desktop-shell.workspace = true
 cad-app.workspace = true
 cad-engine.workspace = true
 cad-host.workspace = true
+# ADR-0061 P-MESH-1a/1b: the mesh kernel is carrier-owned composition, exactly
+# like the renderer and the `.ymodel` archive. Only an `apps/app-*` host links
+# it (`scripts/check-architecture.py`); the shared layers see only the
+# `MeshModeler` trait. Without the injection every mesh boolean/repair refuses
+# with `unsupported-runtime: mesh-modeler` instead of silently approximating.
+cad-kernel-manifold.workspace = true
 cad-platform.workspace = true
 cad-resources.workspace = true
 cad-db.workspace = true

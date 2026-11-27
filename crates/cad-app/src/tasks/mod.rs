@@ -47,7 +47,9 @@ mod mesh;
 mod solid;
 
 pub use mesh::MESH_JOB_WORKER_PANICKED;
-pub(crate) use mesh::{MeshJobKind, MeshJobManager, MeshJobOperand, MeshJobPlan, MeshJobTake};
+pub(crate) use mesh::{
+    is_mesh_operand, MeshJobKind, MeshJobManager, MeshJobOperand, MeshJobPlan, MeshJobTake,
+};
 pub use solid::SOLID_BOOLEAN_WORKER_PANICKED;
 pub(crate) use solid::{
     SolidBooleanManager, SolidBooleanOperand, SolidBooleanPlan, SolidBooleanTake,

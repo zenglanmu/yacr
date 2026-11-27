@@ -19,8 +19,8 @@
 
 use super::*;
 use crate::app_utility::require_none_payload;
-use crate::tasks::{MeshJobKind, MeshJobOperand, MeshJobPlan};
-use cad_kernel_adapter::{BooleanOp, MeshBooleanOp, MeshData, MeshRepairMode, MeshWindingRule};
+use crate::tasks::{is_mesh_operand, MeshJobKind, MeshJobOperand, MeshJobPlan};
+use cad_kernel_adapter::{BooleanOp, MeshBooleanOp, MeshRepairMode, MeshWindingRule};
 
 use super::solids::{boolean_operand_brep, describe_operand, invalid, op_label};
 
@@ -38,7 +38,11 @@ pub(crate) enum BooleanOperand {
     /// One exact `Body3d { Solid, Exact }` stored as `AcDb3dSolid`.
     Exact(cad_domain::BrepData),
     /// One closed triangle mesh, either a `Mesh` row or an imported preview body.
-    Mesh(MeshData),
+    ///
+    /// No payload: the row itself is moved into the job plan, which derives the
+    /// neutral triangle view on the worker. Cloning the mesh here just to
+    /// classify it would double every operand's buffers on the command thread.
+    Mesh,
 }
 
 /// Classify one selected row for a boolean.
@@ -49,41 +53,7 @@ pub(crate) fn classify_boolean_operand(entity: &DbEntity) -> Option<BooleanOpera
     if let Some(brep) = boolean_operand_brep(entity) {
         return Some(BooleanOperand::Exact(brep));
     }
-    mesh_operand_data(entity).map(BooleanOperand::Mesh)
-}
-
-/// The triangle data of a mesh-ish row, or `None`.
-///
-/// This accepts the two shapes the importers actually produce:
-///
-/// * `SemanticGeometry::Mesh` (STL/OBJ/PLY/OFF and any `.ymodel` mesh row);
-/// * `Body3d { kind: Unknown, exact: Unavailable }` whose display mesh is the
-///   only geometry (the SKP preview body, ADR-0049).
-///
-/// A `Sheet`/`Wire` body, or a body with exact geometry, is **not** a mesh
-/// operand: a sheet has no volume and an exact body must go through the solid
-/// seam, never be silently tessellated.
-pub(crate) fn mesh_operand_data(entity: &DbEntity) -> Option<MeshData> {
-    match &entity.geometry {
-        SemanticGeometry::Mesh(mesh) if !mesh.triangles.is_empty() && !mesh.vertices.is_empty() => {
-            Some(MeshData::from_parts(
-                mesh.vertices.clone(),
-                mesh.triangles.clone(),
-            ))
-        }
-        SemanticGeometry::Body3d(body)
-            if body.kind == BodyKind::Unknown
-                && body.exact_brep().is_none()
-                && !body.display.mesh.triangles.is_empty()
-                && !body.display.mesh.vertices.is_empty() =>
-        {
-            Some(MeshData::from_parts(
-                body.display.mesh.vertices.clone(),
-                body.display.mesh.triangles.clone(),
-            ))
-        }
-        _ => None,
-    }
+    is_mesh_operand(entity).then_some(BooleanOperand::Mesh)
 }
 
 fn mesh_boolean_op(op: BooleanOp) -> MeshBooleanOp {
@@ -105,7 +75,7 @@ impl Application {
         &mut self,
         command: &Command,
         op: BooleanOp,
-        entities: Vec<(DbEntity, MeshData)>,
+        entities: Vec<DbEntity>,
         mut diagnostics: Vec<Diagnostic>,
     ) -> CadResult<CommandOutcome> {
         let Some(modeler) = self.mesh_modeler.clone() else {
@@ -113,7 +83,7 @@ impl Application {
         };
         // The caller checked arity and layer/space agreement; the target is the
         // first operand's layer/space and the group's lowest draw order.
-        let Some((first, _)) = entities.first() else {
+        let Some(first) = entities.first() else {
             return Err(CadError::Invariant(
                 "mesh.boolean_invalid_plan: a mesh boolean needs at least two operands".into(),
             ));
@@ -122,14 +92,11 @@ impl Application {
         let space = first.space.clone();
         let draw_order = entities
             .iter()
-            .map(|(entity, _)| entity.draw_order)
+            .map(|entity| entity.draw_order)
             .min()
             .unwrap_or(0);
         let operand_count = entities.len();
-        let operands = entities
-            .into_iter()
-            .map(|(entity, mesh)| MeshJobOperand::new(&entity, mesh))
-            .collect();
+        let operands = entities.into_iter().map(MeshJobOperand::new).collect();
         let plan = MeshJobPlan {
             document: command.document,
             kind: MeshJobKind::Boolean(mesh_boolean_op(op)),
@@ -192,7 +159,7 @@ impl Application {
                 ),
             ));
         }
-        let (entity, mesh, diagnostics) = {
+        let (entity, diagnostics) = {
             let Some(document) = self.workspace.documents.get(&command.document) else {
                 return Err(CadError::InvalidInput("document not open".into()));
             };
@@ -212,17 +179,17 @@ impl Application {
                     "the selected mesh no longer exists",
                 ));
             };
-            let mesh = mesh_operand_data(&entity).ok_or_else(|| {
-                invalid(
+            if !is_mesh_operand(&entity) {
+                return Err(invalid(
                     "meshrepair.not_mesh",
                     format!(
                         "entity {} is {}; mesh repair needs a mesh body",
                         entity.id.0,
                         describe_operand(&entity)
                     ),
-                )
-            })?;
-            (entity, mesh, diagnostics)
+                ));
+            }
+            (entity, diagnostics)
         };
         let rule = match mode {
             MeshRepairMode::Orientation => MeshWindingRule::Positive,
@@ -237,7 +204,7 @@ impl Application {
             layer,
             space,
             draw_order,
-            operands: vec![MeshJobOperand::new(&entity, mesh)],
+            operands: vec![MeshJobOperand::new(entity)],
         };
         self.start_mesh_job(plan, modeler)?;
         let mut diagnostics = diagnostics;

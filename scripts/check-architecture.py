@@ -341,7 +341,7 @@ def check(root: pathlib.Path) -> int:
         forbid_dependency("cad-kernel-manifold", dependency)
 
     # The kernel **host** crate is a carrier-owned dependency: only a concrete
-    # app host (today `app-linux`) links it at runtime. No `cad-*` shared layer
+    # app host (`apps/app-*`) links it at runtime. No `cad-*` shared layer
     # may, because that would fold the pinned kernel into a reusable layer
     # instead of a carrier composition (ADR-0036 D1 / P1/C1).
     #

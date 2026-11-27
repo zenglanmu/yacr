@@ -355,6 +355,14 @@ pub fn tick(shared: &Arc<Mutex<Shared>>, telemetry: &Arc<Mutex<RenderTelemetry>>
                 // `.ymodel` the carrier could not save anything at all.
                 session.set_document_archive(Some(crate::ymodel_archive::ZipArchive::new()
                     as std::sync::Arc<dyn cad_platform::DocumentArchive>));
+                // ADR-0061 P-MESH-1a/1b: the mesh modeler is carrier
+                // composition exactly like the archive. The shared layers never
+                // link the kernel, so without this line every mesh
+                // boolean/repair refuses with `unsupported-runtime:
+                // mesh-modeler` instead of silently approximating.
+                session.set_mesh_modeler(Some(std::sync::Arc::new(
+                    cad_kernel_manifold::ManifoldMeshModeler::new(),
+                )));
                 // The recovery snapshot (ADR-0037 D12): the same archive encoder,
                 // written to `filesDir/recovery` while the document is dirty. The
                 // directory is derived from the `nativeAssetsReady` handshake, which

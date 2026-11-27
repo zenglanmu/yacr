@@ -136,7 +136,7 @@ SUMMARY files=11 meshes=11 triangles=34347 closed=5 open=1 non_manifold=5 repair
 |---|---|
 | Linux 原生 `native-below` | `ManifoldMeshModeler` 已注入；P-MESH-1a/1b 命令/worker/commit 与 P-MESH-2/3 编辑/补洞契约真实执行 |
 | Linux `dom-canvas`（X11/XWayland） | 无 `MeshModeler`：布尔/修复按 `unsupported-runtime: mesh-modeler` 拒绝；纯面编辑/细分/平滑/补洞不依赖内核（运行时未在 X11 专项验证） |
-| Windows / macOS / Android | 无 `MeshModeler` 注入；编译/运行时 NOT VERIFIED |
+| Windows / macOS / Android | **2026-11-27 起已注入**（`native-below` 各 tick 安装 `ManifoldMeshModeler`）；证据只有跨目标编译/契约，运行时 NOT VERIFIED；见 `docs/validation-mesh-hosts-2026-11-27.md` |
 | Web | 无 `MeshModeler`：布尔/修复拒绝；纯面编辑/补洞代码可编译，浏览器运行时 NOT VERIFIED |
 
 `docs/concept-sketchup.md` 是 SketchUp 工具面的可数覆盖表；本文件记录 P-MESH-0/1a/1b/2/3 与

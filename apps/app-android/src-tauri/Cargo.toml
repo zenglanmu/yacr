@@ -48,6 +48,12 @@ android_logger = "0.14"
 # for the event loop — see `src/surface.rs` for the UI-thread hand-off).
 cad-desktop-shell.workspace = true
 cad-host.workspace = true
+# ADR-0061 P-MESH-1a/1b: the mesh kernel is carrier-owned composition, exactly
+# like the renderer and the `.ymodel` archive. Only an `apps/app-*` host links
+# it (`scripts/check-architecture.py`); the wasm gate never compiles this table,
+# so the `dom-canvas` session still has no mesh modeler. Without the injection
+# every mesh boolean/repair refuses with `unsupported-runtime: mesh-modeler`.
+cad-kernel-manifold.workspace = true
 cad-render-wgpu.workspace = true
 cad-engine.workspace = true
 # Raw `AndroidNdkWindowHandle`/`AndroidDisplayHandle` for the renderer surface
