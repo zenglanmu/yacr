@@ -6,7 +6,14 @@ import { useEffect, useState } from 'react';
 import { useI18n, useShell } from '../../context.ts';
 import { invoke } from '../../host/invoke.ts';
 import { readMatchPhoto, readOverlays } from '../concept/panels.ts';
-import { BUILTIN_MATERIALS, materialDeleteCommand, paintCommand, readMaterials } from '../concept/materials.ts';
+import {
+  BUILTIN_MATERIALS,
+  materialDeleteCommand,
+  materialEditCommands,
+  paintCommand,
+  readMaterials,
+} from '../concept/materials.ts';
+import type { MaterialDraft } from '../concept/materials.ts';
 import {
   groupCreateCommand,
   groupEditCommand,
@@ -169,6 +176,24 @@ export function MaterialsBody() {
   const entityCount = shell.status?.entityCount ?? null;
   const commandCount = shell.status?.commandLog?.length ?? 0;
   const [state, setState] = useState<MaterialsState>({ phase: 'ready', answer: null, reason: '' });
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<MaterialDraft | null>(null);
+  const beginEdit = (material: { name: string; color: string; transparency: number }) => {
+    setEditing(material.name);
+    setEditDraft({
+      name: material.name,
+      color: material.color,
+      transparency: material.transparency,
+    });
+  };
+  const commitEdit = (material: { name: string; color: string; transparency: number }) => {
+    if (editDraft === null) return;
+    const commands = materialEditCommands(material, editDraft);
+    if (commands === null || commands.length === 0) return;
+    for (const command of commands) shell.runCommand(command);
+    setEditing(null);
+    setEditDraft(null);
+  };
   useEffect(() => {
     if (documentLabel === null) {
       setState({ phase: 'ready', answer: null, reason: '' });
@@ -219,19 +244,89 @@ export function MaterialsBody() {
               >
                 <span>{material.name}</span>
               </button>
-              <button
-                type="button"
-                className="concept-panel__action"
-                disabled={materialDeleteCommand(material.name) === null
-                  || !shell.canCommand('MATERIAL')}
-                title={t('concept.materials.delete_named', { name: material.name })}
-                onClick={() => {
-                  const command = materialDeleteCommand(material.name);
-                  if (command !== null) shell.runCommand(command);
-                }}
-              >
-                {t('concept.materials.delete')}
-              </button>
+              {editing === material.name && editDraft !== null ? (
+                <>
+                  <input
+                    type="text"
+                    className="concept-scenes__name"
+                    value={editDraft.name}
+                    aria-label={t('concept.materials.edit_name')}
+                    onChange={event => setEditDraft({
+                      ...editDraft,
+                      name: event.currentTarget.value,
+                    })}
+                  />
+                  <input
+                    type="color"
+                    value={editDraft.color}
+                    aria-label={t('concept.materials.edit_color')}
+                    onChange={event => setEditDraft({
+                      ...editDraft,
+                      color: event.currentTarget.value,
+                    })}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    className="concept-scenes__name"
+                    value={editDraft.transparency}
+                    aria-label={t('concept.materials.edit_transparency')}
+                    onChange={event => setEditDraft({
+                      ...editDraft,
+                      transparency: Number(event.currentTarget.value),
+                    })}
+                  />
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={(() => {
+                      const commands = materialEditCommands(material, editDraft);
+                      return commands === null || commands.length === 0
+                        || !shell.canCommand('MATERIAL');
+                    })()}
+                    onClick={() => commitEdit(material)}
+                  >
+                    {t('concept.materials.edit_save')}
+                  </button>
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    onClick={() => {
+                      setEditing(null);
+                      setEditDraft(null);
+                    }}
+                  >
+                    {t('concept.materials.edit_cancel')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={!shell.canCommand('MATERIAL')}
+                    title={t('concept.materials.edit_named', { name: material.name })}
+                    onClick={() => beginEdit(material)}
+                  >
+                    {t('concept.materials.edit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={materialDeleteCommand(material.name) === null
+                      || !shell.canCommand('MATERIAL')}
+                    title={t('concept.materials.delete_named', { name: material.name })}
+                    onClick={() => {
+                      const command = materialDeleteCommand(material.name);
+                      if (command !== null) shell.runCommand(command);
+                    }}
+                  >
+                    {t('concept.materials.delete')}
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>

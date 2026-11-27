@@ -11,6 +11,7 @@ import {
   BUILTIN_MATERIALS,
   MATERIALS_COMMAND,
   materialDeleteCommand,
+  materialEditCommands,
   paintCommand,
   parseMaterialsAnswer,
 } from '../src/domains/concept/materials.ts';
@@ -66,4 +67,34 @@ test('a document material delete uses the quoted MATERIAL grammar', () => {
   for (const name of ['', 'a"b', 'a\nb', null, 3]) {
     assert.equal(materialDeleteCommand(name), null, String(name));
   }
+});
+
+test('an edited material emits rename then value commands against the new name', () => {
+  const current = { name: 'Red', color: '#b22222', transparency: 0 };
+  assert.deepEqual(
+    materialEditCommands(current, {
+      name: '  Dark Red  ',
+      color: '#0a141e',
+      transparency: 0.5,
+    }),
+    [
+      'MATERIAL "Red" RENAME "Dark Red"',
+      'MATERIAL "Dark Red" COLOR 10 20 30',
+      'MATERIAL "Dark Red" TRANSPARENCY 0.5',
+    ],
+  );
+  assert.deepEqual(
+    materialEditCommands(current, current),
+    [],
+    'no fields changed means no commands',
+  );
+});
+
+test('an edited material rejects unsafe names, colours and transparency', () => {
+  const current = { name: 'Red', color: '#b22222', transparency: 0 };
+  assert.equal(materialEditCommands(current, { ...current, name: 'a"b' }), null);
+  assert.equal(materialEditCommands(current, { ...current, name: '  ' }), null);
+  assert.equal(materialEditCommands(current, { ...current, color: '#12345' }), null);
+  assert.equal(materialEditCommands(current, { ...current, transparency: 2 }), null);
+  assert.equal(materialEditCommands(current, { ...current, transparency: Number.NaN }), null);
 });

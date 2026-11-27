@@ -87,8 +87,10 @@
   **Flip Along**（2026-11-28，ADR-0083）：`FLIP X|Y|Z` 以选择包围盒中心为平面原地反射
   （源删除 + 镜像副本、一次事务/一步撤销、字形真反射）；新副本是新 entity id，块定义成员/子图元
   仍按名拒绝。
+  **材质编辑表单**（2026-11-28，ADR-0100）：文档材质行 Edit 打开名称/颜色/透明度，只对变化字段
+  发 `MATERIAL ... RENAME/COLOR/TRANSPARENCY`（每条一步撤销）；贴图/材质库未建模。
   **材质编辑命令**（2026-11-28，ADR-0099）：`MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE`
-  改文档材质行（一步撤销，delete 清实体/面赋值）；面板现有重涂 + Delete，名称/颜色编辑 UI 未建模。
+  改文档材质行（一步撤销，delete 清实体/面赋值）；面板现有重涂 + Edit（名称/颜色/透明度）+ Delete；多字段保存按字段分命令。
   **逐面材质**（2026-11-27，ADR-0081）：`PAINT <name>` 接受带 `SubElementId` 的网格面选择，
   材质表行新增 `faces` 快照（minor 25）；渲染器按面材质把网格拆成多个 fragment（fragment 自带
   颜色/alpha），未涂面保留实体颜色；陈旧 face key 只报告不重映射。
@@ -248,7 +250,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Styles | partial | 真实面板：两行 `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`（当前 token 高亮，来自 `cad_status.visualStyle`），另保留界面主题切换。**未建模**：基于材质/贴图的 SketchUp 样式、边/面显示开关（轮廓线、深度提示、端点、雾化以外的背景/天空）、样式库保存/缩略图/水印；界面主题不是 SketchUp Style |
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
-| Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**逐面涂刷**：选中网格面（pick 的 `SubElementId` / `Mesh.face_sources` key）时只涂该面，材质表行的 `faces` 快照（minor 25）；渲染器按材质把网格拆成多个 fragment（未涂面保留实体颜色，透明材质乘实体 alpha），陈旧 face key 不重映射并报 `representation.material_face_inert`。**编辑器命令层**：`MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE` 直接改文档材质行（rename 保 seq/赋值；delete 清实体与面赋值；一步撤销），面板提供重涂与 Delete。**未建模**：名称/颜色编辑 UI、贴图/纹理与材质库；整实体涂刷仍在 |
+| Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**逐面涂刷**：选中网格面（pick 的 `SubElementId` / `Mesh.face_sources` key）时只涂该面，材质表行的 `faces` 快照（minor 25）；渲染器按材质把网格拆成多个 fragment（未涂面保留实体颜色，透明材质乘实体 alpha），陈旧 face key 不重映射并报 `representation.material_face_inert`。**编辑器**：`MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE` 直接改文档材质行（rename 保 seq/赋值；delete 清实体与面赋值；一步撤销）；面板文档材质行提供 **Edit**（名称/颜色/透明度，按变更字段各发一条命令；多字段保存是多步撤销）与 **Delete**。**未建模**：贴图/纹理、材质库、材质缩略图/拖放；整实体涂刷仍在 |
 | Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）、文档 **Shadows/Fog 记录**（行的 `display` 快照，minor 24）、**显式逐实体柔化角度**（行的 `soften` 快照，minor 28）与**无显式柔化的 body 列表**（行的 `soften_cleared`，minor 29）；恢复把标签快照作为会话图层覆盖应用（不写图层表），阴影/雾各写一次，柔化按一次 display 属性事务写回显式值并清空 cleared body，Viewer 下有差异的恢复在改动前按 `PermissionDenied` 拒绝。**未建模**：剖面与场景缩略图 |
 | Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
 | Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |

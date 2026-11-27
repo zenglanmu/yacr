@@ -29,6 +29,61 @@ export const BUILTIN_MATERIALS: readonly BuiltinMaterial[] = Object.freeze([
   { name: 'Glass', color: '#aadcf0', transparency: 0.6 },
 ]);
 
+/** One editable document material row. */
+export interface MaterialDraft {
+  readonly name: string;
+  /** `#rrggbb`. */
+  readonly color: string;
+  /** `0.0` opaque … `1.0` transparent. */
+  readonly transparency: number;
+}
+
+function safeMaterialName(name: unknown): string | null {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (trimmed === '' || trimmed.includes('"')
+    || trimmed.includes('\n') || trimmed.includes('\r')) {
+    return null;
+  }
+  return trimmed;
+}
+
+/**
+ * The `MATERIAL` commands for one edited row, in rename-then-value order.
+ *
+ * Only changed fields are emitted; each command is one ordinary write/undo step.
+ * A later color/transparency command addresses the new name after a rename.
+ * Unsafe names/colours/transparency produce `null`, never a guessed command.
+ */
+export function materialEditCommands(
+  current: MaterialDraft,
+  draft: MaterialDraft,
+): readonly string[] | null {
+  const oldName = safeMaterialName(current.name);
+  const newName = safeMaterialName(draft.name);
+  const color = typeof draft.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(draft.color)
+    ? draft.color.toLowerCase()
+    : null;
+  if (oldName === null || newName === null || color === null) return null;
+  if (!Number.isFinite(draft.transparency)
+    || draft.transparency < 0 || draft.transparency > 1) {
+    return null;
+  }
+  const commands: string[] = [];
+  if (newName !== oldName) {
+    commands.push(`MATERIAL "${oldName}" RENAME "${newName}"`);
+  }
+  if (color !== current.color.toLowerCase()) {
+    const r = Number.parseInt(color.slice(1, 3), 16);
+    const g = Number.parseInt(color.slice(3, 5), 16);
+    const b = Number.parseInt(color.slice(5, 7), 16);
+    commands.push(`MATERIAL "${newName}" COLOR ${r} ${g} ${b}`);
+  }
+  if (draft.transparency !== current.transparency) {
+    commands.push(`MATERIAL "${newName}" TRANSPARENCY ${draft.transparency}`);
+  }
+  return commands;
+}
+
 /** `MATERIAL "<name>" DELETE` for a document material, or null when unsafe. */
 export function materialDeleteCommand(name: unknown): string | null {
   const trimmed = typeof name === 'string' ? name.trim() : '';
