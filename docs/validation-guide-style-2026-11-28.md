@@ -12,6 +12,9 @@ guide 表新增文档级 style 行：颜色 + 虚线开关；`GUIDE STYLE COLOR/
 - **渲染**：overlay 用 style 颜色；dashed=false 不切段并使用 continuous pattern；point 十字实线。
 - **状态/UI**：有文档时 `cad_status.guideStyle {color, dashed}` 投影表样式；concept 域 Styles
   托盘有颜色输入与虚线开关，dispatch 同一 `GUIDE STYLE` 命令（无新命令）。
+- **本地 admission**：`argument-guide-grammar.ts` 镜像宿主 `parse_guide_argument` 的
+  `LIST/CLEAR/DELETE/POINT/STYLE` 形状；没有它，命令线和托盘 dispatch 会在 IPC 前被本地
+  admission 拒绝（旧缺陷，本轮修复）。
 - **边界**：托盘只在 concept 域；每 guide 独立样式未建模。
 
 ## 2. 验证
@@ -22,7 +25,7 @@ guide 表新增文档级 style 行：颜色 + 虚线开关；`GUIDE STYLE COLOR/
 | `cargo test -p cad-store-zip --test guides_minor --locked` | PASS（**4 passed**：minor-30 style 往返） |
 | `cargo test -p cad-ui-core --lib --locked` | PASS（**997 passed**，GUIDE STYLE grammar + status 投影） |
 | `cargo test -p cad-host --lib --locked` | PASS（**508 passed**） |
-| `(cd apps/desktop-ui && npm test)` | PASS（**2156 passed**，颜色/虚线命令与 hex 往返） |
+| `(cd apps/desktop-ui && npm test)` | PASS（**2159 passed**，颜色/虚线命令、hex 往返、GUIDE 语法与 admission） |
 | `cargo fmt --all -- --check` / file-size / i18n / architecture / command-docs | PASS |
 
 **边界**：没有真实 GUI **交互**证据；样式只有表/命令/状态投影/CPU overlay 与前端契约，

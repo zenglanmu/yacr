@@ -11,6 +11,7 @@
 // `argument-{mleader,selection,record}-grammar.ts`. The `LINETYPE`/`MLINE`/
 // `LAYOUT`/`TABLEEXPORT` shapes — plus the quote-aware tokenizer they share with
 // `RENAME` live in `argument-extras-grammar.ts`.
+import { isGuideArgument } from './argument-guide-grammar.ts';
 import { isHatchEditArgument } from './argument-hatchedit.ts';
 import { isColorArgument } from './argument-color-grammar.ts';
 import { EXPORT_ARGUMENT_SPEC } from './argument-export-grammar.ts';
@@ -121,6 +122,9 @@ function isPositiveSignedDecimal(text: string): boolean {
  * unsupported answers.
  */
 export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.freeze({
+  // `GUIDE LIST|CLEAR|DELETE <n>|POINT <x> <y> <z>|STYLE COLOR|DASH`; the host
+  // validates semantics, this predicate only mirrors the admitted token shapes.
+  GUIDE: Object.freeze({ parse: isGuideArgument }),
   ZOOM: Object.freeze({
     /**
      * `ZOOM WINDOW`, `ZOOM PREVIOUS`, `ZOOM OBJECT`, `ZOOM nX` and `ZOOM nXP`
