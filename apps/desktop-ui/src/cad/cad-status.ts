@@ -1,13 +1,11 @@
 // The frozen `cad_status` snapshot: its wire types, the runtime validator the
-// chrome runs on every poll, and the import-progress/cancel affordances.
-//
-// The types are the host's own wire shape (`cad_ui_core::session::status`,
+// chrome runs on every poll, and the import-progress/cancel affordances. The
+// types are the host's own wire shape (`cad_ui_core::session::status`,
 // serialized with `camelCase` except the two documented snake_case overrides
 // `tool.awaiting_text` and `tool.text_prefill`). The validator is deliberately
 // **narrower** than the type: it enforces exactly the fields the chrome cannot
 // proceed without, and tolerates the additive blocks an older host may omit, so
-// those are typed optional for the same reason. A malformed payload throws
-// `CAD_STATUS_INVALID` and is never coerced into a guessed state.
+// those are typed optional; a malformed payload throws `CAD_STATUS_INVALID`.
 
 import { parseSelection } from './selection-wire.ts';
 import { parseOrbitCapability } from './host-profile.ts';
@@ -360,6 +358,8 @@ export interface CadStatus {
   readonly documentLabel: string | null;
   /** Effective document domain (`cad2d|bim|concept|mechanical`; null with no document). */
   readonly applicationDomain?: string | null;
+  /** The session's 3D body style token (`WIREFRAME`/`SHADED`), when reported. */
+  readonly visualStyle?: string | null;
   readonly entityCount: number | null;
   readonly loading: boolean;
   readonly importProgress: CadImportProgress | null;

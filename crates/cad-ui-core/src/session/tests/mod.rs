@@ -45,6 +45,7 @@ mod tests_settings;
 mod tests_soften;
 mod tests_splitsolid;
 mod tests_stretch;
+mod tests_styles;
 mod tests_sysvdlg;
 mod tests_text;
 mod tests_text3d;

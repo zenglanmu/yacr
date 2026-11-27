@@ -23,6 +23,7 @@ import { Icon } from '../../icons.tsx';
 import { invoke } from '../../host/invoke.ts';
 import { blocksOf } from '../../cad/cad-status.ts';
 import { componentDefineCommand, componentInsertCommand } from '../concept/components.ts';
+import { STYLE_TOKENS, styleCommand, styleLabelKey } from '../concept/styles.ts';
 import { toolLabelKey } from '../../commands/commands.ts';
 import { toolStepPromptKey } from '../../cad/cad.ts';
 import { propertyRowLabel } from '../../properties/property-labels.ts';
@@ -144,8 +145,26 @@ function ComponentsBody() {
 
 function StylesBody() {
   const { t } = useI18n();
+  const shell = useShell();
+  const current = shell.status?.visualStyle ?? null;
+  const available = shell.canCommand('VSCURRENT');
   return (
     <div className="concept-panel__styles">
+      <p className="concept-panel__hint">{t('concept.styles.hint')}</p>
+      {STYLE_TOKENS.map(token => (
+        <button
+          key={token}
+          type="button"
+          className="concept-panel__action"
+          aria-pressed={current === token}
+          disabled={!available}
+          onClick={() => shell.runCommand(styleCommand(token))}
+        >
+          {t(styleLabelKey(token))}
+          {current === token ? ` · ${t('concept.styles.active')}` : ''}
+        </button>
+      ))}
+      <p className="concept-panel__hint">{t('concept.styles.boundary')}</p>
       <p className="concept-panel__hint">{t('concept.styles.theme')}</p>
       <ThemeToggle />
     </div>

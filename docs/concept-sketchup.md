@@ -51,6 +51,9 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **样式面板**（2026-11-27，ADR-0077）：托盘 Styles 从“只有主题切换”变成两行真实 token——
+  `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`，当前 token 从 `cad_status.visualStyle` 高亮；
+  其它样式名仍由命令层按 `vscurrent.style_not_implemented` 拒绝，界面主题与 SketchUp Style 分开。
   **组件面板**（2026-11-27，ADR-0076）：托盘 Components 从只读列表变成可操作面板——每行
   `INSERT <name>`、名称输入 + `BLOCK <name>`（块名经 pending text 在捕获点后自动应用）；命令层
   仍负责未知块/空选择/重名拒绝。
@@ -195,7 +198,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 |---|---|---|
 | Entity Info | full | 属性行来自 `PropertyRow`；网格行有限 |
 | Components | partial | 真实面板：列出块定义（名称 + 成员数）；每行 **Insert** 走 `INSERT <name>`（块名预先交给捕获，点一下就放置），名称输入 + **Create from selection** 走 `BLOCK <name>`（基点点一下即定义）；命令层仍负责未知块/空选择/重名等具名拒绝。**未建模**：组件缩略图、右键替换/重载、嵌套组件的就地编辑、拖放与组件浏览器搜索；面板只列出前 12 个（`cad_status.blocks` 的上限） |
-| Styles | partial | 只有主题切换，不是 SketchUp Style |
+| Styles | partial | 真实面板：两行 `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`（当前 token 高亮，来自 `cad_status.visualStyle`），另保留界面主题切换。**未建模**：基于材质/贴图的 SketchUp 样式、边/面显示开关（轮廓线、深度提示、端点、雾化以外的背景/天空）、样式库保存/缩略图/水印；界面主题不是 SketchUp Style |
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 内置 12 色调色板 + `PAINT <name>`（整实体涂刷、文档表持久化、渲染即生效）；文档材质只在 `MATERIALS` 报告里列出，色块不随文档材质生成 |

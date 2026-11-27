@@ -381,6 +381,19 @@ impl CadSession {
             .core
             .effective_application_domain()
             .map(|domain| domain.as_str().to_string());
+        // The session's 3D body style token (`VSCURRENT`); session state only,
+        // so it is present even without a document (the panel is disabled then by
+        // the status' document gate, not by hiding this fact).
+        status.visual_style = Some(
+            self.core
+                .controller
+                .borrow()
+                .session
+                .view_extras
+                .visual_style
+                .name()
+                .to_string(),
+        );
         // The document's own UNITS settings, projected once for the readouts.
         // `None` without a document; never a UI-side default.
         status.units = self

@@ -423,6 +423,11 @@ pub struct CadStatus {
     /// not a claim about the import format; `openedSource` stays the provenance
     /// key.
     pub application_domain: Option<String>,
+    /// The session's 3D **body** visual-style token (`WIREFRAME`/`SHADED`), or
+    /// absent without a document. Session state only (no document field): it is
+    /// the value `VSCURRENT` stores and the Styles tray highlights.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visual_style: Option<String>,
     pub error: Option<String>,
     /// Whether the host can start a **blank** document right now: the host
     /// advertises the NEW capability and no open/import is in flight
@@ -671,8 +676,9 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         open_summary: None,
         // No session means no opened connector: absent, never a fabricated object.
         opened_source: None,
-        // No session means no document, hence no interface domain.
+        // No session means no document, hence no interface domain or style token.
         application_domain: None,
+        visual_style: None,
         error,
         // No session means no document/command capability at all.
         can_new: false,
@@ -852,6 +858,7 @@ pub(super) fn assemble_status(
         // (never inferred here).
         opened_source: None,
         application_domain: None,
+        visual_style: None,
         error,
         can_new: capabilities.can_new,
         can_open,
