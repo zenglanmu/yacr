@@ -34,15 +34,26 @@ fn a_persisted_guide_is_a_scene_line_batch() {
     let batch = delta
         .added
         .iter()
-        .find(|batch| batch.topology == RenderTopology::Lines && batch.vertices.len() == 2)
-        .expect("the guide line batch");
+        .find(|batch| {
+            batch.topology == RenderTopology::Lines
+                && batch.vertices.len() > 2
+                && !batch.linetype.is_continuous()
+        })
+        .expect("the dashed guide line batch");
     assert!((batch.color[0] - 0.20).abs() < 1e-6);
     assert!((batch.color[1] - 0.45).abs() < 1e-6);
     assert!((batch.color[2] - 0.85).abs() < 1e-6);
-    // The line is centered on the stored point and long enough to read as a
-    // guide in a normal model; it is bounded, never claimed infinite.
-    let x: Vec<f32> = batch.vertices.iter().map(|vertex| vertex[0]).collect();
-    assert!(x[1] - x[0] >= 1000.0, "{x:?}");
+    // The line is bounded and split into dash/gap runs; no single full-length
+    // segment is emitted and every run is short.
+    assert!(batch.vertices.len() >= 4, "{:?}", batch.vertices.len());
+    for pair in batch.vertices.chunks(2) {
+        let dx = pair[1][0] - pair[0][0];
+        let dy = pair[1][1] - pair[0][1];
+        let dz = pair[1][2] - pair[0][2];
+        let length = (dx * dx + dy * dy + dz * dz).sqrt();
+        assert!(length > 0.0 && length <= 10.0, "dash length {length}");
+    }
+    assert_eq!(batch.linetype.elements.len(), 2);
 }
 
 #[test]

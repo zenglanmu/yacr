@@ -1,6 +1,7 @@
 # ADR-0084：持久构造参考线（DIST GUIDE / PROTRACTOR GUIDE）
 
 - 状态：**已接受（决策，2026-11-28）**；**已实现（2026-11-28，非实体 guide 表 + 测量 guide 模式；无真实 GUI/GPU 证据）**
+- 后续：ADR-0086 将 line guide 从连续实线段改为分段虚线（point 十字保持实线）。
 - 关联：ADR-0063（场景表模式）、`tables/guides.json`（minor 26）、`DIST`/`PROTRACTOR`
 
 ## 背景

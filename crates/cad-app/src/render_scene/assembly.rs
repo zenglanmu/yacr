@@ -326,19 +326,34 @@ fn append_guide_batches(
     let mut representation =
         cad_representation::DisplayRepresentation::empty(Completeness::Complete);
     for (index, guide) in guides.guides().iter().enumerate() {
-        let points = match guide {
-            cad_domain::guide::Guide::Line(line) => vec![
-                Point3 {
+        let (points, pattern) = match guide {
+            cad_domain::guide::Guide::Line(line) => {
+                let start = Point3 {
                     x: line.point.x - line.direction.x * extent,
                     y: line.point.y - line.direction.y * extent,
                     z: line.point.z - line.direction.z * extent,
-                },
-                Point3 {
+                };
+                let end = Point3 {
                     x: line.point.x + line.direction.x * extent,
                     y: line.point.y + line.direction.y * extent,
                     z: line.point.z + line.direction.z * extent,
-                },
-            ],
+                };
+                // Dash period follows the bounded guide extent (about 1/100 of
+                // its half-length, at least 5 model units), so a huge model does
+                // not turn one guide into tens of thousands of segments.
+                let period = (extent / 100.0).max(5.0);
+                let pattern = LinetypePattern::from_elements([period * 0.6, -period * 0.4]);
+                let (runs, _fallback) =
+                    cad_representation::subdivide_dashes(&[start, end], &pattern, 1.0, 1.0);
+                let mut points = Vec::new();
+                for run in runs {
+                    for pair in run.windows(2) {
+                        points.push(pair[0]);
+                        points.push(pair[1]);
+                    }
+                }
+                (points, pattern)
+            }
             cad_domain::guide::Guide::Point(mark) => {
                 // A point guide is a three-axis cross; the render batch has no
                 // point primitive, so the marker is three short line segments.
@@ -365,7 +380,7 @@ fn append_guide_batches(
                     points.push(a);
                     points.push(b);
                 }
-                points
+                (points, LinetypePattern::continuous())
             }
         };
         representation.fragments.push(DisplayFragment {
@@ -383,8 +398,8 @@ fn append_guide_batches(
             color_unresolved: false,
             lineweight: 0.0,
             lineweight_unresolved: true,
-            linetype: LinetypePattern::continuous(),
-            linetype_unresolved: true,
+            linetype: pattern,
+            linetype_unresolved: false,
             linetype_scale: 1.0,
             draw_order: -1 - index as i64,
             primitive: DisplayPrimitive::LineSegments(Arc::from(points)),
