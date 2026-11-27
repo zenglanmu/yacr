@@ -70,6 +70,7 @@ pub mod zoom_history;
 mod app_action_recorder;
 mod app_audit;
 // ADR-0036 P2.0: the real one-pick `CHAMFEREDGE` command.
+mod app_camera_two_point;
 mod app_chamfer_edge;
 mod app_concept_shapes;
 mod app_display;

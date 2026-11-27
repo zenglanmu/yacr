@@ -819,12 +819,8 @@ pub enum CommandPayload {
     /// over the modelled `SETVAR` names; `LIST` compares against the last
     /// snapshot. There is no background notification.
     SysVarMonitor(SysVarMonitorAction),
-    /// `SPACETRANS <distance>`: one model/paper distance conversion.
-    ///
-    /// The value is a **model-space distance** converted to paper units for the
-    /// active layout viewport (and the inverse is reported too). A model-space
-    /// session or a layout viewport that cannot be resolved exactly is refused
-    /// by name; the conversion never guesses a scale.
+    /// `SPACETRANS <distance>`: one model/paper distance conversion; a
+    /// conversion that cannot be resolved exactly is refused, never guessed.
     SpaceTrans(f64),
     MRedo(u32),
     /// `MULTIPLE [command]`: the session repeat arm; `None` is bare `MULTIPLE`.
@@ -832,15 +828,17 @@ pub enum CommandPayload {
     /// The 2026-11-07 draw/modify batch; contracts in `command_id::draw2`.
     Draw2(Box<crate::Draw2Payload>),
     View(ViewCommand),
-    /// The typed `SCENE <option>` line (SketchUp pages).
+    /// The typed `SCENE <option>` line.
     Scene(SceneCommand),
-    /// The typed `SHADOWS`/`FOG` line (display settings).
+    /// The typed `SHADOWS`/`FOG` line.
     Display(DisplayCommand),
     Text3d(Text3dInput),
     PositionCamera {
         eye: Point3,
         target: Point3,
     },
+    /// `CAMERA TWO-POINT`: level the current perspective camera (view-only).
+    PositionCameraTwoPoint,
     Walk(WalkCommand),
     LookAround(LookAroundCommand),
     SoftenEdges(f64),

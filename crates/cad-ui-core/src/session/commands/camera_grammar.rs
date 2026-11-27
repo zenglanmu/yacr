@@ -2,9 +2,9 @@
 //! gate.
 //!
 //! The bare `CAMERA` selector starts the two-point eye/target placement capture.
-//! The reference tool's other modes are admitted only to be **refused by name**:
-//! `CAMERA TWO-POINT` (two-point perspective is not modeled) and `CAMERA WALK`
-//! (walk/look-around is a separate pending tool). Nothing else is admitted.
+//! `CAMERA TWO-POINT` levels the current perspective camera (two-point
+//! perspective, view only); `CAMERA WALK` stays a named refusal because it is a
+//! separate tool rather than a second camera mode. Nothing else is admitted.
 
 /// The SketchUp `CAMERA` selector.
 pub const CAMERA_SELECTOR: &str = "CAMERA";

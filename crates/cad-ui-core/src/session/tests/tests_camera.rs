@@ -1,8 +1,8 @@
-//! `CAMERA` (Position Camera) selector, capture route and typed refusals.
+//! `CAMERA` (Position Camera) selector, capture route and the two-point mode.
 //!
-//! The bare selector starts the two-point eye/target capture; the reference
-//! tool's two-point-perspective and walk modes are refused by name. Contract
-//! level: no GUI, no GPU.
+//! The bare selector starts the eye/target capture; `CAMERA TWO-POINT`
+//! dispatches the level-eye command; `CAMERA WALK` stays a named refusal.
+//! Contract level: no GUI, no GPU.
 
 use super::super::*;
 use super::test_support::*;
@@ -35,7 +35,7 @@ fn the_camera_selector_starts_the_two_point_placement() {
 }
 
 #[test]
-fn the_unsupported_camera_modes_are_refused_by_name() {
+fn the_camera_two_point_mode_is_dispatched_and_walk_stays_refused() {
     assert_eq!(
         parse_camera_argument("two-point"),
         Some(CameraArgument::TwoPoint)
@@ -44,11 +44,14 @@ fn the_unsupported_camera_modes_are_refused_by_name() {
     assert_eq!(parse_camera_argument("BOGUS"), None);
 
     let session = fresh_session();
+    // The fixture has no perspective document camera, so the command's own
+    // refusal proves the typed line reached the two-point handler rather than
+    // the removed "not implemented" gate.
     let error = session
         .command("CAMERA TWO-POINT")
-        .expect_err("two-point perspective is not modeled");
+        .expect_err("no perspective camera in the synthetic session");
     assert!(
-        error.contains("camera.two_point_not_implemented"),
+        error.contains("camera.two_point_requires_perspective"),
         "{error}"
     );
     let error = session

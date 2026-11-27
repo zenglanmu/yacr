@@ -553,7 +553,7 @@
 | `BVSHOW` | 部分实现 | 具名拒绝（`bvshow.unsupported`）：本构建无按可见性状态显示实体的 API。 |
 | `BVSTATE` | 部分实现 | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态。 |
 | `CAL` | 部分实现 | 具名拒绝（`cal.unsupported`）：未实现表达式求值器；不写图。 |
-| `CAMERA` | 部分实现 | 真实视图工具：两点捕获（眼睛、目标）设透视相机（eye/target/世界 +Z up、沿用当前 FOV），保存 2D 相机并进入 3D；只改视图、记 `ZOOM PREVIOUS`，不写文档；两点透视/Walk 仍是具名拒绝。 |
+| `CAMERA` | 部分实现 | 真实视图工具：两点捕获（眼睛、目标）设透视相机（eye/target/世界 +Z up、沿用当前 FOV），保存 2D 相机并进入 3D；`CAMERA TWO-POINT` 把当前透视相机放平（竖线保持竖直）；只改视图、记 `ZOOM PREVIOUS`，不写文档；Walk 仍是具名拒绝。 |
 | `CDORDER` | 已实现 | 真实编辑：按颜色索引升序、**逐绘制顺序范围**（模型空间、各图纸布局、各块定义）重写存储绘制顺序；空选择=全图所有范围，选择只动所在范围；保留候选占用的槽位；一条事务/一步撤销；无对话框（全局范围）。 |
 | `CENTERDISASSOCIATE` | 部分实现 | 具名拒绝（`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | `CENTERLINE` | 完整实现 | 真实编辑：恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |
@@ -1470,7 +1470,7 @@
 | 150 | `-BVSTATE` | 部分实现 | At the command prompt, creates, sets, or deletes a visibility state in a dynamic block. | 只读：同 `BVSTATE`，使用 `-bvstate.*` 诊断码；无 INSERT 报 `-bvstate.no_selection`，无状态报 `-bvstate.not_set`；不设置状态。 |
 | 151 | `BVSTATE` | 部分实现 | Creates, sets, or deletes a visibility state in a dynamic block. | 只读：每个选中 INSERT 的活动动态块可见性状态（`bvstate.report`）；无 INSERT 报 `bvstate.no_selection`，无状态报 `bvstate.not_set`；不设置状态/不写库/不升修订。 |
 | 152 | `CAL` | 部分实现 | Evaluates mathematical and geometric expressions at the Command prompt or within a command. | 具名拒绝（`cal.unsupported`）：未实现表达式求值器；不写图。 |
-| 153 | `CAMERA` | 部分实现 | Sets a camera and target location to create and save a 3D perspective view of objects. | 真实视图工具：两点捕获（眼睛、目标）设透视相机；只改视图、记 `ZOOM PREVIOUS`。两点透视/Walk 具名拒绝。 |
+| 153 | `CAMERA` | 部分实现 | Sets a camera and target location to create and save a 3D perspective view of objects. | 真实视图工具：两点捕获（眼睛、目标）设透视相机；`CAMERA TWO-POINT` 放平当前透视相机；只改视图、记 `ZOOM PREVIOUS`。Walk 具名拒绝。 |
 | 154 | `CDORDER` | 已实现 | Arranges the drawing order of selected objects by their color number. | 按颜色索引升序、逐绘制顺序范围（模型空间/各图纸布局/各块定义）重排；空选择=全图；一条事务/一步撤销；无对话框（全局范围）。 |
 | 155 | `CENTERDISASSOCIATE` | 部分实现 | Removes associativity of center marks or centerlines from objects they define. | 具名拒绝（`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit`）。 |
 | 156 | `CENTERLINE` | 完整实现 | Creates centerline geometry associated with selected lines and linear polyline segments. | 恰好两条平行直线之间创建一条中间直线，覆盖投影重叠；`EXTENSION <d>`/`GAP <d>` 可调；一条事务/一步撤销；产出普通 `LINE`（非关联，声明边界）。 |

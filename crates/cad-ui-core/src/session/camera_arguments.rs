@@ -1,11 +1,15 @@
-//! `CAMERA <mode>`: the reference tool's other modes, refused by name.
+//! `CAMERA <mode>`: two-point perspective and the one remaining named refusal.
 //!
 //! The bare selector is a two-point eye/target capture (routed as `BeginDraw`).
-//! Two-point perspective and walk mode have no model here, so their typed forms
-//! answer with stable markers instead of placing a different camera behind the
-//! user's back.
+//! `CAMERA TWO-POINT` dispatches the level-eye two-point camera command (view
+//! only; the app owns the geometry); `CAMERA WALK` stays a named refusal because
+//! WALK/LOOKAROUND are separate tools, not a second camera mode.
 
-use super::commands::{invalid_camera_argument_reason, parse_camera_argument, CameraArgument};
+use cad_app::{CommandId, CommandPayload};
+
+use super::commands::{
+    invalid_camera_argument_reason, parse_camera_argument, CameraArgument, CAMERA_SELECTOR,
+};
 
 impl super::CadSession {
     /// Apply one typed `CAMERA <argument>` line.
@@ -14,14 +18,14 @@ impl super::CadSession {
             return self.refuse_argument(invalid_camera_argument_reason(text));
         };
         match mode {
-            CameraArgument::TwoPoint => self.refuse_argument(
-                "camera.two_point_not_implemented: two-point perspective is not modeled; this \
-                 build places one perspective frame with world +Z up"
-                    .into(),
+            CameraArgument::TwoPoint => self.dispatch_typed_argument(
+                CAMERA_SELECTOR,
+                CommandId::PositionCamera,
+                CommandPayload::PositionCameraTwoPoint,
             ),
             CameraArgument::Walk => self.refuse_argument(
-                "camera.walk_not_implemented: walk mode is not modeled; the WALK tool is still \
-                 pending"
+                "camera.walk_not_implemented: CAMERA WALK is not a second walk mode; use the WALK \
+                 and LOOKAROUND tools"
                     .into(),
             ),
         }

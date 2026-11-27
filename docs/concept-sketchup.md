@@ -76,7 +76,7 @@
   （一点捕获或 typed 数值），只改透视相机、记 `ZOOM PREVIOUS`，平面/退化输入按名拒绝。
   **放置相机**（2026-11-27，ADR-0073）：`CAMERA` 从 pending 变成真实的两点工具——先点眼睛、
   再点目标，设一个透视相机（eye/target/世界 +Z up、沿用当前 FOV），只改视图并记 `ZOOM PREVIOUS`；
-  `CAMERA TWO-POINT` / `CAMERA WALK` 按名拒绝，两点透视与漫游仍未建模。
+  `CAMERA TWO-POINT` 把当前透视相机放平（眼高、world +Z up、保留镜头），竖线保持竖直；`CAMERA WALK` 仍按名拒绝（WALK/LOOKAROUND 是独立工具）。
   **分割**（2026-11-27，ADR-0072）：`SPLITSOLID` 以第一个选中体为目标、其余为切割体，先并集
   切割体，再把目标分成外部（`−`）与内部（`∩`）两块同时插入，切割体保留；无交集/一侧为空按名拒绝，
   其余校验同 Trim。
@@ -179,7 +179,7 @@
 | Zoom Out | `ZOOMOUT` | full | |
 | Zoom Extents | `FIT` | full | |
 | Previous | `VIEWBACK` | full | |
-| Position Camera | `CAMERA` | partial | 真实两点放置：先点眼睛、再点目标 → `CAMERA` 设一个透视相机（eye/target/世界 +Z up、沿用当前 FOV），保存 2D 相机并进入 3D（只改视图，无文档写入/撤销，记 `ZOOM PREVIOUS`）；`CAMERA TWO-POINT` / `CAMERA WALK` 按 `camera.two_point_not_implemented` / `camera.walk_not_implemented` 具名拒绝；无两点透视、无 walk/look-around、无相机高度锁定 |
+| Position Camera | `CAMERA` | partial | 真实两点放置：先点眼睛、再点目标 → `CAMERA` 设一个透视相机（eye/target/世界 +Z up、沿用当前 FOV），保存 2D 相机并进入 3D（只改视图，无文档写入/撤销，记 `ZOOM PREVIOUS`）。`CAMERA TWO-POINT` 把当前透视相机**放平**（target z = eye z、world +Z up、保留镜头），竖直边保持竖直；已水平时报 `camera.two_point_unchanged`。**未建模**：lens-shift 倾斜两点透视（相机俯仰时仍保持竖线）、相机高度锁定/拖动；`CAMERA WALK` 仍按名拒绝（WALK/LOOKAROUND 是独立工具） |
 | Walk | `WALK` | partial | 真实视图导航：裸 `WALK` 一点捕获（走到该地面点，眼睛 z 不变）或 `WALK <distance>` 沿水平视向前进（负值后退），target 随 eye 平移（视向/距离不变），记 `ZOOM PREVIOUS`，只改视图、Viewer 合法；平面/正交视图 `walk.requires_perspective`、零步 `walk.no_distance`、垂直视向 `walk.degenerate_view`；不含碰撞/上下楼/连续按键漫游 |
 | Look Around | `LOOKAROUND` | partial | 真实视图导航：裸 `LOOKAROUND` 一点捕获（固定 eye 看向该点）或 `LOOKAROUND <yaw> <pitch>`（度，绕世界 +Z 偏航、绕相机右轴俯仰，保持视距），记 `ZOOM PREVIOUS`，只改视图、Viewer 合法；平面视图 `lookaround.requires_perspective`、看向眼点 `lookaround.no_direction`、垂直极点 `lookaround.pole`；不含自由拖动/连续环视 |
 

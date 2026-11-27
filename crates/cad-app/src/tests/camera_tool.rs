@@ -397,3 +397,109 @@ fn walk_and_look_around_are_legal_in_viewer_mode() {
     )
     .expect("a view-only turn is Viewer-legal");
 }
+
+fn two_point(app: &mut Application, session: &mut SessionState) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(
+            CommandId::PositionCamera,
+            CommandPayload::PositionCameraTwoPoint,
+        ),
+    )
+}
+
+#[test]
+fn two_point_levels_a_pitched_perspective_camera_without_writing_the_document() {
+    let (mut app, mut session) = application_with_document();
+    perspective(&mut app, &mut session);
+    let before = revision(&app);
+    let eye = app.workspace.viewports[&ViewportId(1)].camera.eye;
+    let outcome = two_point(&mut app, &mut session).expect("two-point");
+    let viewport = &app.workspace.viewports[&ViewportId(1)];
+    assert_eq!(viewport.camera.eye, eye, "the eye does not move");
+    assert_eq!(viewport.camera.target.z, eye.z, "the eye is level");
+    assert_eq!(
+        viewport.camera.up,
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0
+        },
+        "world +Z is up, so verticals stay vertical"
+    );
+    assert!(
+        !viewport.camera.projection.is_orthographic(),
+        "still perspective"
+    );
+    assert_eq!(viewport.view_mode.kind(), ProjectionKind::ThreeD);
+    assert_eq!(viewport.zoom_history_len(), 2, "ZOOM PREVIOUS covers it");
+    assert_eq!(revision(&app), before, "a camera mode writes no document");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "camera.two_point")
+        .expect("the mode is named");
+    assert!(
+        diagnostic.message.contains("lens is"),
+        "{}",
+        diagnostic.message
+    );
+}
+
+#[test]
+fn two_point_refuses_an_orthographic_view_and_a_vertical_look() {
+    let (mut app, mut session) = application_with_document();
+    let error = two_point(&mut app, &mut session).expect_err("orthographic");
+    assert!(
+        matches!(error, CadError::InvalidInput(ref text) if text.contains("camera.two_point_requires_perspective")),
+        "{error:?}"
+    );
+
+    place(
+        &mut app,
+        &mut session,
+        point(0.0, 0.0),
+        Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 10.0,
+        },
+    )
+    .expect("a vertical look is a valid perspective camera");
+    let error = two_point(&mut app, &mut session).expect_err("vertical");
+    assert!(
+        matches!(error, CadError::InvalidInput(ref text) if text.contains("camera.two_point_degenerate")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn two_point_on_an_already_level_camera_is_a_reported_no_op() {
+    let (mut app, mut session) = application_with_document();
+    place(
+        &mut app,
+        &mut session,
+        Point3 {
+            x: 10.0,
+            y: -20.0,
+            z: 5.0,
+        },
+        Point3 {
+            x: 1.0,
+            y: 2.0,
+            z: 5.0,
+        },
+    )
+    .expect("a level perspective camera");
+    let depth = app.workspace.viewports[&ViewportId(1)].zoom_history_len();
+    let outcome = two_point(&mut app, &mut session).expect("no-op");
+    assert_eq!(
+        app.workspace.viewports[&ViewportId(1)].zoom_history_len(),
+        depth,
+        "no extra ZOOM PREVIOUS"
+    );
+    assert!(outcome
+        .diagnostics
+        .iter()
+        .any(|row| row.code == "camera.two_point_unchanged"));
+}

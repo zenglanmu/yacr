@@ -612,7 +612,7 @@ fn unknown_view(name: &str) -> CadError {
     ))
 }
 
-fn view_outcome(code: &str, message: String) -> CommandOutcome {
+pub(crate) fn view_outcome(code: &str, message: String) -> CommandOutcome {
     CommandOutcome {
         objects: Vec::new(),
         changes: None,
@@ -646,13 +646,19 @@ impl Application {
     /// rather than silently placed here.
     pub(crate) fn position_camera(
         &mut self,
-        _session: &mut SessionState,
+        session: &mut SessionState,
         command: &Command,
     ) -> CadResult<CommandOutcome> {
-        let CommandPayload::PositionCamera { eye, target } = command.payload else {
-            return Err(CadError::InvalidInput(
-                "camera.payload: CAMERA needs the captured eye and target points".into(),
-            ));
+        let (eye, target) = match command.payload {
+            CommandPayload::PositionCamera { eye, target } => (eye, target),
+            CommandPayload::PositionCameraTwoPoint => {
+                return self.two_point_camera(session, command);
+            }
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "camera.payload: CAMERA needs the captured eye and target points".into(),
+                ));
+            }
         };
         if !crate::camera::is_finite_point(eye) || !crate::camera::is_finite_point(target) {
             return Err(CadError::InvalidInput(
@@ -753,7 +759,7 @@ fn up_for(forward: Point3) -> Point3 {
     }
 }
 
-fn camera_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
+pub(crate) fn camera_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
 }
 
