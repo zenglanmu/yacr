@@ -274,6 +274,66 @@ fn body_wireframe_off_keeps_the_mesh_with_stored_edges() {
 }
 
 #[test]
+fn body_edges_off_keeps_the_fill_without_the_overlay() {
+    // SketchUp's Edges style off: the filled mesh remains, the stored edge
+    // overlay is dropped (and the scene must not derive one).
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: vec![vec![p(0.0, 0.0), p(1.0, 0.0)]],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            101,
+            BodyKind::Sheet,
+            BodyExact::Exact(Box::new(square_brep(false))),
+            display,
+        ),
+        &context().with_body_edges(false),
+    );
+    assert_eq!(rep.fragments.len(), 1);
+    match &rep.fragments[0].primitive {
+        DisplayPrimitive::MeshWithoutEdgeOverlay(mesh) => {
+            assert_eq!(mesh.triangles.len(), 2);
+        }
+        _ => panic!("EDGES OFF keeps MeshWithoutEdgeOverlay"),
+    }
+}
+
+#[test]
+fn body_edges_off_hides_a_wire_only_body() {
+    let display = BodyDisplay {
+        mesh: Mesh::default(),
+        edges: vec![vec![p(0.0, 0.0), p(1.0, 0.0)]],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            102,
+            BodyKind::Wire,
+            BodyExact::Unavailable {
+                reason: "wire".into(),
+            },
+            display,
+        ),
+        &context().with_body_edges(false),
+    );
+    assert!(
+        rep.fragments.is_empty(),
+        "a wire body has no fill and no edges"
+    );
+    assert_eq!(
+        rep.completeness,
+        Completeness::Complete,
+        "this is a style result"
+    );
+}
+
+#[test]
 fn body_wireframe_leaves_a_wire_body_as_its_line_segments() {
     // A wire body (no mesh) already draws as `LineSegments`; the visual style
     // must not change that or invent a mesh.

@@ -1,14 +1,14 @@
-//! Extended batch session-toggle contracts: `QTEXT`, `FILL`, `TFRAMES`,
+//! Extended batch session-toggle contracts: `QTEXT`, `FILL`, `TFRAMES`, `EDGES`,
 //! `REGENAUTO`, `ISODRAFT`.
 //!
 //! Each is a payload-free session flag: it flips in place, emits one
 //! `*.toggled` diagnostic, never writes the drawing, never bumps the revision and
 //! never records an undo step.
 //!
-//! Three of them are **consumed** by the display build (`FILL`, `QTEXT`,
-//! `TFRAMES`): their report names what the derived display now does. The other
-//! two (`REGENAUTO`, `ISODRAFT`) have no consumer in this build and still say
-//! their effect is NOT IMPLEMENTED.
+//! Four are **consumed** by the display build (`FILL`, `QTEXT`, `TFRAMES`,
+//! `EDGES`): their report names what the derived display now does. The other two
+//! (`REGENAUTO`, `ISODRAFT`) have no consumer in this build and still say their
+//! effect is NOT IMPLEMENTED.
 //!
 //! The display half itself is pinned by `render_scene::display_mode_tests` (the
 //! rebuilt batches) and `cad_host::tests::display_modes` (the session token
@@ -30,6 +30,7 @@ fn flag(session: &SessionState, ext: ExtendedCommandId) -> bool {
         ExtendedCommandId::QText => session.drafting_extras.qtext(),
         ExtendedCommandId::Fill => session.drafting_extras.fill(),
         ExtendedCommandId::TFrames => session.drafting_extras.tframes(),
+        ExtendedCommandId::Edges => session.drafting_extras.body_edges(),
         ExtendedCommandId::RegenAuto => session.drafting_extras.regenauto(),
         ExtendedCommandId::IsoDraft => session.drafting_extras.isodraft(),
         other => panic!("not a drafting toggle: {other:?}"),
@@ -40,14 +41,16 @@ fn flag(session: &SessionState, ext: ExtendedCommandId) -> bool {
 fn drafting_toggles_flip_session_flags_without_drawing_writes() {
     let (mut app, mut session) = application_with_document();
     let revision = app.workspace.documents[&DocumentId(1)].drawing.revision();
-    // FILL and TFRAMES start ON (AutoCAD's defaults); the rest start OFF.
+    // FILL, TFRAMES and EDGES start ON; the rest start OFF.
     assert!(session.drafting_extras.fill());
     assert!(session.drafting_extras.tframes());
+    assert!(session.drafting_extras.body_edges());
     assert!(!session.drafting_extras.qtext());
     for ext in [
         ExtendedCommandId::QText,
         ExtendedCommandId::Fill,
         ExtendedCommandId::TFrames,
+        ExtendedCommandId::Edges,
         ExtendedCommandId::RegenAuto,
         ExtendedCommandId::IsoDraft,
     ] {
@@ -80,7 +83,10 @@ fn drafting_toggles_flip_session_flags_without_drawing_writes() {
         // display tokens must not claim "not implemented" any more.
         let consumed = matches!(
             ext,
-            ExtendedCommandId::QText | ExtendedCommandId::Fill | ExtendedCommandId::TFrames
+            ExtendedCommandId::QText
+                | ExtendedCommandId::Fill
+                | ExtendedCommandId::TFrames
+                | ExtendedCommandId::Edges
         );
         assert_eq!(
             diagnostic.message.contains("NOT IMPLEMENTED"),
@@ -187,4 +193,18 @@ fn drafting_toggle_refuses_a_payload_and_changes_nothing() {
         !app.can_undo(&DocumentId(1)),
         "a refusal records no history"
     );
+}
+
+#[test]
+fn edges_is_a_viewer_legal_session_toggle() {
+    let (mut app, mut session) = application_with_document();
+    session.switch_mode(AppMode::Viewer).expect("viewer");
+    execute(
+        &mut app,
+        &mut session,
+        CommandId::Extended(ExtendedCommandId::Edges),
+        CommandPayload::None,
+    )
+    .expect("EDGES is session-only");
+    assert!(!session.drafting_extras.body_edges());
 }

@@ -40,6 +40,7 @@ pub(crate) fn display_settings(
             session.view_extras.viewres_percent,
         )),
         body_wireframe: session.view_extras.visual_style == cad_app::VisualStyleToken::Wireframe,
+        body_edges: session.drafting_extras.body_edges(),
     }
 }
 

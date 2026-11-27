@@ -108,6 +108,21 @@ impl Application {
                     ),
                 ));
             }
+            ExtendedCommandId::Edges => {
+                let enabled = session.drafting_extras.toggle_body_edges();
+                let state = if enabled { "ON" } else { "OFF" };
+                let behaviour = if enabled {
+                    "shaded 3D bodies draw their stored/topology edge overlay again; no drawing                      data changed"
+                } else {
+                    "shaded 3D bodies keep their fill but draw no edge overlay, and a wire-only                      body (no triangles) draws nothing; standalone line entities are not hidden                      by this body-edge token, and no drawing data changed"
+                };
+                return Ok(toggle_outcome(
+                    "edges.toggled",
+                    format!(
+                        "{name}: body edge display is now {state} (session state only; the                          drawing was not written): {behaviour}"
+                    ),
+                ));
+            }
             ExtendedCommandId::RegenAuto => (
                 "regenauto.toggled",
                 session.drafting_extras.toggle_regenauto(),

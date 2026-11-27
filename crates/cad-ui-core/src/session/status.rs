@@ -444,6 +444,10 @@ pub struct CadStatus {
     /// the panel falls back to the documented default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guide_style: Option<CadGuideStyle>,
+    /// Whether a shaded 3D body draws its edge overlay (`EDGES`), or absent on
+    /// an older host. Session state only; the Styles tray reads it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_edges: Option<bool>,
     pub error: Option<String>,
     /// Whether the host can start a **blank** document right now: the host
     /// advertises the NEW capability and no open/import is in flight
@@ -696,6 +700,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         application_domain: None,
         visual_style: None,
         guide_style: None,
+        body_edges: None,
         error,
         // No session means no document/command capability at all.
         can_new: false,
@@ -877,6 +882,7 @@ pub(super) fn assemble_status(
         application_domain: None,
         visual_style: None,
         guide_style: None,
+        body_edges: None,
         error,
         can_new: capabilities.can_new,
         can_open,

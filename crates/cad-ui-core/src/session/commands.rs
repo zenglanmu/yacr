@@ -351,6 +351,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("QTEXT", CommandId::Extended(ExtendedCommandId::QText)),
     ("FILL", CommandId::Extended(ExtendedCommandId::Fill)),
     ("TFRAMES", CommandId::Extended(ExtendedCommandId::TFrames)),
+    ("EDGES", CommandId::Extended(ExtendedCommandId::Edges)),
     ("REGENAUTO", CommandId::Extended(ExtendedCommandId::RegenAuto)),
     ("ISODRAFT", CommandId::Extended(ExtendedCommandId::IsoDraft)),
     ("BCOUNT", CommandId::Extended(ExtendedCommandId::BlockCount)),
@@ -411,7 +412,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("PSBSCALE", CommandId::Extended(ExtendedCommandId::PsbScale)),
     ("PSTSCALE", CommandId::Extended(ExtendedCommandId::PstScale)),
     ("MVSETUP", CommandId::Extended(ExtendedCommandId::MvSetup)),
-
     // Wave 3 (2026-11-09): thirty more payload-free names. The first eight are
     // reports/session commands (two space switches reusing the existing
     // MODEL/SPACE path, four read-only table reports, two non-associative

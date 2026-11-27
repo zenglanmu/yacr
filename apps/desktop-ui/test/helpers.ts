@@ -358,11 +358,11 @@ export const HOST_NAMES = [
   // import.
   'PDMODE', 'PDSIZE',
   // The 2026-11-09 pilot batch: five session-only display tokens with no renderer
-  // effect (QTEXT/FILL/TFRAMES/REGENAUTO/ISODRAFT) and five read-only reports
+  // effect (QTEXT/FILL/TFRAMES/EDGES/REGENAUTO/ISODRAFT) and five read-only reports
   // (BCOUNT/COUNT/EDITTIME/JULIAN/XLIST). All are payload-free canonical
   // selectors, never aliases. This mirror stands in for the loaded
   // `cad_commands` vocabulary and never proves the host advertises them.
-  'QTEXT', 'FILL', 'TFRAMES', 'REGENAUTO', 'ISODRAFT',
+  'QTEXT', 'FILL', 'TFRAMES', 'EDGES', 'REGENAUTO', 'ISODRAFT',
   'BCOUNT', 'COUNT', 'EDITTIME', 'JULIAN', 'XLIST',
   // The 2026-11-09 Wave 2 batch: thirty payload-free canonical selectors — ten
   // session tokens (no renderer effect), eight read-only reports and twelve

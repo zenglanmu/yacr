@@ -205,6 +205,16 @@ function StylesBody() {
           </>
         );
       })()}
+      <button
+        type="button"
+        className="concept-panel__action"
+        aria-pressed={shell.status?.bodyEdges ?? true}
+        disabled={!shell.canCommand('EDGES')}
+        onClick={() => shell.runCommand('EDGES')}
+      >
+        {t('concept.styles.body_edges')}
+      </button>
+      <p className="concept-panel__hint">{t('concept.styles.body_edges_hint')}</p>
       <p className="concept-panel__hint">{t('concept.styles.boundary')}</p>
       <p className="concept-panel__hint">{t('concept.styles.theme')}</p>
       <ThemeToggle />

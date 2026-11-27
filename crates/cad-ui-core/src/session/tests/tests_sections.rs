@@ -67,3 +67,15 @@ fn section_plane_is_a_real_router_selector() {
     let error = session.command("SECTIONPLANE BOGUS").unwrap_err();
     assert!(error.contains("unsupported CAD command"), "{error}");
 }
+
+#[test]
+fn the_status_projects_the_body_edges_session_token() {
+    let session = fresh_session();
+    assert_eq!(session.snapshot(None, None, 0).body_edges, Some(true));
+    session.command("EDGES").expect("toggle body edges");
+    assert_eq!(session.snapshot(None, None, 0).body_edges, Some(false));
+    assert_eq!(
+        command_name(CommandId::Extended(cad_app::ExtendedCommandId::Edges)),
+        Some("EDGES")
+    );
+}

@@ -20,6 +20,8 @@ pub enum ExtendedCommandId {
     Fill,
     /// `TFRAMES`: toggle the session frame-display flag.
     TFrames,
+    /// `EDGES`: toggle a shaded body's edge overlay (session-only style).
+    Edges,
     /// `REGENAUTO`: toggle the session automatic-regeneration flag.
     RegenAuto,
     /// `ISODRAFT`: toggle the session isometric-plane drafting flag.

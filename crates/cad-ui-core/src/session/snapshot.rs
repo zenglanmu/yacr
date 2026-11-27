@@ -403,6 +403,15 @@ impl CadSession {
                 dashed: style.dashed,
             }
         });
+        // The session EDGES token: body edge overlay visibility.
+        status.body_edges = Some(
+            self.core
+                .controller
+                .borrow()
+                .session
+                .drafting_extras
+                .body_edges(),
+        );
         // The document's own UNITS settings, projected once for the readouts.
         // `None` without a document; never a UI-side default.
         status.units = self

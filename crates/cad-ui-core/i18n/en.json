@@ -3545,6 +3545,8 @@
   "concept.styles.wireframe": "Wireframe",
   "concept.styles.shaded": "Shaded",
   "concept.styles.active": "active",
+  "concept.styles.body_edges": "Body edges",
+  "concept.styles.body_edges_hint": "Off keeps a body's fill but hides its edge overlay; standalone line entities are unaffected.",
   "concept.styles.boundary": "These two tokens are the whole style model: no materials-based SketchUp styles, no edge/face toggles beyond them, and the theme below is the interface shell, not a SketchUp Style.",
   "concept.tags.hint": "Tags are the drawing's layers; the Tags palette owns the list and the writes.",
   "concept.tags.open": "Open Tags",

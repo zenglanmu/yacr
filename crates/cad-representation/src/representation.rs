@@ -314,6 +314,10 @@ pub struct RepresentationContext {
     /// there is no hidden-line removal, and no database write, revision,
     /// history entry or `ChangeSet` comes from it.
     pub body_wireframe: bool,
+    /// Whether a shaded `Body3d` draws its edge overlay (SketchUp's Edges
+    /// style). `true` is the default; `false` emits `MeshWithoutEdgeOverlay`
+    /// and hides a wire-only body's edge segments. It never changes the mesh.
+    pub body_edges: bool,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -366,6 +370,7 @@ impl RepresentationContext {
             // `false` keeps the filled-mesh + stored-edge body display, which is
             // the pre-`VSCURRENT` scene (the session default is `SHADED`).
             body_wireframe: false,
+            body_edges: true,
         }
     }
 
@@ -472,6 +477,15 @@ impl RepresentationContext {
     /// it affects `Body3d` fragments only — see [`Self::body_wireframe`].
     pub fn with_body_wireframe(mut self, enabled: bool) -> Self {
         self.body_wireframe = enabled;
+        self
+    }
+
+    /// Show or hide a shaded body's edge overlay (`EDGES`).
+    ///
+    /// `false` keeps the fill but drops stored/topology edges; a wire-only body
+    /// (no triangles) also draws nothing because edges are its only geometry.
+    pub fn with_body_edges(mut self, enabled: bool) -> Self {
+        self.body_edges = enabled;
         self
     }
 }

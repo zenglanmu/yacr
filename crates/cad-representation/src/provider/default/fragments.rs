@@ -242,6 +242,12 @@ pub(super) fn body_fragment(
     // `VSCURRENT WIREFRAME`: edges only, from the stored body edges when the
     // cache has them, otherwise from the display mesh's unique triangle edges.
     if context.body_wireframe {
+        if !context.body_edges {
+            // Wireframe with Edges off has no fill and no edges: an explicit
+            // style result, not missing geometry.
+            representation.completeness = body.display.completeness.clone();
+            return;
+        }
         let stored = body_edge_segments(&body.display.edges);
         let segments = if stored.is_empty() {
             triangle_edge_segments(&body.display.mesh)
@@ -301,7 +307,10 @@ pub(super) fn body_fragment(
         // edge set keeps today's plain `Mesh`, whose overlay is derived from the
         // triangles and whose display class stays "not a text glyph".
         let stored = body_edge_segments(&body.display.edges);
-        let primitive = if stored.is_empty() {
+        let primitive = if !context.body_edges {
+            // Edges off: keep the fill but never emit a stored or derived edge.
+            DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(body.display.mesh.clone()))
+        } else if stored.is_empty() {
             // No stored edge exists to soften: the boundary overlay is the
             // body's own (odd-use) edges, so a `Mesh` is already edge-exact.
             DisplayPrimitive::Mesh(Arc::new(body.display.mesh.clone()))
@@ -324,6 +333,10 @@ pub(super) fn body_fragment(
         return;
     }
     let segments = body_edge_segments(&body.display.edges);
+    if !context.body_edges {
+        representation.completeness = body.display.completeness.clone();
+        return;
+    }
     if !segments.is_empty() {
         representation
             .fragments

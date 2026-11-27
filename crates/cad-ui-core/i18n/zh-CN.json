@@ -3545,6 +3545,8 @@
   "concept.styles.wireframe": "线框",
   "concept.styles.shaded": "着色",
   "concept.styles.active": "当前",
+  "concept.styles.body_edges": "实体边线",
+  "concept.styles.body_edges_hint": "关闭后实体保留填充但隐藏边线覆盖层；独立的线实体不受影响。",
   "concept.styles.boundary": "样式模型只有这两个 token：没有基于材质/贴图的 SketchUp 样式，也没有更多边/面开关；下面的主题是界面外观，不是 SketchUp Style。",
   "concept.tags.hint": "标签即图形的图层；列表与写入由标签面板负责。",
   "concept.tags.open": "打开标签",

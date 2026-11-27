@@ -38,6 +38,7 @@ impl Application {
             ExtendedCommandId::QText
             | ExtendedCommandId::Fill
             | ExtendedCommandId::TFrames
+            | ExtendedCommandId::Edges
             | ExtendedCommandId::RegenAuto
             | ExtendedCommandId::IsoDraft => self.drafting_toggle(session, command, ext)?,
             ExtendedCommandId::BlockCount

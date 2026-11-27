@@ -65,6 +65,10 @@ pub struct DisplaySettings {
     /// display: a body keeps its filled mesh plus stored-edge overlay. This
     /// affects `Body3d` fragments only.
     pub body_wireframe: bool,
+    /// Draw a shaded body's edge overlay (`EDGES`; `true` is the default).
+    ///
+    /// Part of `SceneVersion`, so a flip rebuilds the base; session-only.
+    pub body_edges: bool,
 }
 
 impl Default for DisplaySettings {
@@ -87,6 +91,7 @@ impl Default for DisplaySettings {
             // deliberate divergence from AutoCAD's 2D-wireframe initial value),
             // which is the pre-`VSCURRENT` filled body display.
             body_wireframe: false,
+            body_edges: true,
         }
     }
 }
@@ -105,6 +110,7 @@ impl DisplaySettings {
             .with_attdisp(self.attdisp)
             .with_curve_segments(self.curve_segments)
             .with_body_wireframe(self.body_wireframe)
+            .with_body_edges(self.body_edges)
     }
 }
 
@@ -152,6 +158,11 @@ impl CadSceneController {
     /// `ATTDISP OFF` cannot hide plotted attribute text.
     pub fn set_attdisp(&mut self, mode: cad_representation::AttributeDisplay) -> bool {
         self.set_display_setting(|settings| settings.attdisp = mode)
+    }
+
+    /// Set the session `EDGES` token. Returns whether the flag changed.
+    pub fn set_body_edges(&mut self, enabled: bool) -> bool {
+        self.set_display_setting(|settings| settings.body_edges = enabled)
     }
 
     /// Set the session `VIEWRES` chord-segment ceiling. Returns whether the

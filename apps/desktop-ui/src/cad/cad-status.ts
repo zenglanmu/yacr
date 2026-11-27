@@ -360,6 +360,7 @@ export interface CadStatus {
   readonly applicationDomain?: string | null;
   /** The session's 3D body style token (`WIREFRAME`/`SHADED`), when reported. */
   readonly visualStyle?: string | null;
+  readonly bodyEdges?: boolean | null;
   /** Shared construction-guide style (`GUIDE STYLE`); absent without a document. */
   readonly guideStyle?: { readonly color: readonly [number, number, number]; readonly dashed: boolean } | null;
   readonly entityCount: number | null;

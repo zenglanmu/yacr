@@ -242,6 +242,12 @@ pub struct DraftingExtras {
     /// `crates/cad-app/src/app_drawing/fs_chain.rs`). Session state only — no
     /// database write, revision bump, history entry or persisted preference.
     fs_mode: bool,
+    /// `EDGES`: whether a shaded 3D body draws its edge overlay.
+    ///
+    /// Session state only; consumed by the display build
+    /// (`render_scene::DisplaySettings::body_edges`). `false` keeps fills but
+    /// hides stored/topology edges and wire-only bodies.
+    body_edges: bool,
     /// `TFRAMES`: whether the frames this build models are drawn.
     ///
     /// AutoCAD's `TFRAMES` toggles the frames of images, wipeouts and external
@@ -316,6 +322,7 @@ impl Default for DraftingExtras {
             fill: true,
             fs_mode: false,
             tframes: true,
+            body_edges: true,
             regenauto: false,
             isodraft: false,
             dragmode: true,
@@ -484,6 +491,15 @@ impl DraftingExtras {
 
     pub fn set_fill(&mut self, value: bool) {
         self.fill = value;
+    }
+
+    pub fn body_edges(&self) -> bool {
+        self.body_edges
+    }
+
+    pub fn toggle_body_edges(&mut self) -> bool {
+        self.body_edges = !self.body_edges;
+        self.body_edges
     }
 
     pub fn set_tframes(&mut self, value: bool) {
