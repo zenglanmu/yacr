@@ -199,3 +199,19 @@ test('reorder plans use the sibling as reference and skip groups', () => {
   assert.equal(reorderPlan(rows, outlinerRowKey(rows[1]), 'up'), null);
   assert.equal(reorderPlan(rows, outlinerRowKey(rows[2]), 'down'), null);
 });
+
+test('group members can be reordered among their own siblings', () => {
+  const rows = parseOutlinerAnswer({ rows: [
+    { kind: 'group', id: 1, label: 'Walls', depth: 0, selectable: true, selectIds: [10, 11] },
+    { kind: 'entity', id: 10, label: 'a', depth: 1, parentGroup: 'Walls', selectable: true, selectIds: [10] },
+    { kind: 'entity', id: 11, label: 'b', depth: 1, parentGroup: 'Walls', selectable: true, selectIds: [11] },
+    { kind: 'entity', id: 12, label: 'c', depth: 1, parentGroup: 'Roof', selectable: true, selectIds: [12] },
+  ] }).rows;
+  assert.deepEqual(
+    reorderPlan(rows, outlinerRowKey(rows[2]), 'up'),
+    { ids: [10, 11], command: 'DRAWORDER BELOW' },
+  );
+  assert.equal(reorderPlan(rows, outlinerRowKey(rows[1]), 'up'), null);
+  assert.equal(reorderPlan(rows, outlinerRowKey(rows[2]), 'down'), null);
+  assert.equal(reorderPlan(rows, outlinerRowKey(rows[0]), 'down'), null);
+});

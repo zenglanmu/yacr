@@ -624,7 +624,8 @@ export function OutlinerBody() {
                     {t('concept.outliner.remove_from_group')}
                   </button>
                 ) : null}
-                {row.depth === 0 && row.kind !== 'group' && row.selectable ? (
+                {(row.depth === 0 && row.kind !== 'group' && row.selectable)
+                  || (row.depth === 1 && row.kind === 'entity' && row.parentGroup !== null) ? (
                   <>
                     <button
                       type="button"

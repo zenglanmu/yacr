@@ -109,11 +109,14 @@ impl HostCore {
         };
         for group in database.groups() {
             grouped.extend(group.members.iter().copied());
-            let members: Vec<&cad_db::DbEntity> = group
+            let mut members: Vec<&cad_db::DbEntity> = group
                 .members
                 .iter()
                 .filter_map(|id| database.entity(*id))
                 .collect();
+            // Group membership keeps capture order in the table, but the tree
+            // shows the members' current paint order so DRAWORDER is visible.
+            members.sort_by_key(|entity| (entity.draw_order, entity.id.0));
             let group_hidden =
                 !members.is_empty() && members.iter().all(|entity| is_hidden(entity.id));
             push(OutlinerRow {

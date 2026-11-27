@@ -194,9 +194,18 @@ export function reorderPlan(
   key: string,
   direction: 'up' | 'down',
 ): ReorderPlan | null {
-  const targets = rows.filter(row =>
-    row.depth === 0 && row.kind !== 'group' && row.selectable
-    && row.selectIds.length === 1);
+  const target = rows.find(row => outlinerRowKey(row) === key);
+  if (!target) return null;
+  const topLevel = target.depth === 0 && target.kind !== 'group';
+  const groupMember = target.depth === 1 && target.kind === 'entity'
+    && target.parentGroup !== null;
+  if (!topLevel && !groupMember) return null;
+  const targets = rows.filter(row => {
+    if (!row.selectable || row.selectIds.length !== 1) return false;
+    if (topLevel) return row.depth === 0 && row.kind !== 'group';
+    return row.depth === 1 && row.kind === 'entity'
+      && row.parentGroup === target.parentGroup;
+  });
   const index = targets.findIndex(row => outlinerRowKey(row) === key);
   if (index < 0) return null;
   const row = targets[index];

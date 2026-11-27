@@ -216,3 +216,35 @@ fn top_level_rows_follow_draw_order_after_draworder() {
         "the moved row follows the drawing's new draw order: b={pb}, a={pa}"
     );
 }
+
+#[test]
+fn group_members_follow_draw_order_after_draworder() {
+    let core = core();
+    let (c, d) = add_two_lines(&core);
+    group(&core, &[c, d], "walls");
+    let document = core.controller.borrow().document_id;
+    core.controller.borrow_mut().session.selection.replace([
+        cad_app::selection::model_ref(document, d),
+        cad_app::selection::model_ref(document, c),
+    ]);
+    run_controller_command(
+        &core,
+        CommandId::DrawOrder,
+        CommandPayload::Draw2(Box::new(Draw2Payload::DrawOrder(DrawOrderMode::Above))),
+    );
+    let tree = core.outliner_tree();
+    let position = |id: cad_domain::EntityId| {
+        tree.rows
+            .iter()
+            .position(|row| {
+                row.kind == "entity"
+                    && row.parent_group.as_deref() == Some("walls")
+                    && row.id == id.0 as u64
+            })
+            .expect("the group member row")
+    };
+    assert!(
+        position(d) < position(c),
+        "group members follow the drawing's new draw order"
+    );
+}
