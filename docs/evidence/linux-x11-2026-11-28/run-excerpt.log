@@ -1,0 +1,7 @@
+[probe] display backend policy=X11 resolved=X11 source=from environment
+[probe] surfaceMode=dom-canvas (wasm CAD session in the WebView owns the pixels; no native CAD surface)
+[probe] startup drawing: /home/zenglanmu/sources/rust/yacr/fixtures/dwg/synthetic-four-lines.dwg
+yacr: unsupported-runtime: webgl2
+yacr 无法在此会话中创建 CAD 画布（WebGL2）
+X11/XWayland 上的 CAD 图像由 WebView 内的 wasm 会话经 WebGL2 绘制。本会话无法提供可用的 WebGL2 上下文，因此 yacr 拒绝启动，而不是显示一块空白画布。请检查显卡驱动与 WebKitGTK 的 GL 支持；也可以改用原生 Wayland（GDK_BACKEND=wayland）。
+[probe] canvas runtime failed step=ui-module-load detail=Error: script /canvas/bootstrap.js failed: error event [origin=tauri://localhost href=tauri://localhost fetch=200 text/html]

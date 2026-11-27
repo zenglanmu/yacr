@@ -1,0 +1,2 @@
+backend	case	verdict	exit_code	screenshot	captured_utc	notes
+x11	production	UNSUPPORTED_RUNTIME	6	missing	-	marker='yacr: unsupported-runtime: webgl2' (expected exit 6); dom-canvas WebGL2 carrier cannot draw; refused before any capture; no carrier frame exists
