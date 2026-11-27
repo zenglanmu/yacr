@@ -3655,6 +3655,8 @@
   "concept.outliner.hidden": "已隐藏",
   "concept.outliner.hide": "隐藏",
   "concept.outliner.hide_named": "隐藏 {name}",
+  "concept.outliner.show": "显示",
+  "concept.outliner.show_named": "显示 {name}",
   "concept.outliner.show_all": "显示全部隐藏对象",
   "concept.outliner.hint": "分组、组件与模型几何。点名称可选中，箭头展开或折叠子项。",
   "concept.outliner.empty": "本文档没有任何对象",

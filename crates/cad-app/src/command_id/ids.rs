@@ -634,6 +634,8 @@ pub enum CommandId {
     HideObjects,
     IsolateObjects,
     UnisolateObjects,
+    /// `SHOWOBJECTS`: remove the current selection from the session's hidden set. Session-only (no document write/undo), so Viewer-legal.
+    ShowObjects,
     /// `PURGE` / `-PURGE`: remove unused named objects through the database's sanctioned delete APIs — layers (`DELETELAYER`, not undoable by design),
     /// block definitions (with their members), text styles and linetypes (one batch / one undo step). Each in-use row is a named per-object refusal that
     /// removes nothing. Work-only.

@@ -323,6 +323,18 @@ export function OutlinerBody() {
       setNonce(value => value + 1);
     });
   };
+  const show = (row: OutlinerRow) => {
+    if (!row.selectable || !row.hidden) return;
+    setSelectionError('');
+    void selectBimEntities(invoke, row.selectIds).then(result => {
+      if (result.kind === 'error') {
+        setSelectionError(result.reason);
+        return;
+      }
+      shell.runCommand('SHOWOBJECTS');
+      setNonce(value => value + 1);
+    });
+  };
   const beginRename = (row: OutlinerRow) => {
     setSelectionError('');
     setRenameValue(row.label);
@@ -419,6 +431,17 @@ export function OutlinerBody() {
                 )}
                 {row.hidden ? (
                   <span className="concept-outliner__hidden">{t('concept.outliner.hidden')}</span>
+                ) : null}
+                {row.hidden && row.selectable ? (
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={!shell.canCommand('SHOWOBJECTS')}
+                    title={t('concept.outliner.show_named', { name: row.label })}
+                    onClick={() => show(row)}
+                  >
+                    {t('concept.outliner.show')}
+                  </button>
                 ) : null}
                 {row.selectable && !row.hidden ? (
                   <button

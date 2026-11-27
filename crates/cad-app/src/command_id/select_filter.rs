@@ -150,4 +150,5 @@ pub const SELECT_FILTER_SELECTORS: &[(&str, CommandId)] = &[
     ("HIDEOBJECTS", CommandId::HideObjects),
     ("ISOLATEOBJECTS", CommandId::IsolateObjects),
     ("UNISOLATEOBJECTS", CommandId::UnisolateObjects),
+    ("SHOWOBJECTS", CommandId::ShowObjects),
 ];

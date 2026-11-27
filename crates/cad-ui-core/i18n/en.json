@@ -3655,6 +3655,8 @@
   "concept.outliner.hidden": "hidden",
   "concept.outliner.hide": "Hide",
   "concept.outliner.hide_named": "Hide {name}",
+  "concept.outliner.show": "Show",
+  "concept.outliner.show_named": "Show {name}",
   "concept.outliner.show_all": "Show all hidden",
   "concept.outliner.hint": "Groups, components and model geometry. Click a name to select it; the arrow expands or collapses its children.",
   "concept.outliner.empty": "This document has no objects",

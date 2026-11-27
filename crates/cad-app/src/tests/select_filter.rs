@@ -17,9 +17,9 @@ use cad_domain::{
 
 /// The fixture ids, in insertion order.
 const LINE_RED: EntityId = EntityId(10);
-const LINE_PLAIN: EntityId = EntityId(11);
-const CIRCLE: EntityId = EntityId(12);
-const TEXT: EntityId = EntityId(13);
+pub(super) const LINE_PLAIN: EntityId = EntityId(11);
+pub(super) const CIRCLE: EntityId = EntityId(12);
+pub(super) const TEXT: EntityId = EntityId(13);
 const MTEXT: EntityId = EntityId(14);
 const LEADER: EntityId = EntityId(15);
 
@@ -83,7 +83,7 @@ fn leader_style() -> MLeaderStyleValues {
 /// Two lines (one red, one ByLayer), a circle, a TEXT, an MTEXT and a
 /// text-bearing MULTILEADER. Layers `0` and `WALLS` come from the shared
 /// fixture.
-fn filter_app() -> (Application, SessionState) {
+pub(super) fn filter_app() -> (Application, SessionState) {
     let (mut app, session) = application_with_document();
     let mut b = DrawingDatabaseBuilder::new(DatabaseId(1));
     for (id, name) in [(LayerId(0), "0"), (LayerId(3), "WALLS")] {
@@ -194,7 +194,7 @@ fn filter_app() -> (Application, SessionState) {
     (app, session)
 }
 
-fn model_ref(entity: EntityId) -> SelectionRef {
+pub(super) fn model_ref(entity: EntityId) -> SelectionRef {
     SelectionRef {
         document: DocumentId(1),
         entity,
@@ -211,7 +211,7 @@ fn filter(property: &str, value: &str, mode: SelectionMode) -> CommandPayload {
     }
 }
 
-fn run(
+pub(super) fn run(
     app: &mut Application,
     session: &mut SessionState,
     id: CommandId,
@@ -226,11 +226,11 @@ fn ids(session: &SessionState) -> Vec<EntityId> {
     ids
 }
 
-fn revision(app: &Application) -> Revision {
+pub(super) fn revision(app: &Application) -> Revision {
     app.workspace.documents[&DocumentId(1)].drawing.revision()
 }
 
-fn undo_depth(app: &Application) -> usize {
+pub(super) fn undo_depth(app: &Application) -> usize {
     app.history
         .get(&DocumentId(1))
         .map(|history| history.undo_depth())

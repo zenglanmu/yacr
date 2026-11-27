@@ -93,6 +93,7 @@ pub(crate) fn batch(id: CommandId) -> bool {
             | CommandId::HideObjects
             | CommandId::IsolateObjects
             | CommandId::UnisolateObjects
+            | CommandId::ShowObjects
     )
 }
 
@@ -118,6 +119,7 @@ impl Application {
             CommandId::HideObjects => self.hide_objects(session, command),
             CommandId::IsolateObjects => self.isolate_objects(session, command),
             CommandId::UnisolateObjects => self.unisolate_objects(session, command),
+            CommandId::ShowObjects => self.show_objects(session, command),
             CommandId::FindReport => self.find_report(session, command),
             CommandId::FindReplace => self.find_replace(session, command),
             other => Err(CadError::Invariant(format!(
@@ -399,6 +401,41 @@ impl Application {
         ))
     }
 
+    /// `SHOWOBJECTS`: reveal the current selection (session-only).
+    ///
+    /// Removes every selected ref from `hidden_entities`; objects that were not
+    /// hidden are ignored. No document write, revision or history entry, so it is
+    /// Viewer-legal like the other session visibility commands.
+    fn show_objects(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command)?;
+        let refs = session.selection.refs().to_vec();
+        if refs.is_empty() {
+            return Err(CadError::InvalidInput(
+                "showobjects.selection_required: select the hidden object(s) to reveal".into(),
+            ));
+        }
+        let mut shown = 0_usize;
+        for reference in refs {
+            if session.hidden_entities.remove(&reference) {
+                shown += 1;
+            }
+        }
+        if shown == 0 {
+            return Ok(selection_outcome(
+                "showobjects.unchanged".into(),
+                "SHOWOBJECTS: the selection is not hidden; nothing changed".into(),
+            ));
+        }
+        Ok(selection_outcome(
+            "showobjects.shown".into(),
+            format!("SHOWOBJECTS: revealed {shown} hidden object(s)"),
+        ))
+    }
+
     /// `UNISOLATEOBJECTS`: clear the session hidden set.
     pub(crate) fn unisolate_objects(
         &self,
@@ -576,6 +613,7 @@ fn command_name(id: CommandId) -> &'static str {
         CommandId::HideObjects => "HIDEOBJECTS",
         CommandId::IsolateObjects => "ISOLATEOBJECTS",
         CommandId::UnisolateObjects => "UNISOLATEOBJECTS",
+        CommandId::ShowObjects => "SHOWOBJECTS",
         _ => "select filter",
     }
 }

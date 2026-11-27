@@ -12,7 +12,6 @@ use super::text_batch::{
 };
 use super::text_commands::{TCASE_SELECTOR, TORIENT_SELECTOR};
 use cad_app::{CommandId, ExtendedCommandId, MeasurementToolKind};
-
 /// The canonical command vocabulary: every [`CommandId`] variant with the stable
 /// uppercase selector a frontend uses to name it.
 ///
@@ -63,6 +62,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("HIDEOBJECTS", CommandId::HideObjects),
     ("ISOLATEOBJECTS", CommandId::IsolateObjects),
     ("UNISOLATEOBJECTS", CommandId::UnisolateObjects),
+    ("SHOWOBJECTS", CommandId::ShowObjects),
     ("MEASURE", CommandId::Measure),
     // `AREA OBJECT` is our **selection-based** exact area of one closed object (AutoCAD's `AREA` → `Object` pick prompt, read from the selection instead). The bare `AREA` selector stays the interactive point measurement below, so the two are distinct names, not aliases.
     ("AREA OBJECT", CommandId::AreaObject),
