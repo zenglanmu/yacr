@@ -99,3 +99,14 @@ test('a group name with a quote or line break cannot be addressed', () => {
     assert.equal(groupRenameCommand(value, 'walls'), null, String(value));
   }
 });
+
+test('the host hidden flag is preserved, never inferred', () => {
+  const answer = parseOutlinerAnswer({
+    rows: [
+      { kind: 'entity', id: 1, label: 'a', hidden: true, selectIds: [1] },
+      { kind: 'entity', id: 2, label: 'b', selectIds: [2] },
+    ],
+  });
+  assert.equal(answer.rows[0].hidden, true);
+  assert.equal(answer.rows[1].hidden, false);
+});

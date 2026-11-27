@@ -152,3 +152,36 @@ fn the_tree_is_bounded_and_reports_its_real_total() {
     assert_eq!(tree.total, tree.rows.len());
     assert!(tree.rows.len() <= crate::OUTLINER_MAX_ROWS);
 }
+
+#[test]
+fn a_session_hidden_entity_is_marked_hidden_in_the_tree() {
+    let core = core();
+    let (document, entity) = {
+        let controller = core.controller.borrow();
+        let drawing = controller.drawing().expect("demo document");
+        let entity = drawing.model_space().first().expect("a model entity").id;
+        (controller.document_id, entity)
+    };
+    let reference = cad_app::selection::model_ref(document, entity);
+    core.controller
+        .borrow_mut()
+        .session
+        .hidden_entities
+        .insert(reference);
+    let tree = core.outliner_tree();
+    let row = tree
+        .rows
+        .iter()
+        .find(|row| row.kind == "entity" && row.id == entity.0 as u64)
+        .expect("the entity row");
+    assert!(row.hidden, "HIDEOBJECTS must be visible in the Outliner");
+
+    core.controller.borrow_mut().session.hidden_entities.clear();
+    let tree = core.outliner_tree();
+    let row = tree
+        .rows
+        .iter()
+        .find(|row| row.kind == "entity" && row.id == entity.0 as u64)
+        .expect("the entity row");
+    assert!(!row.hidden);
+}

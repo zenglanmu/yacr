@@ -31,6 +31,8 @@ pub struct OutlinerRowWire {
     pub label: String,
     /// Nesting depth (top-level rows are `0`).
     pub depth: u32,
+    /// Whether the row is temporarily hidden in this session.
+    pub hidden: bool,
     /// Whether the row has children in this answer or beyond the page.
     pub has_children: bool,
     /// Whether a click can select this row.
@@ -66,6 +68,7 @@ impl OutlinerResponse {
                     id: row.id,
                     label: row.label,
                     depth: row.depth,
+                    hidden: row.hidden,
                     has_children: row.has_children,
                     selectable: row.selectable,
                     select_ids: row.select_ids,

@@ -1,4 +1,4 @@
-// Match Photo, Overlays and Materials tray bodies, split out of
+// Match Photo, Overlays, Materials and Outliner tray bodies, split out of
 // `DomainTray.tsx` for the file-size gate. All are host-read-backed; none of
 // the reads writes anything (painting still goes through `PAINT`).
 
@@ -7,7 +7,10 @@ import { useI18n, useShell } from '../../context.ts';
 import { invoke } from '../../host/invoke.ts';
 import { readMatchPhoto, readOverlays } from '../concept/panels.ts';
 import { BUILTIN_MATERIALS, paintCommand, readMaterials } from '../concept/materials.ts';
+import { groupRenameCommand, outlinerRowKey, readOutliner, visibleOutlinerRows } from '../concept/outliner.ts';
+import type { OutlinerAnswer, OutlinerRow } from '../concept/outliner.ts';
 import type { MaterialsAnswer } from '../concept/materials.ts';
+import { selectBimEntities } from '../../bim/selection.ts';
 import type { MatchPhotoAnswer, OverlaysAnswer } from '../concept/panels.ts';
 
 /**
@@ -239,4 +242,234 @@ export function MaterialsBody() {
     </>
   );
 }
+
+
+/**
+ * The Outliner panel.
+ *
+ * The host's tree is a flat pre-order list (`cad_outliner`); the panel only
+ * applies the user's collapse state and renders the indentation. Clicking a
+ * selectable row sends its `selectIds` through the one selection wire
+ * (`cad_select_entities`); a component member row is a readable leaf and says
+ * why it cannot be selected. No local "selected" state: the host's
+ * `cad_status.selection` is the authority.
+ */
+export function OutlinerBody() {
+  const { t } = useI18n();
+  const shell = useShell();
+  const documentLabel = shell.status?.documentLabel ?? null;
+  const entityCount = shell.status?.entityCount ?? null;
+  const commandCount = shell.status?.commandLog?.length ?? 0;
+  const [nonce, setNonce] = useState(0);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [selectionError, setSelectionError] = useState('');
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [state, setState] = useState<{
+    phase: 'ready' | 'loading' | 'error';
+    answer: OutlinerAnswer | null;
+    reason: string;
+  }>({ phase: 'ready', answer: null, reason: '' });
+  useEffect(() => {
+    if (documentLabel === null) {
+      setState({ phase: 'ready', answer: null, reason: '' });
+      return undefined;
+    }
+    let live = true;
+    setState(previous => ({ phase: 'loading', answer: previous.answer, reason: '' }));
+    readOutliner(invoke)
+      .then(answer => {
+        if (live) setState({ phase: 'ready', answer, reason: '' });
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        const reason = error instanceof Error ? error.message : String(error);
+        setState(previous => ({ phase: 'error', answer: previous.answer, reason }));
+      });
+    return () => { live = false; };
+  }, [documentLabel, entityCount, commandCount, nonce]);
+
+  if (documentLabel === null) {
+    return <p className="concept-panel__hint">{t('concept.outliner.no_document')}</p>;
+  }
+  const rows = state.answer?.rows ?? [];
+  const visible = visibleOutlinerRows(rows, collapsed);
+  const toggle = (row: OutlinerRow) => {
+    const key = outlinerRowKey(row);
+    setCollapsed(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const select = (row: OutlinerRow) => {
+    if (!row.selectable) return;
+    setSelectionError('');
+    void selectBimEntities(invoke, row.selectIds).then(result => {
+      if (result.kind === 'error') setSelectionError(result.reason);
+      else setNonce(value => value + 1);
+    });
+  };
+  const hide = (row: OutlinerRow) => {
+    if (!row.selectable || row.hidden) return;
+    setSelectionError('');
+    void selectBimEntities(invoke, row.selectIds).then(result => {
+      if (result.kind === 'error') {
+        setSelectionError(result.reason);
+        return;
+      }
+      shell.runCommand('HIDEOBJECTS');
+      setNonce(value => value + 1);
+    });
+  };
+  const beginRename = (row: OutlinerRow) => {
+    setSelectionError('');
+    setRenameValue(row.label);
+    setRenaming(outlinerRowKey(row));
+  };
+  const commitRename = (row: OutlinerRow) => {
+    const command = groupRenameCommand(row.label, renameValue);
+    if (command === null) return;
+    shell.runCommand(command);
+    setRenaming(null);
+  };
+  return (
+    <>
+      <p className="concept-panel__hint">{t('concept.outliner.hint')}</p>
+      {state.phase === 'error' ? (
+        <p className="concept-panel__hint" role="alert">
+          {t('concept.outliner.error', { reason: state.reason })}
+        </p>
+      ) : null}
+      {selectionError !== '' ? (
+        <p className="concept-panel__hint" role="alert">
+          {t('concept.outliner.selection_failed', { reason: selectionError })}
+        </p>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="concept-panel__hint">
+          {state.phase === 'loading' ? t('concept.outliner.loading') : t('concept.outliner.empty')}
+        </p>
+      ) : (
+        <ul className="concept-outliner">
+          {visible.map(row => {
+            const key = outlinerRowKey(row);
+            const isCollapsed = collapsed.has(key);
+            return (
+              <li key={key} style={{ paddingInlineStart: `${row.depth * 14}px` }}>
+                {row.hasChildren ? (
+                  <button
+                    type="button"
+                    className="concept-outliner__toggle"
+                    aria-label={t(isCollapsed ? 'concept.outliner.expand' : 'concept.outliner.collapse')}
+                    onClick={() => toggle(row)}
+                  >
+                    {isCollapsed ? '\u25B8' : '\u25BE'}
+                  </button>
+                ) : (
+                  <span className="concept-outliner__toggle" aria-hidden="true" />
+                )}
+                {renaming === key ? (
+                  <>
+                    <input
+                      type="text"
+                      className="concept-scenes__name"
+                      value={renameValue}
+                      aria-label={t('concept.outliner.rename')}
+                      onChange={event => setRenameValue(event.currentTarget.value)}
+                      onKeyDown={event => {
+                        if (event.key === 'Enter') commitRename(row);
+                        if (event.key === 'Escape') setRenaming(null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="concept-panel__action"
+                      disabled={groupRenameCommand(row.label, renameValue) === null
+                        || !shell.canCommand('GROUPEDIT')}
+                      onClick={() => commitRename(row)}
+                    >
+                      {t('concept.outliner.rename_save')}
+                    </button>
+                    <button
+                      type="button"
+                      className="concept-panel__action"
+                      onClick={() => setRenaming(null)}
+                    >
+                      {t('concept.outliner.rename_cancel')}
+                    </button>
+                  </>
+                ) : row.selectable ? (
+                  <button
+                    type="button"
+                    className="concept-rows__label concept-outliner__name"
+                    title={t('concept.outliner.select', { name: row.label })}
+                    onClick={() => select(row)}
+                  >
+                    {row.label}
+                  </button>
+                ) : (
+                  <span
+                    className="concept-outliner__name concept-outliner__member"
+                    title={t('concept.outliner.not_selectable')}
+                  >
+                    {row.label}
+                  </span>
+                )}
+                {row.hidden ? (
+                  <span className="concept-outliner__hidden">{t('concept.outliner.hidden')}</span>
+                ) : null}
+                {row.selectable && !row.hidden ? (
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={!shell.canCommand('HIDEOBJECTS')}
+                    title={t('concept.outliner.hide_named', { name: row.label })}
+                    onClick={() => hide(row)}
+                  >
+                    {t('concept.outliner.hide')}
+                  </button>
+                ) : null}
+                {renaming !== key && row.kind === 'group'
+                  && groupRenameCommand(row.label, row.label) !== null ? (
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={!shell.canCommand('GROUPEDIT')}
+                    onClick={() => beginRename(row)}
+                  >
+                    {t('concept.outliner.rename')}
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {state.answer !== null && state.answer.truncated ? (
+        <p className="concept-panel__hint">
+          {t('concept.outliner.truncated', {
+            shown: rows.length,
+            total: state.answer.total,
+          })}
+        </p>
+      ) : null}
+      {rows.some(row => row.hidden) ? (
+        <button
+          type="button"
+          className="concept-panel__action"
+          disabled={!shell.canCommand('UNISOLATEOBJECTS')}
+          onClick={() => {
+            shell.runCommand('UNISOLATEOBJECTS');
+            setNonce(value => value + 1);
+          }}
+        >
+          {t('concept.outliner.show_all')}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 

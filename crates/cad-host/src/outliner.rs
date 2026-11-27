@@ -48,6 +48,11 @@ pub struct OutlinerRow {
     pub depth: u32,
     /// Whether this row has children in the same answer or beyond the page.
     pub has_children: bool,
+    /// Whether the row is temporarily hidden in this session (`HIDEOBJECTS`).
+    ///
+    /// A group row is hidden when every member is hidden; a block member is
+    /// never session-hidden on its own (its INSERT carries the hidden ref).
+    pub hidden: bool,
     /// Whether a click can select this row through `cad_select_entities`.
     pub selectable: bool,
     /// The entity ids one click sends (empty when not selectable).
@@ -90,6 +95,16 @@ impl HostCore {
             }
         };
         let mut grouped: HashSet<EntityId> = HashSet::new();
+        let document = controller.document_id;
+        let hidden = &controller.session.hidden_entities;
+        let is_hidden = |id: EntityId| {
+            hidden.contains(&cad_domain::SelectionRef {
+                document,
+                entity: id,
+                instance: cad_domain::InstancePath::default(),
+                sub_element: None,
+            })
+        };
         for group in database.groups() {
             grouped.extend(group.members.iter().copied());
             let members: Vec<&cad_db::DbEntity> = group
@@ -97,11 +112,14 @@ impl HostCore {
                 .iter()
                 .filter_map(|id| database.entity(*id))
                 .collect();
+            let group_hidden =
+                !members.is_empty() && members.iter().all(|entity| is_hidden(entity.id));
             push(OutlinerRow {
                 kind: "group",
                 id: group.seq.0,
                 label: group.name.clone(),
                 depth: 0,
+                hidden: group_hidden,
                 has_children: !members.is_empty(),
                 selectable: !members.is_empty(),
                 select_ids: members.iter().map(|entity| entity.id.0 as u64).collect(),
@@ -112,6 +130,7 @@ impl HostCore {
                     id: entity.id.0 as u64,
                     label: entity_label(&entity.object.type_key, entity.id),
                     depth: 1,
+                    hidden: is_hidden(entity.id),
                     has_children: false,
                     selectable: true,
                     select_ids: vec![entity.id.0 as u64],
@@ -146,6 +165,7 @@ impl HostCore {
                             .map(|name| format!("{name} #{}", entity.id.0))
                             .unwrap_or_else(|| entity_label(&entity.object.type_key, entity.id)),
                         depth: 0,
+                        hidden: is_hidden(entity.id),
                         has_children: !members.is_empty(),
                         selectable: true,
                         select_ids: vec![entity.id.0 as u64],
@@ -156,6 +176,7 @@ impl HostCore {
                             id: member.id.0 as u64,
                             label: entity_label(&member.object.type_key, member.id),
                             depth: 1,
+                            hidden: false,
                             has_children: false,
                             // A block member has no model-space address through
                             // `cad_select_entities`; the row is a readable leaf.
@@ -169,6 +190,7 @@ impl HostCore {
                     id: entity.id.0 as u64,
                     label: entity_label(&entity.object.type_key, entity.id),
                     depth: 0,
+                    hidden: is_hidden(entity.id),
                     has_children: false,
                     selectable: true,
                     select_ids: vec![entity.id.0 as u64],

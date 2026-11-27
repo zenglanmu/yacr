@@ -34,6 +34,8 @@ export interface OutlinerRow {
   readonly label: string;
   /** Nesting depth (top level is `0`). */
   readonly depth: number;
+  /** Whether the row is temporarily hidden in this session. */
+  readonly hidden: boolean;
   /** Whether the row has children. */
   readonly hasChildren: boolean;
   /** Whether a click can select this row. */
@@ -106,6 +108,7 @@ export function parseOutlinerAnswer(answer: unknown): OutlinerAnswer {
       id,
       label,
       depth,
+      hidden: fields.hidden === true,
       hasChildren: fields.hasChildren === true,
       selectable: fields.selectable === true && selectIds.length > 0,
       selectIds,
