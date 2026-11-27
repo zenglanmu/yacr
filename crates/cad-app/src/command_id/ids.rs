@@ -35,6 +35,9 @@ pub enum CommandId {
     /// `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`: the document's
     /// distance fog (`tables/display.json`).
     Fog,
+    /// `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: one extruded glyph
+    /// mesh (`AcDbSubDMesh`) from the host's outline font engine.
+    Text3d,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

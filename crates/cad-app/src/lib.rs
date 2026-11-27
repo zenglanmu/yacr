@@ -78,6 +78,7 @@ mod app_follow_me;
 mod app_materials;
 mod app_press_pull;
 mod app_scene;
+mod app_text3d;
 // The extended-command wrapper: dispatch, session toggles and reports.
 mod app_dispatch;
 mod app_drafting;
@@ -542,11 +543,11 @@ pub use command_payload::{
     SelectionProperty, SelectionScope, SelectionToolPayload, SetByLayerSettings, ShapeCommand,
     SolidPrimitiveCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp,
     SysVarAssignment, SysVarDialogCommand, SysVarMonitorAction, TCircleCommand, TCircleSizeMode,
-    TCountCommand, TableCreateCommand, TableEditCommand, TextAlignAxis, TextAlignCommand,
-    TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode,
-    TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand,
-    TwoLineCommand, Txt2MTextOptions, UnitsCommand, UtilityPayload, VPointInput, ViewCommand,
-    WipeoutPayload, XClipCommand, XPlodeSettings,
+    TCountCommand, TableCreateCommand, TableEditCommand, Text3dInput, TextAlignAxis,
+    TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape,
+    TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand,
+    ToleranceCommand, TwoLineCommand, Txt2MTextOptions, UnitsCommand, UtilityPayload, VPointInput,
+    ViewCommand, WipeoutPayload, XClipCommand, XPlodeSettings,
 };
 
 pub use app_audit::AuditRequest;

@@ -340,7 +340,7 @@ fn outline_text_entity(
 /// end** (`FontEngine`'s outline builder pushes it in `close`). Storing that point
 /// again on a `closed` polyline would add a zero-length segment, so it is dropped
 /// here; an open SHX stroke has distinct ends and stays open.
-fn contour_points(contour: &[Point3]) -> Option<(Vec<Point3>, bool)> {
+pub(crate) fn contour_points(contour: &[Point3]) -> Option<(Vec<Point3>, bool)> {
     const EPS: f64 = 1e-9;
     if contour.len() < 2 {
         return None;

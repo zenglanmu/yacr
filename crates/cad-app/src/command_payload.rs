@@ -1,6 +1,5 @@
-//! The typed input payloads of the command funnel.
-//! Split out for the code-size limit; every item is re-exported.
-//! A payload is the **input** of one [`crate::CommandId`]; it carries no behaviour.
+//! The typed input payloads of the command funnel (split out for the code-size
+//! limit); each is the input of one [`crate::CommandId`] and carries no behaviour.
 
 use cad_domain::{
     LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
@@ -842,6 +841,7 @@ pub enum CommandPayload {
     Scene(SceneCommand),
     /// The typed `SHADOWS`/`FOG` line (display settings).
     Display(DisplayCommand),
+    Text3d(Text3dInput),
     /// `SOFTENEDGES <angle>` in degrees (bare uses the default).
     SoftenEdges(f64),
     ViewGo(String),

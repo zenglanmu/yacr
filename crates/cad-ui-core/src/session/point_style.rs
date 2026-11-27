@@ -237,6 +237,9 @@ impl CadSession {
             // `PROTRACTOR GUIDE`: the guide mode is a named refusal (the bare
             // selector is a measurement selector and never reaches this arm).
             super::commands::PROTRACTOR_SELECTOR => self.protractor_argument(argument, text),
+            // `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: the extruded
+            // glyph mesh command.
+            super::commands::TEXT3D_SELECTOR => self.text3d_argument(argument, text),
             // `SHADOWS`/`FOG`: the per-document display record.
             super::commands::SHADOWS_SELECTOR => self.shadows_argument(argument, text),
             super::commands::FOG_SELECTOR => self.fog_argument(argument, text),

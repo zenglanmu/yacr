@@ -185,7 +185,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // marks DIVIDE creates, `scale` for the length change LENGTHEN makes (the icon
   // set has no divide/lengthen mark; SCALE keeps its own row below).
   //
-  // BREAK accepts one LINE/ARC/CIRCLE/straight-polyline; nothing wider.
+  // BREAK accepts one LINE/ARC/CIRCLE/polyline.
   { id: 'BREAK', labelKey: 'draw.kind.break', icon: 'trim', group: 'modify' },
   { id: 'DIVIDE', labelKey: 'draw.kind.divide', icon: 'point', group: 'modify' },
   { id: 'LENGTHEN', labelKey: 'draw.kind.lengthen', icon: 'scale', group: 'modify' },
@@ -656,12 +656,11 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VIEWFORWARD', labelKey: 'draw.kind.viewforward', icon: 'view', group: 'view' },
   { id: 'VPOINT', labelKey: 'draw.kind.vpoint', icon: 'axes', group: 'view' },
 
-  // The 2026-11-07 extras batch. `-PAN`, `REGEN3` and `-LINETYPE` are aliases
-  // of PAN/REGEN/LINETYPE (no rows of their own). SKETCH is the Freehand tool:
-  // the bare selector starts its drag capture and the release commits the
-  // sampled stroke. MSTRETCH takes its input from an IPC payload, so the command
-  // line only advertises it; TRACE/MOCORO/VIEWRES/VSCURRENT/LINETYPE are typed.
+  // The 2026-11-07 extras batch. `-PAN`/`REGEN3`/`-LINETYPE` alias PAN/REGEN/
+  // LINETYPE. SKETCH is the Freehand drag tool; MSTRETCH takes its input from an
+  // IPC payload; the rest have typed grammars in `gating.ts`.
   { id: 'SKETCH', labelKey: 'draw.kind.sketch', icon: 'spline', group: 'draw' },
+  { id: 'TEXT3D', labelKey: 'draw.kind.text3d', icon: 'pushPull', group: 'draw' },
   { id: 'TRACE', labelKey: 'draw.kind.trace', icon: 'line', group: 'draw' },
   { id: 'MOCORO', labelKey: 'draw.kind.mocoro', icon: 'copy', group: 'modify' },
   { id: 'MSTRETCH', labelKey: 'draw.kind.mstretch', icon: 'stretch', group: 'modify' },

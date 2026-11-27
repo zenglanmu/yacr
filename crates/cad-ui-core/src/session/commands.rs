@@ -1,4 +1,4 @@
-//! The canonical command vocabulary and name normalization.
+//! Canonical command vocabulary and name normalization.
 use cad_app::{CommandId, ExtendedCommandId, MeasurementToolKind};
 
 use super::annot_arguments::{
@@ -763,7 +763,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),
     ("PYRAMID", CommandId::Extended(ExtendedCommandId::Pyramid)), ("POLYSOLID", CommandId::Extended(ExtendedCommandId::PolySolid)),
-    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("SHADOWS", CommandId::Shadows), ("FOG", CommandId::Fog), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
+    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("SHADOWS", CommandId::Shadows), ("FOG", CommandId::Fog), ("TEXT3D", CommandId::Text3d), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
     ("SWEEP", CommandId::Extended(ExtendedCommandId::Sweep)), ("LOFT", CommandId::Extended(ExtendedCommandId::Loft)),
     ("INTERSECT", CommandId::Extended(ExtendedCommandId::Intersect)), ("UNION", CommandId::Extended(ExtendedCommandId::Union)),
     ("SUBTRACT", CommandId::Extended(ExtendedCommandId::Subtract)), ("SLICE", CommandId::Extended(ExtendedCommandId::Slice)),
@@ -810,9 +810,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
 
 ];
 
-/// Interaction-only selectors: canonical uppercase names that carry **no**
-/// [`CommandId`] of their own and dispatch a typed
-/// [`cad_app::interaction::InteractionRequest`] directly.
+/// Interaction-only selectors (no [`CommandId`]) dispatching a typed request.
 ///
 /// The four measurement selectors name the four real
 /// [`MeasurementToolKind`] algorithms, so a measurement button starts *its own*
@@ -900,9 +898,11 @@ pub use scene_grammar::*;
 mod display_grammar;
 mod protractor_grammar;
 mod soften_grammar;
+mod text3d_grammar;
 pub use display_grammar::*;
 pub use protractor_grammar::*;
 pub use soften_grammar::*;
+pub use text3d_grammar::*;
 // The typed `PYRAMID` regular n-gon base line (the one typed 3D primitive).
 mod solid_arguments;
 pub use solid_arguments::*;

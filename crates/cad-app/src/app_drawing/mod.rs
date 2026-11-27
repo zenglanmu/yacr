@@ -179,6 +179,7 @@ mod stretch_vertices;
 mod stretch_window;
 // The 2026-11-07 2D text batch (JUSTIFYTEXT/TJUST/TSCALE/TEXTALIGN/TCOUNT/
 // TCIRCLE/TEXTMASK/TEXTUNMASK); one estimate and one write discipline.
+pub(crate) mod text3d;
 pub(crate) mod text_batch;
 mod text_edit;
 // TABLE / -TABLE creation and TABLEDIT cell-text editing (2026-11-10).

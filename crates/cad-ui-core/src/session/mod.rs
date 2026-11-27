@@ -1,9 +1,8 @@
 //! Owner-thread CAD session (`CadSession`) shared by the UI hosts.
 //!
-//! `CadSession` is a thin, deliberately `!Send` owner-thread wrapper over
-//! [`cad_host::HostCore`] and its [`RenderSessionHandle`]: it adds no CAD authority
-//! and no parser; the database stays in `cad-db` behind the host
-//! command/engine boundary, and the frontend sees only the derived state.
+//! A thin, deliberately `!Send` owner-thread wrapper over [`cad_host::HostCore`]
+//! and its [`RenderSessionHandle`]: no CAD authority, no parser; the database
+//! stays in `cad-db` behind the host boundary, the frontend sees derived state.
 //!
 //! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`, so
 //! it is created, driven and dropped on the host main thread only (`!Send`/`!Sync`).
@@ -84,6 +83,7 @@ mod status;
 mod status_view;
 mod sysvdlg_dialog;
 mod table_export;
+mod text3d_arguments;
 mod text_batch;
 mod text_commands;
 mod util_arguments;
@@ -639,8 +639,8 @@ impl CadSession {
     /// Change one property on **every** entity of the current selection,
     /// reached from the dedicated `cad_set_selected_property` IPC.
     ///
-    /// No entity id travels: the host resolves its own current selection and
-    /// applies the write at apply time. `key` is one of
+    /// No entity id travels: the host applies the write to its own selection.
+    /// `key` is one of
     /// [`cad_app::property_value::SUPPORTED_KEYS`] (`layer`, `color`,
     /// `linetype`, `lineweight`, `transparency`) with `value` in its grammar,
     /// both validated by the host write path; a refusal returns the real error

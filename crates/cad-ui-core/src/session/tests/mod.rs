@@ -42,6 +42,7 @@ mod tests_soften;
 mod tests_stretch;
 mod tests_sysvdlg;
 mod tests_text;
+mod tests_text3d;
 mod tests_tools;
 mod tests_tools_routing;
 mod tests_typed_dimensions;

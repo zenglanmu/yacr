@@ -435,6 +435,7 @@ impl Application {
             CommandId::View => self.view_command(session, &command),
             CommandId::Scene => self.scene_command(session, &command),
             CommandId::Shadows | CommandId::Fog => self.display_command(session, &command),
+            CommandId::Text3d => self.text3d(session, &command),
             CommandId::SoftenEdges => self.soften_selected_edges(session, &command),
             CommandId::ViewGo => self.view_go(session, &command),
             CommandId::ViewBack => self.view_back(session, &command),

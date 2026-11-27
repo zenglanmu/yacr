@@ -3455,6 +3455,8 @@
   "concept.tool.protractor.hint": "先点角的顶点，再各点一个射线上的点。这里只测量角度；参考线（guide）创建未建模。",
   "concept.tool.axes": "坐标轴",
   "concept.tool.text3d": "三维文字",
+  "draw.kind.text3d": "三维文字（TEXT3D）",
+  "concept.tool.text3d.hint": "TEXT3D <x> <y> <z> <height> <extrusion> <font|-> <text>：生成一个挤出字形网格；字体写 - 表示默认字体。旋转、对齐与对话框未建模。",
   "concept.tool.section_plane": "剖切平面",
   "concept.tool.position_camera": "放置相机",
   "concept.tool.walk": "漫游",

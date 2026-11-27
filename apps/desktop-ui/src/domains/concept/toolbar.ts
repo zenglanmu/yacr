@@ -75,7 +75,7 @@ const CONSTRUCTION = group('concept.construction', 'concept.toolbar.construction
   { id: 'PROTRACTOR', labelKey: 'concept.tool.protractor', icon: 'angle', command: 'PROTRACTOR', hintKey: 'concept.tool.protractor.hint' },
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
   { id: 'UCS', labelKey: 'concept.tool.axes', icon: 'axes', command: 'UCS' },
-  pending('TEXT3D', 'concept.tool.text3d', 'mtext'),
+  { id: 'TEXT3D', labelKey: 'concept.tool.text3d', icon: 'pushPull', command: 'TEXT3D', hintKey: 'concept.tool.text3d.hint' },
 ]);
 
 const CAMERA = group('concept.camera', 'concept.toolbar.camera', [

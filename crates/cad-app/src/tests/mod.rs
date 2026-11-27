@@ -310,6 +310,7 @@ mod soften;
 // SSX Express-Tool selection-filter contracts.
 mod ssx;
 mod style_tables;
+mod text3d;
 mod text_commands;
 mod txt2mtxt;
 mod utility;

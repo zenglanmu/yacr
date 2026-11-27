@@ -3455,6 +3455,8 @@
   "concept.tool.protractor.hint": "Click the angle vertex, then one point on each ray. This measures the angle; guide-line creation is not modeled.",
   "concept.tool.axes": "Axes",
   "concept.tool.text3d": "3D text",
+  "draw.kind.text3d": "3D Text (TEXT3D)",
+  "concept.tool.text3d.hint": "TEXT3D <x> <y> <z> <height> <extrusion> <font|-> <text>: one extruded glyph mesh; a font token of - uses the default face. Rotation, alignment and a dialog are not modeled.",
   "concept.tool.section_plane": "Section plane",
   "concept.tool.position_camera": "Position camera",
   "concept.tool.walk": "Walk",

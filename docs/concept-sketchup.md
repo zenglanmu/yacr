@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 11 | 15.9% |
-| `pending` | 4 | 5.8% |
+| `partial` | 12 | 17.4% |
+| `pending` | 3 | 4.3% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 65/69 = 94.2% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 66/69 = 95.7% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -51,6 +51,9 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **三维文字**（2026-11-27，ADR-0069）：`TEXT3D` 用宿主 outline 引擎的**已填充字形网格**挤出
+  一个 `AcDbSubDMesh`（盖沿用显示三角形、侧墙来自边界边），一次事务/一步撤销；SHX 描边与超预算
+  按名拒绝，无字体对话框/旋转/对齐。
   **自由手绘**（2026-11-27，ADR-0067）：`SKETCH` 从裸选择器变成真实拖拽工具——host 按 2 px
   步长采样（≤1024 点）、松开经 `screen_to_world` 投影后喂给捕获并以既有 `SKETCH` 命令写入一条
   开放 `LWPOLYLINE`（一次事务/一步撤销）；点击未拖动是 `sketch.too_few_points`，3D 视图是
@@ -129,7 +132,7 @@
 | Protractor | `PROTRACTOR` | partial | 真实三点角度量具（`BeginMeasurement(Protractor)`：先点顶点、再各点一条射线，结果按 `Angle3Points` 记录并格式化角度；只读、不写文档）+ 托盘/工具栏/菜单真实工具；**guide 线创建未建模**：`PROTRACTOR GUIDE` 以 `protractor.guide_not_implemented` 具名拒绝 |
 | Text | `TEXT` | full | 二维文字 |
 | Axes | `UCS` | full | 会话坐标轴 |
-| 3D Text | `TEXT3D` | pending | 没有三维文字网格 |
+| 3D Text | `TEXT3D` | partial | `TEXT3D <x> <y> <z> <height> <extrusion> <font\|-> <text>`：用宿主已安装的 outline 字体引擎取**已填充字形面**（与显示/TXTEXP 同一份），挤成 `AcDbSubDMesh`（上下盖 + 每个边界边侧墙），一次事务/一步撤销；SHX 描边字体按 `text3d.not_solid` 拒绝、超出预算按 `text3d.budget` 拒绝；无字体选择对话框、旋转/对齐/斜体/描边、截面或圆角 |
 
 ### Camera（9；full 6 / pending 3）
 
@@ -206,7 +209,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
-- 其余 `pending` 工具（3D Text/Outer Shell/Trim/Split/Camera/Walk/Look Around）与
+- 其余 `pending` 工具（Outer Shell/Trim/Split/Camera/Walk/Look Around）与
   Match Photo/Overlays 托盘面板保持显式 pending；Shadows/Fog/Outliner/Scenes/Soften Edges/
   Protractor 都已是有真实命令与面板的 `partial`（`cad_display`/`cad_outliner`/`cad_scenes`）。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

@@ -171,6 +171,8 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     SCENE_SELECTOR,
     // `SOFTENEDGES [<angle>]`: SketchUp soften edges.
     SOFTENEDGES_SELECTOR,
+    // `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: one extruded glyph mesh.
+    TEXT3D_SELECTOR,
     // `PROTRACTOR GUIDE`: the reference tool's guide mode, refused by name (no
     // guide model); the bare selector stays a measurement selector.
     PROTRACTOR_SELECTOR,

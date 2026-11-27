@@ -72,6 +72,7 @@ mod settings_units;
 mod snap_marker;
 mod solid_boolean;
 mod stretch_lasso;
+mod text3d;
 mod text_tool;
 mod texture_round_trip;
 mod tolerance;

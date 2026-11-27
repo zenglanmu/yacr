@@ -16,6 +16,7 @@ mod param;
 mod qdim_payload;
 mod scene_payload;
 mod table;
+mod text3d_payload;
 mod view_payload;
 mod xclip;
 
@@ -29,6 +30,7 @@ pub use param::*;
 pub use qdim_payload::*;
 pub use scene_payload::*;
 pub use table::*;
+pub use text3d_payload::*;
 pub use view_payload::*;
 pub use xclip::*;
 

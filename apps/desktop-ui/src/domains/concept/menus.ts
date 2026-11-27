@@ -129,7 +129,7 @@ const TOOLS_MEASURE = panel('concept.tools.measure', 'concept.section.measure', 
 
 const TOOLS_ANNOTATE = panel('concept.tools.annotate', 'concept.section.annotate', [
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
-  pending('TEXT3D', 'concept.tool.text3d', 'mtext'),
+  { id: 'TEXT3D', labelKey: 'concept.tool.text3d', icon: 'pushPull', command: 'TEXT3D', hintKey: 'concept.tool.text3d.hint' },
   { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', command: 'DIMLINEAR' },
 ]);
 

@@ -57,7 +57,6 @@
   "pendingTools": [
     "ARC2POINT",
     "ARC3POINT",
-    "TEXT3D",
     "OUTERSHELL",
     "TRIMSOLID",
     "SPLITSOLID",

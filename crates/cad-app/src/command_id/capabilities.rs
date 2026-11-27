@@ -151,6 +151,8 @@ impl CommandId {
                 // SHADOWS/FOG write the per-document display record.
                 | Self::Shadows
                 | Self::Fog
+                // TEXT3D writes one extruded glyph mesh row.
+                | Self::Text3d
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock

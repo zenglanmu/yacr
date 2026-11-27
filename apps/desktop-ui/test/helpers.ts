@@ -344,7 +344,7 @@ export const HOST_NAMES = [
   // The 2026-11-07 extras batch: SKETCH/TRACE/MOCORO/MSTRETCH/VIEWRES/VSCURRENT/
   // LINETYPE are canonical selectors; `REGEN3`/`-PAN`/`-LINETYPE` are the host
   // alias spellings (the `-` forms normalize onto PAN/LINETYPE).
-  'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
+  'SKETCH', 'TEXT3D', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
   'REGEN3', '-PAN', '-LINETYPE',
   // WIPEOUT is the open-ended polygon mask; POLYGON CIRCUMSCRIBED is the
   // tangent-ring variant of POLYGON (its own multi-word selector).
