@@ -1,25 +1,30 @@
 //! `tables/materials.json` row codec (document materials, minor 19).
 //!
-//! One row per material, in sequence order, with the entities painted by that
-//! material inline:
+//! One row per material, in sequence order, with the entities and mesh faces
+//! painted by that material inline:
 //!
 //! ```json
-//! [{"seq":1,"name":"Red","color":[178,34,34],"entities":[2,3]},
+//! [{"seq":1,"name":"Red","color":[178,34,34],"entities":[2,3],
+//!   "faces":[{"entity":2,"face":"skp:face:0"}]},
 //!  {"seq":2,"name":"Glass","color":[170,220,240],"transparency":0.6,"entities":[4]}]
 //! ```
 //!
 //! `transparency` is omitted when zero (never written as a `0.0` placeholder);
-//! `entities` is always present, possibly empty. An entity appears in at most one
-//! row. The decoder refuses a duplicate name/sequence/entity, an out-of-range
-//! colour or transparency, an unknown key and an assignment to a material the
-//! table does not hold; the builder's `finish()` then refuses an assignment whose
-//! entity does not exist in the drawing.
+//! `entities` is always present, possibly empty; `faces` is omitted when empty
+//! and lists `(entity, Mesh.face_sources key)` pairs otherwise. An entity appears
+//! in at most one row and one face key at most once. The decoder refuses a
+//! duplicate name/sequence/entity/face key, an out-of-range colour or
+//! transparency, an unknown key and an assignment to a material the table does
+//! not hold; the builder's `finish()` then refuses an assignment whose entity
+//! does not exist in the drawing.
 //!
 //! Strict in both directions, like the group codec.
 
 use std::collections::BTreeMap;
 
-use cad_domain::material::{Material, MaterialDocument, MaterialError, MaterialSeq, MATERIAL_CAP};
+use cad_domain::material::{
+    Material, MaterialDocument, MaterialError, MaterialSeq, MATERIAL_CAP, MATERIAL_FACE_CAP,
+};
 use cad_domain::ymodel::id::{IdKind, PersistentId, PersistentIdOf};
 use cad_domain::EntityId;
 use serde_json::Value;
@@ -51,6 +56,13 @@ pub(crate) fn encode_materials(db: &DrawingDatabase) -> Result<Vec<Value>, Snaps
     for (entity, seq) in document.assignments() {
         by_material.entry(*seq).or_default().push(*entity);
     }
+    let mut faces_by_material: BTreeMap<MaterialSeq, Vec<(EntityId, String)>> = BTreeMap::new();
+    for ((entity, face), seq) in document.face_assignments() {
+        faces_by_material
+            .entry(*seq)
+            .or_default()
+            .push((*entity, face.clone()));
+    }
     let mut rows = Vec::with_capacity(document.len());
     for material in document.materials() {
         let mut entries = vec![
@@ -80,6 +92,23 @@ pub(crate) fn encode_materials(db: &DrawingDatabase) -> Result<Vec<Value>, Snaps
                     .collect(),
             ),
         ));
+        let faces = faces_by_material.remove(&material.seq).unwrap_or_default();
+        if !faces.is_empty() {
+            entries.push((
+                "faces",
+                Value::Array(
+                    faces
+                        .into_iter()
+                        .map(|(entity, face)| {
+                            object(vec![
+                                ("entity", Value::from(entity.persistent().raw())),
+                                ("face", Value::from(face)),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ));
+        }
         rows.push(object(entries));
     }
     Ok(rows)
@@ -97,10 +126,11 @@ pub(crate) fn decode_materials(tables: &TableSnapshot) -> Result<MaterialDocumen
     }
     let mut materials = Vec::with_capacity(rows.len());
     let mut assignments: BTreeMap<EntityId, MaterialSeq> = BTreeMap::new();
+    let mut face_assignments: BTreeMap<(EntityId, String), MaterialSeq> = BTreeMap::new();
     let mut names: Vec<String> = Vec::with_capacity(rows.len());
     for (index, row) in rows.iter().enumerate() {
         let context = format!("{} row {index}", table());
-        let (material, entities) = decode_row(row, context.clone())?;
+        let (material, entities, faces) = decode_row(row, context.clone())?;
         let name = material.name.to_ascii_lowercase();
         if names.contains(&name) {
             return Err(SnapshotError::invalid(format!(
@@ -117,14 +147,34 @@ pub(crate) fn decode_materials(tables: &TableSnapshot) -> Result<MaterialDocumen
                 )));
             }
         }
+        for (entity, face) in faces {
+            if face_assignments
+                .insert((entity, face.clone()), material.seq)
+                .is_some()
+            {
+                return Err(SnapshotError::invalid(format!(
+                    "{context}: face `{face}` of entity {} is painted more than once",
+                    entity.0
+                )));
+            }
+        }
         materials.push(material);
     }
-    let document = MaterialDocument::from_parts(materials, assignments);
+    if face_assignments.len() > MATERIAL_FACE_CAP {
+        return Err(invalid(format!(
+            "{}: {} face paints exceed the {MATERIAL_FACE_CAP} budget",
+            table(),
+            face_assignments.len()
+        )));
+    }
+    let document = MaterialDocument::from_parts(materials, assignments, face_assignments);
     document.validate()?;
     Ok(document)
 }
 
-fn decode_row(value: &Value, context: String) -> Result<(Material, Vec<EntityId>), SnapshotError> {
+type DecodedRow = (Material, Vec<EntityId>, Vec<(EntityId, String)>);
+
+fn decode_row(value: &Value, context: String) -> Result<DecodedRow, SnapshotError> {
     let mut reader = Reader::new(value, context.clone())?;
     let raw = reader.integer("seq")?;
     let seq = u64::try_from(raw)
@@ -170,6 +220,15 @@ fn decode_row(value: &Value, context: String) -> Result<(Material, Vec<EntityId>
         .enumerate()
         .map(|(index, value)| decode_entity(&value, format!("{context}.entities[{index}]")))
         .collect::<Result<Vec<_>, SnapshotError>>()?;
+    let faces = match reader.opt_take("faces") {
+        Some(Value::Array(rows)) => rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| decode_face(&value, format!("{context}.faces[{index}]")))
+            .collect::<Result<Vec<_>, SnapshotError>>()?,
+        Some(_) => return Err(reader.error("faces: expected an array")),
+        None => Vec::new(),
+    };
     reader.finish()?;
     let material = Material {
         seq,
@@ -178,7 +237,32 @@ fn decode_row(value: &Value, context: String) -> Result<(Material, Vec<EntityId>
         transparency,
     };
     material.validate()?;
-    Ok((material, entities))
+    Ok((material, entities, faces))
+}
+
+fn decode_face(value: &Value, context: String) -> Result<(EntityId, String), SnapshotError> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| SnapshotError::invalid(format!("{context}: expected a JSON object")))?;
+    if object.len() != 2 {
+        return Err(SnapshotError::invalid(format!(
+            "{context}: expected exactly `entity` and `face`"
+        )));
+    }
+    let entity = object
+        .get("entity")
+        .ok_or_else(|| SnapshotError::invalid(format!("{context}.entity: missing")))
+        .and_then(|value| decode_entity(value, format!("{context}.entity")))?;
+    let face = object
+        .get("face")
+        .and_then(Value::as_str)
+        .ok_or_else(|| SnapshotError::invalid(format!("{context}.face: expected a string")))?;
+    if face.trim().is_empty() || face != face.trim() {
+        return Err(SnapshotError::invalid(format!(
+            "{context}.face: a face key must be trimmed and non-empty"
+        )));
+    }
+    Ok((entity, face.to_string()))
 }
 
 fn decode_entity(value: &Value, context: String) -> Result<EntityId, SnapshotError> {
@@ -209,6 +293,15 @@ pub(crate) fn validate_materials(db: &DrawingDatabase) -> Result<(), SnapshotErr
         if !db.entities.contains_key(entity) {
             return Err(invalid(format!(
                 "{}: entity {} is painted but does not exist",
+                table(),
+                entity.0
+            )));
+        }
+    }
+    for (entity, face) in document.face_assignments().keys() {
+        if !db.entities.contains_key(entity) {
+            return Err(invalid(format!(
+                "{}: face `{face}` is painted on entity {}, which does not exist",
                 table(),
                 entity.0
             )));

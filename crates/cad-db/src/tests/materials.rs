@@ -228,3 +228,101 @@ fn ensure_does_not_silently_edit_an_existing_material() {
         MaterialSeq(2)
     );
 }
+
+#[test]
+fn a_face_paint_is_encoded_as_faces_and_reads_back() {
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder
+        .insert_layer(Layer {
+            id: LayerId(0),
+            name: "0".into(),
+            visible: true,
+        })
+        .unwrap();
+    builder
+        .insert_entity(raw_entity(
+            7,
+            SpaceId::Model,
+            SemanticGeometry::Mesh(cad_domain::Mesh {
+                vertices: vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 0.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
+                ],
+                triangles: vec![[0, 1, 2]],
+                normals: Vec::new(),
+                face_sources: vec![Some(cad_domain::SubElementId {
+                    source_key: "skp:face:0".into(),
+                    topology_revision: Revision(0),
+                })],
+                colors: Vec::new(),
+                uvs: Vec::new(),
+                texture: None,
+                pbr: None,
+            }),
+        ))
+        .unwrap();
+    let mut materials = MaterialDocument::new();
+    let red = materials.ensure("Red", [178, 34, 34], 0.0).unwrap();
+    materials
+        .assign_face(EntityId(7), "skp:face:0", red)
+        .unwrap();
+    builder.set_materials(materials).unwrap();
+    let db = builder.finish().unwrap();
+
+    let snapshot = snapshot(&db);
+    assert!(snapshot.has_face_materials());
+    let rows = snapshot
+        .tables
+        .get(TableKind::Materials)
+        .expect("the material table");
+    assert_eq!(rows[0]["faces"][0]["face"], Value::from("skp:face:0"));
+    assert_eq!(rows[0]["entities"], Value::from(Vec::<Value>::new()));
+
+    let loaded = DrawingDatabase::from_snapshot(&snapshot).unwrap();
+    let row = loaded
+        .materials()
+        .face_assignment(EntityId(7), "skp:face:0")
+        .expect("the face paint survives");
+    assert_eq!(row.name, "Red");
+    assert!(loaded
+        .materials()
+        .face_assignment(EntityId(7), "skp:face:1")
+        .is_none());
+}
+
+#[test]
+fn erasing_an_entity_drops_its_face_paints_and_a_stale_face_never_validates_a_missing_material() {
+    let mut document = MaterialDocument::new();
+    let red = document.ensure("Red", [178, 34, 34], 0.0).unwrap();
+    document.assign(EntityId(7), red).unwrap();
+    document
+        .assign_face(EntityId(7), "skp:face:0", red)
+        .unwrap();
+    document
+        .assign_face(EntityId(8), "skp:face:2", red)
+        .unwrap();
+    document.clear(EntityId(7));
+    assert!(document.assignment(EntityId(7)).is_none());
+    assert!(document
+        .face_assignment(EntityId(7), "skp:face:0")
+        .is_none());
+    assert!(document
+        .face_assignment(EntityId(8), "skp:face:2")
+        .is_some());
+    document
+        .assign_face(EntityId(8), "skp:face:3", MaterialSeq(99))
+        .expect_err("an absent material is refused");
+}

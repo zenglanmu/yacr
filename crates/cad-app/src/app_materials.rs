@@ -2,13 +2,15 @@
 //!
 //! # Shapes
 //!
-//! * `PAINT <name>` applies one material to the **current selection** (whole,
-//!   directly addressable entities; no block-instance path and no sub-element).
-//!   The name resolves in the document table first and then in the built-in
-//!   palette; painting a built-in creates the document row on first use, so a
-//!   document only ever stores the materials it actually uses. One paint is one
-//!   `tables/materials.json` write, one revision and one undo step; the first
-//!   paint that changes nothing is refused as `paint.no_change`.
+//! * `PAINT <name>` applies one material to the **current selection**: whole,
+//!   directly addressable entities and mesh faces (`SelectionRef.sub_element`
+//!   carrying a `Mesh.face_sources` key). A face selection paints only that face
+//!   and wins over the entity's own material; no block-instance path is
+//!   accepted. The name resolves in the document table first and then in the
+//!   built-in palette; painting a built-in creates the document row on first
+//!   use, so a document only ever stores the materials it actually uses. One
+//!   paint is one `tables/materials.json` write, one revision and one undo step;
+//!   the first paint that changes nothing is refused as `paint.no_change`.
 //! * `MATERIALS` is the read-only report (the command-level Materials Browser):
 //!   the document's materials with their colours and painted-entity counts, plus
 //!   the built-in palette names. It never writes.
@@ -17,17 +19,20 @@
 //!
 //! `paint.requires_material` (no name), `paint.unknown_material` (neither the
 //! document nor the palette has it), `paint.selection_required`,
-//! `paint.not_addressable` (a block member or sub-element ref),
-//! `paint.selection_changed` (the row is gone), `paint.insert_not_paintable` (an
-//! INSERT is not an expanded row, so painting it would render nothing) and
-//! `paint.no_change`. A refusal happens before the table write and records no
-//! undo step.
+//! `paint.not_addressable` (a block member), `paint.face_not_paintable` (the
+//! sub-element is not a mesh face), `paint.face_unknown` (the face key is not in
+//! the mesh's `face_sources`), `paint.mixed_targets` (a whole-mesh ref and a face
+//! ref on the same entity), `paint.selection_changed` (the row is gone),
+//! `paint.insert_not_paintable` (an INSERT is not an expanded row, so painting it
+//! would render nothing) and `paint.no_change`. A refusal happens before the
+//! table write and records no undo step.
 //!
 //! # Scope
 //!
-//! Paint is per **entity**: a mesh is one entity, so painting a mesh paints all
-//! of it; face-level assignment is not modelled yet. Materials are flat colours
-//! (no texture); the mesh texture/PBR channels importers fill are untouched.
+//! Paint is per **entity** or per **mesh face**. Materials are flat colours (no
+//! texture); the mesh texture/PBR channels importers fill are untouched. A face
+//! key that no longer exists (a mesh edit dropped the face) stays stored but is
+//! inert: the report names it rather than pretending the paint is visible.
 
 use super::*;
 use crate::app_extrude::invalid;
@@ -106,12 +111,14 @@ impl Application {
             .cloned()
             .expect("the row was just resolved or created");
 
-        let mut painted = 0_usize;
+        let mut whole = std::collections::BTreeSet::new();
+        let mut faces = std::collections::BTreeSet::new();
         for reference in &refs {
-            if !reference.instance.0.is_empty() || reference.sub_element.is_some() {
+            if !reference.instance.0.is_empty() {
                 return Err(invalid(
                     "paint.not_addressable",
-                    "PAINT reads whole top-level entities, never a block member or a sub-element",
+                    "PAINT reads whole top-level entities and their mesh faces, never a block \
+                     member",
                 ));
             }
             let entity = drawing.entity(reference.entity).ok_or_else(|| {
@@ -130,14 +137,75 @@ impl Application {
                     ),
                 ));
             }
-            if next.assign(reference.entity, seq).is_err() {
-                return Err(invalid(
-                    markers::MATERIAL_UNKNOWN,
-                    format!("material {} disappeared while painting", seq.0),
-                ));
+            match &reference.sub_element {
+                None => {
+                    if faces.contains(&reference.entity) {
+                        return Err(invalid(
+                            "paint.mixed_targets",
+                            format!(
+                                "entity {} is selected both whole and by face; paint one or the \
+                                 other",
+                                reference.entity.0
+                            ),
+                        ));
+                    }
+                    whole.insert(reference.entity);
+                    if next.assign(reference.entity, seq).is_err() {
+                        return Err(invalid(
+                            markers::MATERIAL_UNKNOWN,
+                            format!("material {} disappeared while painting", seq.0),
+                        ));
+                    }
+                }
+                Some(sub) => {
+                    if whole.contains(&reference.entity) {
+                        return Err(invalid(
+                            "paint.mixed_targets",
+                            format!(
+                                "entity {} is selected both whole and by face; paint one or the \
+                                 other",
+                                reference.entity.0
+                            ),
+                        ));
+                    }
+                    let keys = mesh_face_sources(entity).ok_or_else(|| {
+                        invalid(
+                            "paint.face_not_paintable",
+                            format!(
+                                "entity {} is not a mesh with face identities; a face paint needs \
+                                 `Mesh.face_sources`",
+                                reference.entity.0
+                            ),
+                        )
+                    })?;
+                    if !keys
+                        .iter()
+                        .flatten()
+                        .any(|key| key.source_key == sub.source_key)
+                    {
+                        return Err(invalid(
+                            "paint.face_unknown",
+                            format!(
+                                "face `{}` is not in entity {}'s current face set (a mesh edit may \
+                                 have removed it)",
+                                sub.source_key, reference.entity.0
+                            ),
+                        ));
+                    }
+                    if next
+                        .assign_face(reference.entity, &sub.source_key, seq)
+                        .is_err()
+                    {
+                        return Err(invalid(
+                            markers::MATERIAL_UNKNOWN,
+                            format!("material {} disappeared while painting", seq.0),
+                        ));
+                    }
+                    faces.insert(reference.entity);
+                }
             }
-            painted += 1;
         }
+        let painted = whole.len() + refs.iter().filter(|r| r.sub_element.is_some()).count();
         if next == before {
             return Err(invalid(
                 "paint.no_change",
@@ -202,9 +270,11 @@ impl Application {
                 object: None,
                 code: "paint.applied".into(),
                 message: format!(
-                    "PAINT: `{}` ({}) on {painted} object(s)",
+                    "PAINT: `{}` ({}) on {painted} target(s): {} object(s), {} face(s)",
                     material.name,
-                    color_hex(look.color)
+                    color_hex(look.color),
+                    whole.len(),
+                    faces.len()
                 ),
             }],
             measurement: None,
@@ -226,16 +296,22 @@ impl Application {
                 for seq in materials.assignments().values() {
                     *counts.entry(seq.0).or_insert(0) += 1;
                 }
+                let mut face_counts: std::collections::BTreeMap<u64, usize> =
+                    std::collections::BTreeMap::new();
+                for seq in materials.face_assignments().values() {
+                    *face_counts.entry(seq.0).or_insert(0) += 1;
+                }
                 materials
                     .materials()
                     .iter()
                     .take(20)
                     .map(|material| {
                         format!(
-                            "{} {} ({} painted)",
+                            "{} {} ({} painted, {} face(s))",
                             material.name,
                             color_hex(material.color),
-                            counts.get(&material.seq.0).copied().unwrap_or(0)
+                            counts.get(&material.seq.0).copied().unwrap_or(0),
+                            face_counts.get(&material.seq.0).copied().unwrap_or(0)
                         )
                     })
                     .collect::<Vec<_>>()
@@ -260,6 +336,24 @@ impl Application {
             measurement: None,
             point_report: None,
         })
+    }
+}
+
+/// The persisted face-source keys of a paintable mesh row, or `None`.
+///
+/// Only `SemanticGeometry::Mesh` and a display-only `Body3d` carry addressable
+/// faces; an exact B-Rep has no `face_sources` here and is refused by name.
+fn mesh_face_sources(entity: &cad_db::DbEntity) -> Option<&[Option<cad_domain::SubElementId>]> {
+    match &entity.geometry {
+        SemanticGeometry::Mesh(mesh) => Some(&mesh.face_sources),
+        SemanticGeometry::Body3d(body)
+            if body.kind == cad_domain::BodyKind::Unknown
+                && body.exact_brep().is_none()
+                && !body.display.mesh.triangles.is_empty() =>
+        {
+            Some(&body.display.mesh.face_sources)
+        }
+        _ => None,
     }
 }
 

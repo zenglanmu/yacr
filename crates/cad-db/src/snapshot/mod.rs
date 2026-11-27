@@ -507,6 +507,20 @@ impl DocumentSnapshot {
             .is_some_and(|rows| !rows.is_empty())
     }
 
+    /// Whether any material row lists per-face paints (minor 25).
+    ///
+    /// The writer omits an empty `faces` array, so a material document with only
+    /// whole-entity paints keeps the minor-19 tier.
+    pub fn has_face_materials(&self) -> bool {
+        self.tables.get(TableKind::Materials).is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row.get("faces")
+                    .and_then(|faces| faces.as_array())
+                    .is_some_and(|faces| !faces.is_empty())
+            })
+        })
+    }
+
     /// Whether any scene row captures the Shadows/Fog record (minor 24).
     ///
     /// A missing key is a scene written before display capture and never costs

@@ -6,6 +6,7 @@ mod default;
 mod depth;
 mod display_modes;
 mod expand;
+mod face_paint;
 mod image;
 mod registry;
 mod stroke;

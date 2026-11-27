@@ -207,7 +207,7 @@ fn an_unknown_material_name_is_refused_by_name() {
 }
 
 #[test]
-fn an_empty_selection_or_a_sub_element_ref_is_refused_by_name() {
+fn an_empty_selection_is_refused_and_a_face_on_a_line_is_not_paintable() {
     let (mut app, mut session) = app_with(vec![line(7)], None);
     let text = refusal_text(paint(&mut app, &mut session, "Red").unwrap_err());
     assert!(text.starts_with("paint.selection_required:"), "{text}");
@@ -220,7 +220,7 @@ fn an_empty_selection_or_a_sub_element_ref_is_refused_by_name() {
         ..ref_of(7)
     }]);
     let text = refusal_text(paint(&mut app, &mut session, "Red").unwrap_err());
-    assert!(text.starts_with("paint.not_addressable:"), "{text}");
+    assert!(text.starts_with("paint.face_not_paintable:"), "{text}");
 }
 
 #[test]
@@ -282,4 +282,140 @@ fn a_document_material_wins_over_a_builtin_of_the_same_name() {
     let document = materials(&app);
     let row = document.resolve("Red").expect("the document row");
     assert_eq!(row.color, [1, 2, 3], "the document row wins");
+}
+
+fn face(key: &str) -> SubElementId {
+    SubElementId {
+        source_key: key.into(),
+        topology_revision: Revision(0),
+    }
+}
+
+fn two_face_mesh(id: u128) -> DbEntity {
+    ent(
+        id,
+        SemanticGeometry::Mesh(cad_domain::Mesh {
+            vertices: vec![
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                point(0.0, 1.0),
+                point(1.0, 1.0),
+            ],
+            triangles: vec![[0, 1, 2], [1, 3, 2]],
+            normals: Vec::new(),
+            face_sources: vec![Some(face("face-a")), Some(face("face-b"))],
+            colors: Vec::new(),
+            uvs: Vec::new(),
+            texture: None,
+            pbr: None,
+        }),
+        id as i64,
+    )
+}
+
+fn select_face(session: &mut SessionState, entity: u128, key: &str) {
+    session.selection = SelectionSet::from_refs([SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(entity),
+        instance: InstancePath::default(),
+        sub_element: Some(face(key)),
+    }]);
+}
+
+#[test]
+fn painting_a_mesh_face_assigns_only_that_face() {
+    let (mut app, mut session) = app_with(vec![two_face_mesh(7)], None);
+    select_face(&mut session, 7, "face-b");
+    let before = revision(&app);
+    let outcome = paint(&mut app, &mut session, "Red").expect("paint the face");
+    assert_eq!(revision(&app), Revision(before.0 + 1));
+    let painted = materials(&app);
+    assert!(
+        painted.assignment(EntityId(7)).is_none(),
+        "the whole entity is not painted"
+    );
+    let face_material = painted
+        .face_assignment(EntityId(7), "face-b")
+        .expect("the face is painted");
+    assert_eq!(face_material.name, "Red");
+    assert!(
+        painted.face_assignment(EntityId(7), "face-a").is_none(),
+        "the sibling face is untouched"
+    );
+    let applied = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "paint.applied")
+        .expect("the success is named");
+    assert!(applied.message.contains("1 face(s)"), "{}", applied.message);
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    assert!(materials(&app).is_empty(), "undo removes the face paint");
+}
+
+#[test]
+fn painting_a_face_the_mesh_does_not_have_is_named_and_writes_nothing() {
+    let (mut app, mut session) = app_with(vec![two_face_mesh(7)], None);
+    select_face(&mut session, 7, "face-gone");
+    let before = revision(&app);
+    let text = refusal_text(paint(&mut app, &mut session, "Red").expect_err("unknown face"));
+    assert!(text.starts_with("paint.face_unknown:"), "{text}");
+    assert_eq!(revision(&app), before, "nothing was written");
+    assert!(materials(&app).is_empty());
+}
+
+#[test]
+fn a_whole_mesh_and_a_face_of_the_same_mesh_is_refused_as_ambiguous() {
+    let (mut app, mut session) = app_with(vec![two_face_mesh(7)], None);
+    session.selection = SelectionSet::from_refs([
+        SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(7),
+            instance: InstancePath::default(),
+            sub_element: None,
+        },
+        SelectionRef {
+            document: DocumentId(1),
+            entity: EntityId(7),
+            instance: InstancePath::default(),
+            sub_element: Some(face("face-b")),
+        },
+    ]);
+    let text = refusal_text(paint(&mut app, &mut session, "Red").expect_err("ambiguous selection"));
+    assert!(text.starts_with("paint.mixed_targets:"), "{text}");
+    assert!(materials(&app).is_empty());
+}
+
+#[test]
+fn painting_a_face_on_a_line_is_refused_by_name() {
+    let (mut app, mut session) = app_with(vec![line(7)], None);
+    select_face(&mut session, 7, "face-a");
+    let text = refusal_text(paint(&mut app, &mut session, "Red").expect_err("not a mesh"));
+    assert!(text.starts_with("paint.face_not_paintable:"), "{text}");
+    assert!(materials(&app).is_empty());
+}
+
+#[test]
+fn the_materials_report_counts_entity_and_face_paints() {
+    let (mut app, mut session) = app_with(vec![two_face_mesh(7), line(8)], None);
+    select(&mut app, &mut session, &[8]);
+    paint(&mut app, &mut session, "Blue").expect("entity paint");
+    select_face(&mut session, 7, "face-a");
+    paint(&mut app, &mut session, "Red").expect("face paint");
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Extended(ExtendedCommandId::Materials),
+                CommandPayload::None,
+            ),
+        )
+        .expect("report");
+    let report = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "materials.listed")
+        .expect("the report is named");
+    assert!(report.message.contains("1 face(s)"), "{}", report.message);
 }

@@ -592,47 +592,73 @@ impl ProviderRegistry {
                             ),
                         }
                     }
-                    let emit = |primitive: DisplayPrimitive, out: &mut DisplayRepresentation| {
-                        let mut source = fragment.source.clone();
-                        source.instance = path.clone();
-                        // A `Body3d` carries its own derived display cache, and
-                        // its precision and producer live on that cache
-                        // (`BodyDisplay`), not on the entity-level
-                        // `geometry_source` attribute (whose default is
-                        // `Analytic`). For this one class the provider-resolved
-                        // values therefore win: an analytic body display still
-                        // reports `Analytic`, and an approximate one is never
-                        // upgraded to it.
-                        let body_owns_precision =
-                            matches!(&entity.geometry, SemanticGeometry::Body3d(_));
-                        let (geometry_source, precision) = if body_owns_precision {
-                            (fragment.geometry_source.clone(), fragment.precision.clone())
-                        } else {
-                            (
-                                attributes.geometry_source.clone(),
-                                precision_for_source(&attributes.geometry_source),
-                            )
+                    let emit_piece =
+                        |primitive: DisplayPrimitive,
+                         color: [f32; 3],
+                         alpha: f32,
+                         color_unresolved: bool,
+                         out: &mut DisplayRepresentation| {
+                            let mut source = fragment.source.clone();
+                            source.instance = path.clone();
+                            // A `Body3d` carries its own derived display cache, and
+                            // its precision and producer live on that cache
+                            // (`BodyDisplay`), not on the entity-level
+                            // `geometry_source` attribute (whose default is
+                            // `Analytic`). For this one class the provider-resolved
+                            // values therefore win: an analytic body display still
+                            // reports `Analytic`, and an approximate one is never
+                            // upgraded to it.
+                            let body_owns_precision =
+                                matches!(&entity.geometry, SemanticGeometry::Body3d(_));
+                            let (geometry_source, precision) = if body_owns_precision {
+                                (fragment.geometry_source.clone(), fragment.precision.clone())
+                            } else {
+                                (
+                                    attributes.geometry_source.clone(),
+                                    precision_for_source(&attributes.geometry_source),
+                                )
+                            };
+                            out.fragments.push(DisplayFragment {
+                                source,
+                                geometry_source,
+                                precision,
+                                alpha,
+                                color,
+                                color_unresolved,
+                                lineweight: fragment_lineweight,
+                                lineweight_unresolved: fragment_lineweight_unresolved,
+                                linetype: own_linetype.clone(),
+                                linetype_unresolved,
+                                linetype_scale,
+                                draw_order,
+                                primitive,
+                            });
                         };
-                        out.fragments.push(DisplayFragment {
-                            source,
-                            geometry_source,
-                            precision,
-                            alpha: own_alpha,
-                            color: fragment_color,
-                            color_unresolved: fragment_color_unresolved,
-                            lineweight: fragment_lineweight,
-                            lineweight_unresolved: fragment_lineweight_unresolved,
-                            linetype: own_linetype.clone(),
-                            linetype_unresolved,
-                            linetype_scale,
-                            draw_order,
-                            primitive,
-                        });
-                    };
-                    match inherited_clip {
-                        None => emit(primitive, out),
-                        Some(region) => {
-                            emit_clipped(entity, primitive, region, &emit, out);
+                    let pieces = super::face_paint::pieces_for(
+                        entity,
+                        primitive,
+                        database.materials(),
+                        fragment_color,
+                        own_alpha,
+                        fragment_color_unresolved,
+                        out,
+                    );
+                    for piece in pieces {
+                        let emit =
+                            |primitive: DisplayPrimitive, out: &mut DisplayRepresentation| {
+                                emit_piece(
+                                    primitive,
+                                    piece.color,
+                                    piece.alpha,
+                                    piece.color_unresolved,
+                                    out,
+                                );
+                            };
+                        match inherited_clip {
+                            None => emit(piece.primitive, out),
+                            Some(region) => {
+                                emit_clipped(entity, piece.primitive, region, &emit, out);
+                            }
                         }
                     }
                 }

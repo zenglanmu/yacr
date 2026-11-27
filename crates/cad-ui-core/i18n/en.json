@@ -3608,7 +3608,7 @@
   "draw.kind.materials.hint": "Read-only report: the document materials with their painted counts, plus the built-in palette names.",
   "concept.tool.paint_bucket.hint": "Open the material report/palette; use PAINT <name> to paint the selection",
   "concept.tool.materials.hint": "Read-only material report: document materials and the built-in palette",
-  "concept.materials.hint": "Click a swatch to paint the whole selected entity (document materials above, built-in palette below); per-face materials are not modeled",
+  "concept.materials.hint": "Click a swatch to paint the selected objects or mesh faces (document materials above, built-in palette below); a face paint wins over the whole entity",
   "concept.materials.document": "Document materials",
   "concept.materials.builtin": "Built-in palette",
   "concept.materials.empty": "No document materials yet; painting a built-in swatch creates one.",

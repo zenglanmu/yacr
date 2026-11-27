@@ -7,11 +7,15 @@
 //!
 //! # Scope
 //!
-//! This first cut paints **whole entities**. A mesh face is still one entity, so
-//! painting a mesh paints all of it; face-level assignment (a `face_sources`
-//! key) is not modelled yet. Textures are not modelled either: the built-in
-//! catalogue and every document material are flat colours, and the mesh
-//! texture/PBR channels that importers fill stay untouched by this table.
+//! Paint targets a **whole entity** or, when the selection carries a
+//! `SubElementId`, one **mesh face** (`Mesh.face_sources`). A face assignment is
+//! keyed by `(entity, face source key)` and wins over the entity's assignment for
+//! that face; the renderer splits the mesh per material. A face key that no
+//! longer exists in the mesh is inert (mesh edits can drop faces); the report
+//! names that state instead of pretending the paint is visible. Textures are not
+//! modelled: the built-in catalogue and every document material are flat
+//! colours, and the mesh texture/PBR channels that importers fill stay untouched
+//! by this table.
 //!
 //! # Bounds and names
 //!
@@ -40,6 +44,12 @@ pub const MATERIAL_CAP: usize = 256;
 /// Longest accepted material name, in characters.
 pub const MAX_MATERIAL_NAME_CHARS: usize = 64;
 
+/// Longest accepted mesh face-source key, in characters.
+pub const MAX_FACE_KEY_CHARS: usize = 256;
+
+/// How many per-face paints one document retains.
+pub const MATERIAL_FACE_CAP: usize = 65_536;
+
 /// Stable refusal markers.
 pub mod markers {
     /// The name is empty, too long or contains a control character.
@@ -58,6 +68,10 @@ pub mod markers {
     pub const MATERIAL_UNKNOWN: &str = "material.unknown";
     /// An assignment names a material the table does not hold.
     pub const MATERIAL_ASSIGNMENT_MISSING: &str = "material.assignment_missing";
+    /// A face assignment names an empty/untrimmed/over-long/control key.
+    pub const MATERIAL_FACE_KEY_INVALID: &str = "material.face_key_invalid";
+    /// A new face paint would exceed [`super::MATERIAL_FACE_CAP`].
+    pub const MATERIAL_FACE_CAP_EXCEEDED: &str = "material.face_cap_exceeded";
     /// A paint write would leave the document exactly as it was.
     pub const MATERIAL_NO_CHANGE: &str = "material.no_change";
 }
@@ -171,6 +185,8 @@ impl std::error::Error for MaterialError {}
 pub struct MaterialDocument {
     materials: Vec<Material>,
     assignments: BTreeMap<EntityId, MaterialSeq>,
+    /// Per-face paints, keyed by `(entity, Mesh.face_sources source key)`.
+    face_assignments: BTreeMap<(EntityId, String), MaterialSeq>,
 }
 
 impl MaterialDocument {
@@ -186,10 +202,12 @@ impl MaterialDocument {
     pub fn from_parts(
         materials: Vec<Material>,
         assignments: BTreeMap<EntityId, MaterialSeq>,
+        face_assignments: BTreeMap<(EntityId, String), MaterialSeq>,
     ) -> Self {
         MaterialDocument {
             materials,
             assignments,
+            face_assignments,
         }
     }
 
@@ -241,6 +259,17 @@ impl MaterialDocument {
     /// Every assignment, keyed by entity (sorted).
     pub fn assignments(&self) -> &BTreeMap<EntityId, MaterialSeq> {
         &self.assignments
+    }
+
+    /// The material painted on one face of `entity`, when there is one.
+    pub fn face_assignment(&self, entity: EntityId, face: &str) -> Option<&Material> {
+        let seq = *self.face_assignments.get(&(entity, face.to_string()))?;
+        self.get(seq)
+    }
+
+    /// Every face assignment, keyed by `(entity, face source key)`.
+    pub fn face_assignments(&self) -> &BTreeMap<(EntityId, String), MaterialSeq> {
+        &self.face_assignments
     }
 
     /// Find `name` or add it (opaque/transparency as given) with the next free
@@ -299,14 +328,51 @@ impl MaterialDocument {
         Ok(())
     }
 
-    /// Remove `entity`'s assignment (an unpainted entity keeps its own colour).
+    /// Paint one mesh face with `seq` (the material must exist).
+    ///
+    /// The key is the persisted `Mesh.face_sources` source key (the same key a
+    /// pick stores in `SelectionRef.sub_element`). A trimmed, non-empty,
+    /// at-most-[`MAX_FACE_KEY_CHARS`] key without control characters is
+    /// required; the command layer verifies the key exists in the mesh.
+    pub fn assign_face(
+        &mut self,
+        entity: EntityId,
+        face: &str,
+        seq: MaterialSeq,
+    ) -> Result<(), MaterialError> {
+        if self.get(seq).is_none() {
+            return Err(MaterialError::Invalid(
+                markers::MATERIAL_UNKNOWN,
+                format!("no material has sequence {}", seq.0),
+            ));
+        }
+        validate_face_key(face)?;
+        let key = (entity, face.to_string());
+        if !self.face_assignments.contains_key(&key)
+            && self.face_assignments.len() >= MATERIAL_FACE_CAP
+        {
+            return Err(MaterialError::Invalid(
+                markers::MATERIAL_FACE_CAP_EXCEEDED,
+                format!("the document holds at most {MATERIAL_FACE_CAP} face paints"),
+            ));
+        }
+        self.face_assignments.insert(key, seq);
+        Ok(())
+    }
+
+    /// Remove `entity`'s assignment and every face assignment of that entity
+    /// (an unpainted entity keeps its own colour).
     pub fn clear(&mut self, entity: EntityId) {
         self.assignments.remove(&entity);
+        self.face_assignments
+            .retain(|(owner, _), _| *owner != entity);
     }
 
     /// Drop every assignment whose entity no longer exists in `alive`.
     pub fn retain_entities(&mut self, alive: impl Fn(EntityId) -> bool) {
         self.assignments.retain(|entity, _| alive(*entity));
+        self.face_assignments
+            .retain(|(entity, _), _| alive(*entity));
     }
 
     /// The whole document's validation.
@@ -351,8 +417,53 @@ impl MaterialDocument {
                 ));
             }
         }
+        if self.face_assignments.len() > MATERIAL_FACE_CAP {
+            return Err(MaterialError::Invalid(
+                markers::MATERIAL_FACE_CAP_EXCEEDED,
+                format!(
+                    "the table holds {} face paints, more than {MATERIAL_FACE_CAP}",
+                    self.face_assignments.len()
+                ),
+            ));
+        }
+        for ((entity, face), seq) in &self.face_assignments {
+            validate_face_key(face)?;
+            if !sequences.contains(&seq.0) {
+                return Err(MaterialError::Invalid(
+                    markers::MATERIAL_ASSIGNMENT_MISSING,
+                    format!(
+                        "face `{face}` of entity {} is painted with material {}, which the table \
+                         does not hold",
+                        entity.0, seq.0
+                    ),
+                ));
+            }
+        }
         Ok(())
     }
+}
+
+/// One validated face-source key.
+fn validate_face_key(face: &str) -> Result<(), MaterialError> {
+    if face.trim().is_empty() || face != face.trim() {
+        return Err(MaterialError::Invalid(
+            markers::MATERIAL_FACE_KEY_INVALID,
+            "a face key must be trimmed and non-empty".into(),
+        ));
+    }
+    if face.chars().count() > MAX_FACE_KEY_CHARS {
+        return Err(MaterialError::Invalid(
+            markers::MATERIAL_FACE_KEY_INVALID,
+            format!("`{face}` is longer than {MAX_FACE_KEY_CHARS} characters"),
+        ));
+    }
+    if face.chars().any(char::is_control) {
+        return Err(MaterialError::Invalid(
+            markers::MATERIAL_FACE_KEY_INVALID,
+            "a face key cannot contain a control character".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// A short, locale-neutral point the command layer can echo in a diagnostic.

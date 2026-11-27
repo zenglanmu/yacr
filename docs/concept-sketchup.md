@@ -54,9 +54,12 @@
   **场景阴影/雾快照**（2026-11-27，ADR-0080）：`SCENE SAVE` 把文档 `tables/display.json`
   记录存进场景行的 `display`（minor 24）；`SCENE RESTORE` 在记录有差异时执行一次与
   `SHADOWS`/`FOG` 相同的显示写入（一步撤销），Viewer 下有差异则在改动前拒绝。
+  **逐面材质**（2026-11-27，ADR-0081）：`PAINT <name>` 接受带 `SubElementId` 的网格面选择，
+  材质表行新增 `faces` 快照（minor 25）；渲染器按面材质把网格拆成多个 fragment（fragment 自带
+  颜色/alpha），未涂面保留实体颜色；陈旧 face key 只报告不重映射。
   **材质面板文档行**（2026-11-27，ADR-0079）：`cad_materials` 把 `tables/materials.json` 的
   名称/颜色/透明度投影给托盘，文档材质不再只存在于 `MATERIALS` 文本报告；每个色块走既有
-  `PAINT <name>`（仍是整实体涂刷，逐面材质/编辑器/贴图未建模）。
+  `PAINT <name>`（整实体或选中的网格面；逐面材质编辑器/贴图/材质库仍未建模）。
   **场景可见标签**（2026-11-27，ADR-0078）：`SCENE SAVE` 把每个图层的有效可见性存进
   `tables/scenes.json` 行的 `tags` 快照（minor 23），`SCENE RESTORE` 把它作为会话图层覆盖重新应用
   （不写图层表）；阴影/雾/剖面/软边仍不随场景切换。
@@ -210,7 +213,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Styles | partial | 真实面板：两行 `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`（当前 token 高亮，来自 `cad_status.visualStyle`），另保留界面主题切换。**未建模**：基于材质/贴图的 SketchUp 样式、边/面显示开关（轮廓线、深度提示、端点、雾化以外的背景/天空）、样式库保存/缩略图/水印；界面主题不是 SketchUp Style |
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
-| Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**未建模**：逐面材质、材质编辑器（改名/改色/删除）、贴图/纹理与材质库；涂刷仍是整实体 |
+| Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**逐面涂刷**：选中网格面（pick 的 `SubElementId` / `Mesh.face_sources` key）时只涂该面，材质表行的 `faces` 快照（minor 25）；渲染器按材质把网格拆成多个 fragment（未涂面保留实体颜色，透明材质乘实体 alpha），陈旧 face key 不重映射并报 `representation.material_face_inert`。**未建模**：材质编辑器（改名/改色/删除）、贴图/纹理与材质库；整实体涂刷仍在 |
 | Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）与文档 **Shadows/Fog 记录**（行的 `display` 快照，minor 24）；恢复把标签快照作为会话图层覆盖应用（不写图层表，与库内标志相同则不额外钉覆盖，改名/删除的图层名跳过），阴影/雾有差异时按一次 `tables/display.json` 写入恢复（Viewer 下有差异的恢复在改动前按 `PermissionDenied` 拒绝）。**未建模**：剖面、软边与场景缩略图（这些仍不随场景切换） |
 | Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
 | Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |
