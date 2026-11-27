@@ -841,6 +841,7 @@ pub enum CommandPayload {
     Flip(FlipAxis),
     /// `GUIDE [LIST|CLEAR]`: construction-guide management.
     Guide(GuideCommand),
+    Material(MaterialCommand),
     Walk(WalkCommand),
     LookAround(LookAroundCommand),
     SoftenEdges(f64),
@@ -961,10 +962,8 @@ pub enum CommandPayload {
     /// [`crate::app_drawing::mleader_edit`].
     MLeaderEdit(Box<MLeaderEditCommand>),
     /// `TOLERANCE <x> <y> <text>`: one feature-control frame built from real
-    /// `LWPOLYLINE`/`LINE`/`TEXT` entities on the active layer (Work-only). This
-    /// build has no single `AcDbFcf` object, so the frame is the declared
-    /// separate-entity representation. Contract:
-    /// [`crate::app_drawing::tolerance`].
+    /// `LWPOLYLINE`/`LINE`/`TEXT` on the active layer (Work-only); no `AcDbFcf`.
+    /// Contract: [`crate::app_drawing::tolerance`].
     Tolerance(Box<ToleranceCommand>),
     /// `REFSET ADD|REMOVE`: add or remove the current selection from the active
     /// in-place block edit's working set (Work-only, session-only; no drawing

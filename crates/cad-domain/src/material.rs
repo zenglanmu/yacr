@@ -316,6 +316,96 @@ impl MaterialDocument {
         Ok(MaterialSeq(next))
     }
 
+    /// Rename one row, keeping its sequence and every assignment.
+    pub fn rename(&mut self, seq: MaterialSeq, name: &str) -> Result<(), MaterialError> {
+        let name = name.trim();
+        if name.is_empty()
+            || name.chars().count() > MAX_MATERIAL_NAME_CHARS
+            || name.chars().any(char::is_control)
+        {
+            return Err(MaterialError::Invalid(
+                markers::MATERIAL_NAME_INVALID,
+                format!("`{name}` is not a valid material name"),
+            ));
+        }
+        if self
+            .materials
+            .iter()
+            .any(|row| row.seq != seq && row.has_name(name))
+        {
+            return Err(MaterialError::Invalid(
+                markers::MATERIAL_DUPLICATE_NAME,
+                format!("a material named `{name}` already exists"),
+            ));
+        }
+        let row = self
+            .materials
+            .iter_mut()
+            .find(|row| row.seq == seq)
+            .ok_or_else(|| {
+                MaterialError::Invalid(
+                    markers::MATERIAL_UNKNOWN,
+                    format!("no material has sequence {}", seq.0),
+                )
+            })?;
+        row.name = name.to_string();
+        row.validate()
+    }
+
+    /// Set one row's sRGB colour (assignments follow the sequence).
+    pub fn set_color(&mut self, seq: MaterialSeq, color: [u8; 3]) -> Result<(), MaterialError> {
+        let row = self
+            .materials
+            .iter_mut()
+            .find(|row| row.seq == seq)
+            .ok_or_else(|| {
+                MaterialError::Invalid(
+                    markers::MATERIAL_UNKNOWN,
+                    format!("no material has sequence {}", seq.0),
+                )
+            })?;
+        row.color = color;
+        row.validate()
+    }
+
+    /// Set one row's transparency in `0..=1`.
+    pub fn set_transparency(
+        &mut self,
+        seq: MaterialSeq,
+        transparency: f64,
+    ) -> Result<(), MaterialError> {
+        if !transparency.is_finite() || !(0.0..=1.0).contains(&transparency) {
+            return Err(MaterialError::Invalid(
+                markers::MATERIAL_TRANSPARENCY_INVALID,
+                format!("transparency must be finite and in 0..=1, got {transparency}"),
+            ));
+        }
+        let row = self
+            .materials
+            .iter_mut()
+            .find(|row| row.seq == seq)
+            .ok_or_else(|| {
+                MaterialError::Invalid(
+                    markers::MATERIAL_UNKNOWN,
+                    format!("no material has sequence {}", seq.0),
+                )
+            })?;
+        row.transparency = transparency;
+        row.validate()
+    }
+
+    /// Remove one material row and every assignment (entity and face) to it.
+    ///
+    /// Returns whether the row existed. The table's other rows keep their
+    /// sequences; a later `ensure` may reuse the freed maximum.
+    pub fn remove(&mut self, seq: MaterialSeq) -> bool {
+        let before = self.materials.len();
+        self.materials.retain(|row| row.seq != seq);
+        self.assignments.retain(|_, assigned| *assigned != seq);
+        self.face_assignments.retain(|_, assigned| *assigned != seq);
+        self.materials.len() != before
+    }
+
     /// Paint `entity` with `seq` (the material must exist).
     pub fn assign(&mut self, entity: EntityId, seq: MaterialSeq) -> Result<(), MaterialError> {
         if self.get(seq).is_none() {

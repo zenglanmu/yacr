@@ -178,6 +178,8 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     FLIP_SELECTOR,
     // `GUIDE [LIST|CLEAR]`: report or clear construction guides.
     GUIDE_SELECTOR,
+    // `MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE`.
+    MATERIAL_SELECTOR,
     // `DIST GUIDE`: the Tape Measure's guide mode (the bare selector measures).
     DIST_SELECTOR,
     // `CAMERA TWO-POINT|WALK`: the reference camera modes, refused by name (the

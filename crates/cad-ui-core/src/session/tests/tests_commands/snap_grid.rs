@@ -323,6 +323,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "BLOCK",
             "FLIP",
             "GUIDE",
+            "MATERIAL",
             "DIST",
             "CAMERA",
             "WALK",

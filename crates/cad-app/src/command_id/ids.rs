@@ -388,6 +388,8 @@ pub enum CommandId {
     Flip,
     /// `GUIDE [LIST|CLEAR]`: report or clear persisted construction guides. `LIST` is read-only; `CLEAR` is one table write/undo step and Work-only.
     Guide,
+    /// `MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE`: edit one document material row (one table write/undo step). Work-only.
+    Material,
     /// Capture the current selection into the in-process clipboard. Read-only (the drawing and history are untouched), so it is allowed in Viewer too.
     CopyToClipboard,
     /// Capture the current selection into the clipboard, then delete it in one transaction and one undo step. Work-only.

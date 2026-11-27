@@ -544,3 +544,16 @@ pub enum GuideCommand {
     /// `GUIDE POINT <x> <y> <z>`: append one point marker.
     Point(cad_domain::Point3),
 }
+
+/// One typed `MATERIAL` edit over the document material table.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MaterialCommand {
+    /// Rename one material; assignments keep the sequence.
+    Rename { name: String, new_name: String },
+    /// Replace one material's sRGB colour.
+    Color { name: String, color: [u8; 3] },
+    /// Replace one material's transparency (0..=1).
+    Transparency { name: String, transparency: f64 },
+    /// Remove one material and every assignment to it.
+    Delete { name: String },
+}

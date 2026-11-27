@@ -3609,6 +3609,8 @@
   "concept.tool.paint_bucket.hint": "打开材质报告/调色板；用 PAINT <名称> 给所选对象涂色",
   "concept.tool.materials.hint": "只读材质报告：文档材质与内置调色板",
   "concept.materials.hint": "点击色块涂刷选中的对象或网格面（上方是文档材质，下方是内置调色板）；面涂刷优先于整实体",
+  "concept.materials.delete": "删除",
+  "concept.materials.delete_named": "删除 {name}",
   "concept.materials.document": "文档材质",
   "concept.materials.builtin": "内置调色板",
   "concept.materials.empty": "文档还没有材质；涂刷一个内置色块即可创建。",

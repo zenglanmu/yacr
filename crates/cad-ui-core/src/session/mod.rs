@@ -30,6 +30,7 @@ mod diagnostics;
 mod dist_arguments;
 mod flip_arguments;
 mod guide_arguments;
+mod material_arguments;
 mod param;
 mod walk_arguments;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
@@ -262,7 +263,6 @@ const PENDING_RECEIPT_LIMIT: usize = 256;
 const RESOURCE_MISSING_CODE: &str = "resource.missing";
 /// The host's resource-install failure status key.
 const RESOURCE_FAILED_STATUS: &str = "fonts.failed";
-
 /// Owner-thread CAD session: host core + derived status + accounting.
 pub struct CadSession {
     core: HostCore,

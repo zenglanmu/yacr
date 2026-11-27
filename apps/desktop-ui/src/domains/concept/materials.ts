@@ -29,6 +29,16 @@ export const BUILTIN_MATERIALS: readonly BuiltinMaterial[] = Object.freeze([
   { name: 'Glass', color: '#aadcf0', transparency: 0.6 },
 ]);
 
+/** `MATERIAL "<name>" DELETE` for a document material, or null when unsafe. */
+export function materialDeleteCommand(name: unknown): string | null {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (trimmed === '' || trimmed.includes('"')
+    || trimmed.includes('\n') || trimmed.includes('\r')) {
+    return null;
+  }
+  return `MATERIAL "${trimmed}" DELETE`;
+}
+
 /** The command line one swatch dispatches. */
 export function paintCommand(name: string): string {
   return `PAINT ${name}`;

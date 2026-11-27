@@ -148,6 +148,7 @@ impl CommandId {
                 | Self::ScaleText
                 // SOFTENEDGES writes per-entity display state (`render_attributes.soften`).
                 | Self::SoftenEdges
+                | Self::Material
                 // SHADOWS/FOG write the per-document display record.
                 | Self::Shadows
                 | Self::Fog

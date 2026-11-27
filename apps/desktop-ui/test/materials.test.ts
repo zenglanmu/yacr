@@ -10,6 +10,7 @@ import test from 'node:test';
 import {
   BUILTIN_MATERIALS,
   MATERIALS_COMMAND,
+  materialDeleteCommand,
   paintCommand,
   parseMaterialsAnswer,
 } from '../src/domains/concept/materials.ts';
@@ -57,4 +58,12 @@ test('both lists dispatch the same PAINT selector', () => {
   assert.equal(paintCommand('Glass'), 'PAINT Glass');
   assert.ok(BUILTIN_MATERIALS.length >= 12);
   assert.equal(BUILTIN_MATERIALS[0].name, 'Red');
+});
+
+test('a document material delete uses the quoted MATERIAL grammar', () => {
+  assert.equal(materialDeleteCommand('Red'), 'MATERIAL "Red" DELETE');
+  assert.equal(materialDeleteCommand('  Dark Wood  '), 'MATERIAL "Dark Wood" DELETE');
+  for (const name of ['', 'a"b', 'a\nb', null, 3]) {
+    assert.equal(materialDeleteCommand(name), null, String(name));
+  }
 });

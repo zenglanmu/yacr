@@ -220,6 +220,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("MIRROR", CommandId::MirrorEntities),
     ("FLIP", CommandId::Flip),
     ("GUIDE", CommandId::Guide),
+    ("MATERIAL", CommandId::Material),
     ("COPYCLIP", CommandId::CopyToClipboard),
     ("CUTCLIP", CommandId::CutToClipboard),
     // `PASTECLIP` is the **insertion-point** paste: it starts the one-point `PasteClip` capture (the clipboard is the input, so a selection is not required) and translates every clipboard entry by `insertion − base`. `PASTEORIG` is the other half of the AutoCAD pair: it takes no point and inserts at the original coordinates, ignoring the base.
@@ -300,7 +301,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("EXTRIM", CommandId::Extrim),
     ("MPEDIT", CommandId::Mpedit),
     ("DRAWORDER", CommandId::DrawOrder),
-
     // The 2026-11-07 view batch: session view state only (Viewer-legal).
     ("REDRAW", CommandId::Redraw),
     ("REDRAWALL", CommandId::RedrawAll),
@@ -311,7 +311,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("VIEWBACK", CommandId::ViewBack),
     ("VIEWFORWARD", CommandId::ViewForward),
     ("VPOINT", CommandId::VPoint),
-
     // The 2026-11-07 extras batch. `REGEN3`, `-PAN` and `-LINETYPE` are aliases below (same CommandId/path), never a second implementation.
     ("SKETCH", CommandId::Sketch),
     ("TRACE", CommandId::Trace),
@@ -337,7 +336,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     // `VPCLIP` target the viewport it names.
     ("CVPORT", CommandId::Cvport),
     ("LINETYPE", CommandId::Linetype),
-
     // The 2026-11-07 layout batch; every write form is a named refusal.
     ("LAYOUT", CommandId::Layout),
     ("LAYOUTMERGE", CommandId::LayoutMerge),
@@ -896,6 +894,7 @@ mod display_grammar;
 mod dist_grammar;
 mod flip_grammar;
 mod guide_grammar;
+mod material_grammar;
 mod protractor_grammar;
 mod soften_grammar;
 mod text3d_grammar;
@@ -906,6 +905,7 @@ pub use display_grammar::*;
 pub use dist_grammar::*;
 pub use flip_grammar::*;
 pub use guide_grammar::*;
+pub use material_grammar::*;
 pub use protractor_grammar::*;
 pub use soften_grammar::*;
 pub use text3d_grammar::*;

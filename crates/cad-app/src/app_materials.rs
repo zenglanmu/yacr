@@ -282,6 +282,119 @@ impl Application {
         })
     }
 
+    /// `MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE`: edit one table row.
+    ///
+    /// One whole-table `tables/materials.json` write/revision/undo step. Rename
+    /// keeps the sequence, so assignments follow; delete drops the row and every
+    /// entity/face assignment to it. Refusals: `material.unknown`,
+    /// `material.no_change`, the domain's name/transparency rules and the
+    /// command layer's Work-only gate.
+    pub(crate) fn edit_material(&mut self, command: &Command) -> CadResult<CommandOutcome> {
+        let CommandPayload::Material(edit) = &command.payload else {
+            return Err(invalid(
+                "material.payload",
+                "MATERIAL needs <name> RENAME|COLOR|TRANSPARENCY|DELETE",
+            ));
+        };
+        let before = self.drawing(command.document)?.materials().clone();
+        let mut next = before.clone();
+        let (subject, label) = match edit {
+            MaterialCommand::Rename { name, new_name } => {
+                let row = next.resolve(name).cloned().ok_or_else(|| {
+                    invalid("material.unknown", format!("no material named `{name}`"))
+                })?;
+                next.rename(row.seq, new_name)
+                    .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+                (
+                    new_name.to_string(),
+                    format!("MATERIAL RENAME {} -> {}", row.name, new_name),
+                )
+            }
+            MaterialCommand::Color { name, color } => {
+                let row = next.resolve(name).cloned().ok_or_else(|| {
+                    invalid("material.unknown", format!("no material named `{name}`"))
+                })?;
+                next.set_color(row.seq, *color)
+                    .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+                (
+                    row.name.clone(),
+                    format!("MATERIAL COLOR {} {}", row.name, color_hex(*color)),
+                )
+            }
+            MaterialCommand::Transparency { name, transparency } => {
+                let row = next.resolve(name).cloned().ok_or_else(|| {
+                    invalid("material.unknown", format!("no material named `{name}`"))
+                })?;
+                next.set_transparency(row.seq, *transparency)
+                    .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+                (
+                    row.name.clone(),
+                    format!("MATERIAL TRANSPARENCY {} {}", row.name, transparency),
+                )
+            }
+            MaterialCommand::Delete { name } => {
+                let row = next.resolve(name).cloned().ok_or_else(|| {
+                    invalid("material.unknown", format!("no material named `{name}`"))
+                })?;
+                next.remove(row.seq);
+                (row.name.clone(), format!("MATERIAL DELETE {}", row.name))
+            }
+        };
+        if next == before {
+            return Err(invalid(
+                "material.no_change",
+                format!("MATERIAL: `{subject}` already has that value; nothing was written"),
+            ));
+        }
+        let transaction = crate::app_drawing::next_transaction_id();
+        let patch = cad_db::MaterialPatch {
+            before: before.clone(),
+            after: next.clone(),
+        };
+        {
+            let document = self
+                .workspace
+                .documents
+                .get_mut(&command.document)
+                .ok_or_else(|| invalid("material.unknown", "document not open"))?;
+            std::sync::Arc::make_mut(&mut document.drawing).apply_material_document(
+                next.clone(),
+                transaction,
+                &label,
+            )?;
+        }
+        let record = DrawingUndoRecord::entity_only(transaction, label.clone(), Vec::new());
+        if let Err(error) = self
+            .history
+            .entry(command.document)
+            .or_default()
+            .record_drawing_with_materials(record, vec![patch])
+        {
+            let document = self
+                .workspace
+                .documents
+                .get_mut(&command.document)
+                .ok_or_else(|| invalid("material.unknown", "document not open"))?;
+            std::sync::Arc::make_mut(&mut document.drawing).apply_material_document(
+                before,
+                crate::app_drawing::next_transaction_id(),
+                "MATERIAL rollback",
+            )?;
+            return Err(error);
+        }
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics: vec![Diagnostic {
+                object: None,
+                code: "material.edited".into(),
+                message: format!("{label}: one material table write"),
+            }],
+            measurement: None,
+            point_report: None,
+        })
+    }
+
     /// `MATERIALS`: the read-only material report.
     pub(crate) fn list_materials(&self, command: &Command) -> CadResult<CommandOutcome> {
         let rows = self

@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useI18n, useShell } from '../../context.ts';
 import { invoke } from '../../host/invoke.ts';
 import { readMatchPhoto, readOverlays } from '../concept/panels.ts';
-import { BUILTIN_MATERIALS, paintCommand, readMaterials } from '../concept/materials.ts';
+import { BUILTIN_MATERIALS, materialDeleteCommand, paintCommand, readMaterials } from '../concept/materials.ts';
 import {
   groupCreateCommand,
   groupEditCommand,
@@ -218,6 +218,19 @@ export function MaterialsBody() {
                 onClick={() => shell.runCommand(paintCommand(material.name))}
               >
                 <span>{material.name}</span>
+              </button>
+              <button
+                type="button"
+                className="concept-panel__action"
+                disabled={materialDeleteCommand(material.name) === null
+                  || !shell.canCommand('MATERIAL')}
+                title={t('concept.materials.delete_named', { name: material.name })}
+                onClick={() => {
+                  const command = materialDeleteCommand(material.name);
+                  if (command !== null) shell.runCommand(command);
+                }}
+              >
+                {t('concept.materials.delete')}
               </button>
             </li>
           ))}

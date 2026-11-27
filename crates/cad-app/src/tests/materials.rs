@@ -419,3 +419,136 @@ fn the_materials_report_counts_entity_and_face_paints() {
         .expect("the report is named");
     assert!(report.message.contains("1 face(s)"), "{}", report.message);
 }
+
+fn edit_material(
+    app: &mut Application,
+    session: &mut SessionState,
+    edit: MaterialCommand,
+) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(CommandId::Material, CommandPayload::Material(edit)),
+    )
+}
+
+#[test]
+fn renaming_a_material_keeps_its_assignments_and_is_one_undo_step() {
+    let (mut app, mut session) = app_with(vec![line(7)], None);
+    select(&mut app, &mut session, &[7]);
+    paint(&mut app, &mut session, "Red").expect("paint");
+    let seq = materials(&app).assignments()[&EntityId(7)];
+    let before = revision(&app);
+    edit_material(
+        &mut app,
+        &mut session,
+        MaterialCommand::Rename {
+            name: "Red".into(),
+            new_name: "Crimson".into(),
+        },
+    )
+    .expect("rename");
+    let document = materials(&app);
+    assert_eq!(document.resolve("Crimson").map(|row| row.seq), Some(seq));
+    assert_eq!(
+        document.assignment(EntityId(7)).map(|row| row.seq),
+        Some(seq)
+    );
+    assert_eq!(revision(&app), Revision(before.0 + 1));
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    assert!(materials(&app).resolve("Red").is_some());
+}
+
+#[test]
+fn color_and_transparency_edits_change_the_row_and_share_assignments() {
+    let (mut app, mut session) = app_with(vec![line(7)], None);
+    select(&mut app, &mut session, &[7]);
+    paint(&mut app, &mut session, "Red").expect("paint");
+    edit_material(
+        &mut app,
+        &mut session,
+        MaterialCommand::Color {
+            name: "Red".into(),
+            color: [1, 2, 3],
+        },
+    )
+    .expect("color");
+    edit_material(
+        &mut app,
+        &mut session,
+        MaterialCommand::Transparency {
+            name: "Red".into(),
+            transparency: 0.5,
+        },
+    )
+    .expect("transparency");
+    let row = materials(&app).resolve("Red").unwrap().clone();
+    assert_eq!(row.color, [1, 2, 3]);
+    assert!((row.transparency - 0.5).abs() < 1e-12);
+    assert!(materials(&app).assignment(EntityId(7)).is_some());
+}
+
+#[test]
+fn deleting_a_material_drops_assignment_and_face_assignments() {
+    let (mut app, mut session) = app_with(vec![two_face_mesh(7)], None);
+    select_face(&mut session, 7, "face-a");
+    paint(&mut app, &mut session, "Red").expect("face paint");
+    let seq = materials(&app).face_assignments()[&(EntityId(7), "face-a".into())];
+    edit_material(
+        &mut app,
+        &mut session,
+        MaterialCommand::Delete { name: "Red".into() },
+    )
+    .expect("delete");
+    assert!(materials(&app).resolve("Red").is_none());
+    assert!(materials(&app).assignment(EntityId(7)).is_none());
+    assert!(materials(&app)
+        .face_assignments()
+        .get(&(EntityId(7), "face-a".into()))
+        .is_none());
+    assert_eq!(seq.0, 1);
+}
+
+#[test]
+fn material_edit_refusals_are_named_and_write_nothing() {
+    let (mut app, mut session) = app_with(vec![line(7)], None);
+    select(&mut app, &mut session, &[7]);
+    paint(&mut app, &mut session, "Red").expect("paint");
+    let before = revision(&app);
+    let text = refusal_text(
+        edit_material(
+            &mut app,
+            &mut session,
+            MaterialCommand::Rename {
+                name: "Nope".into(),
+                new_name: "Blue".into(),
+            },
+        )
+        .unwrap_err(),
+    );
+    assert!(text.starts_with("material.unknown:"), "{text}");
+    let text = refusal_text(
+        edit_material(
+            &mut app,
+            &mut session,
+            MaterialCommand::Rename {
+                name: "Red".into(),
+                new_name: "Red".into(),
+            },
+        )
+        .unwrap_err(),
+    );
+    assert!(text.starts_with("material.no_change:"), "{text}");
+    assert_eq!(revision(&app), before);
+
+    session.switch_mode(AppMode::Viewer).expect("Viewer");
+    assert!(matches!(
+        edit_material(
+            &mut app,
+            &mut session,
+            MaterialCommand::Delete { name: "Red".into() },
+        )
+        .unwrap_err(),
+        CadError::PermissionDenied
+    ));
+}

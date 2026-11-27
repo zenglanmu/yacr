@@ -140,6 +140,7 @@ command_selector_contract! {
     MirrorEntities => "MIRROR",
     Flip => "FLIP",
     Guide => "GUIDE",
+    Material => "MATERIAL",
     CopyToClipboard => "COPYCLIP",
     CutToClipboard => "CUTCLIP",
     PasteFromClipboard => "PASTECLIP",
@@ -218,7 +219,6 @@ command_selector_contract! {
     Extrim => "EXTRIM",
     Mpedit => "MPEDIT",
     DrawOrder => "DRAWORDER",
-
     Redraw => "REDRAW",
     RedrawAll => "REDRAWALL",
     Regen => "REGEN",
@@ -279,7 +279,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 263,
+        EXPECTED_COMMAND_COUNT, 264,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
