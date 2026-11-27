@@ -237,7 +237,7 @@ export const HOST_NAMES = [
   // canonical selector** (the host canonicalises the whole trimmed line, exactly
   // like the `MEASURE AREA` alias it mirrors), so it stays one entry here and is
   // never split into `AREA` + a typed argument.
-  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'AREA', 'AREA OBJECT', 'ID', 'ZOOMIN', 'ZOOMOUT',
+  'DIST', 'MEASUREPOLYLINE', 'MEASUREANGLE', 'PROTRACTOR', 'AREA', 'AREA OBJECT', 'ID', 'ZOOMIN', 'ZOOMOUT',
   // JOIN (2026-10-26): the modify selector that welds the current selection into
   // one polyline. `LAYISO`/`LAYUNISO` (2026-10-26) are the layer isolate pair —
   // router commands, not chrome-local selectors like `LAYER`. `LAYOFF`/`LAYON`

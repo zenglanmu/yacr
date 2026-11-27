@@ -49,6 +49,7 @@ mod p4_trace;
 mod param_list;
 mod point_style;
 mod properties;
+mod protractor;
 mod queue;
 mod recent_files;
 mod recovery;

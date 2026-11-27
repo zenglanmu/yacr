@@ -124,7 +124,7 @@ const TOOLS_MODIFY = panel('concept.tools.modify', 'concept.section.modify', [
 const TOOLS_MEASURE = panel('concept.tools.measure', 'concept.section.measure', [
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', command: 'DIST' },
   { id: 'MEASUREGEOM', labelKey: 'measure.kind.measuregeom', icon: 'angle', command: 'MEASUREGEOM' },
-  pending('PROTRACTOR', 'concept.tool.protractor', 'angle'),
+  { id: 'PROTRACTOR', labelKey: 'concept.tool.protractor', icon: 'angle', command: 'PROTRACTOR', hintKey: 'concept.tool.protractor.hint' },
 ]);
 
 const TOOLS_ANNOTATE = panel('concept.tools.annotate', 'concept.section.annotate', [

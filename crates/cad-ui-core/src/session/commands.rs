@@ -830,6 +830,8 @@ pub const MEASUREMENT_SELECTORS: &[(&str, MeasurementToolKind)] = &[
     ("DIST", MeasurementToolKind::Distance),
     ("MEASUREPOLYLINE", MeasurementToolKind::PolylineLength),
     ("MEASUREANGLE", MeasurementToolKind::Angle),
+    // SketchUp's Protractor: the same angle algorithm, captured vertex-first.
+    ("PROTRACTOR", MeasurementToolKind::Protractor),
     ("AREA", MeasurementToolKind::Area),
     // ID is AutoCAD's own point-coordinate command (`Specify point`). It is an
     // interaction-only selector like the four above: the one pick is resolved by
@@ -896,8 +898,10 @@ pub use paint_grammar::*;
 mod scene_grammar;
 pub use scene_grammar::*;
 mod display_grammar;
+mod protractor_grammar;
 mod soften_grammar;
 pub use display_grammar::*;
+pub use protractor_grammar::*;
 pub use soften_grammar::*;
 // The typed `PYRAMID` regular n-gon base line (the one typed 3D primitive).
 mod solid_arguments;

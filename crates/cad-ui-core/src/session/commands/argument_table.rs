@@ -171,6 +171,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     SCENE_SELECTOR,
     // `SOFTENEDGES [<angle>]`: SketchUp soften edges.
     SOFTENEDGES_SELECTOR,
+    // `PROTRACTOR GUIDE`: the reference tool's guide mode, refused by name (no
+    // guide model); the bare selector stays a measurement selector.
+    PROTRACTOR_SELECTOR,
     // `SHADOWS [ON|OFF|SUN <az> <elev>]` and
     // `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`: the display record.
     SHADOWS_SELECTOR,

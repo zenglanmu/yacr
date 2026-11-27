@@ -76,7 +76,7 @@ impl Application {
                 &session.active_space,
                 command,
                 algorithm,
-                captured,
+                kind.engine_points(captured),
                 &snaps,
             )?;
             if let Some(record) = &outcome.measurement {
@@ -157,8 +157,13 @@ impl Application {
             )
         })?;
         let active_space = session.active_space.clone();
-        let outcome =
-            self.evaluate_measurement(&active_space, command, algorithm, points, &snaps)?;
+        let outcome = self.evaluate_measurement(
+            &active_space,
+            command,
+            algorithm,
+            kind.engine_points(points),
+            &snaps,
+        )?;
         if let Some(record) = &outcome.measurement {
             session.set_last_measurement(record.clone());
         }

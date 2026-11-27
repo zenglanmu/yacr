@@ -185,8 +185,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   // marks DIVIDE creates, `scale` for the length change LENGTHEN makes (the icon
   // set has no divide/lengthen mark; SCALE keeps its own row below).
   //
-  // The host refuses a polyline for BREAK and anything beyond one LINE/ARC/CIRCLE/
-  // straight-polyline for the other two; nothing here may imply the wider set.
+  // BREAK accepts one LINE/ARC/CIRCLE/straight-polyline; nothing wider.
   { id: 'BREAK', labelKey: 'draw.kind.break', icon: 'trim', group: 'modify' },
   { id: 'DIVIDE', labelKey: 'draw.kind.divide', icon: 'point', group: 'modify' },
   { id: 'LENGTHEN', labelKey: 'draw.kind.lengthen', icon: 'scale', group: 'modify' },
@@ -239,6 +238,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', group: 'measure' },
   { id: 'MEASUREPOLYLINE', labelKey: 'measure.kind.polyline', icon: 'polyline', group: 'measure' },
   { id: 'MEASUREANGLE', labelKey: 'measure.kind.angle', icon: 'angle', group: 'measure' },
+  { id: 'PROTRACTOR', labelKey: 'measure.kind.protractor', icon: 'angle', group: 'measure' },
   { id: 'AREA', labelKey: 'measure.kind.area', icon: 'area', group: 'measure' },
   // AREA OBJECT (2026-10-27) is the selection-based area variant: it takes the
   // current selection (exactly one closed object — a circle, an ellipse or a

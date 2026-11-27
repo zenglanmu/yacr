@@ -1,8 +1,8 @@
 //! Owner-thread CAD session (`CadSession`) shared by the UI hosts.
 //!
-//! `CadSession` is a thin, deliberately `!Send` owner-thread wrapper over the
-//! UI-free [`cad_host::HostCore`] and its [`RenderSessionHandle`]: it adds no CAD
-//! authority and no parser; the database stays in `cad-db` behind the host
+//! `CadSession` is a thin, deliberately `!Send` owner-thread wrapper over
+//! [`cad_host::HostCore`] and its [`RenderSessionHandle`]: it adds no CAD authority
+//! and no parser; the database stays in `cad-db` behind the host
 //! command/engine boundary, and the frontend sees only the derived state.
 //!
 //! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`, so
@@ -71,6 +71,7 @@ mod select_filter;
 mod settings;
 // SHAPE/MINSERT/ADDSELECTED typed dispatch (grammar in `commands::shape_block`).
 mod paint_arguments;
+mod protractor_arguments;
 mod scene_arguments;
 mod set_view;
 mod shape_block_arguments;
@@ -449,6 +450,7 @@ impl CadSession {
     /// | `MEASURE` / `DIST` | `BeginMeasurement(Distance)` |
     /// | `MEASUREPOLYLINE` | `BeginMeasurement(PolylineLength)` |
     /// | `MEASUREANGLE` | `BeginMeasurement(Angle)` |
+    /// | `PROTRACTOR` | `BeginMeasurement(Protractor)` (vertex first) |
     /// | `AREA` | `BeginMeasurement(Area)` |
     /// | `PAN` | `BeginPan` (modal pan; never a zero-delta pan) |
     /// | `CONFIRM` | `Confirm` |
@@ -640,11 +642,9 @@ impl CadSession {
     /// No entity id travels: the host resolves its own current selection and
     /// applies the write at apply time. `key` is one of
     /// [`cad_app::property_value::SUPPORTED_KEYS`] (`layer`, `color`,
-    /// `linetype`, `lineweight`, `transparency`) and `value` must match that
-    /// key's documented grammar; both are validated by the host write path, and a
-    /// refusal is returned here as the real error text with its stable code.
-    /// A successful edit is one transaction / one undo step, and the next
-    /// `cad_status` carries the new `selection.rows`.
+    /// `linetype`, `lineweight`, `transparency`) with `value` in its grammar,
+    /// both validated by the host write path; a refusal returns the real error
+    /// text. A successful edit is one transaction / one undo step.
     ///
     /// A dynamic BIM PSet row key (`bim.pset.{set}.{property}`) is the same call
     /// and command: `cad-app` dispatches it to the stored BIM value instead of

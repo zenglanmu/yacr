@@ -72,7 +72,7 @@ const EDIT = group('concept.edit', 'concept.toolbar.edit', [
 const CONSTRUCTION = group('concept.construction', 'concept.toolbar.construction', [
   { id: 'DIST', labelKey: 'concept.tool.tape_measure', icon: 'distance', command: 'DIST' },
   { id: 'DIMLINEAR', labelKey: 'draw.kind.dimlinear', icon: 'dimlinear', command: 'DIMLINEAR' },
-  pending('PROTRACTOR', 'concept.tool.protractor', 'angle'),
+  { id: 'PROTRACTOR', labelKey: 'concept.tool.protractor', icon: 'angle', command: 'PROTRACTOR', hintKey: 'concept.tool.protractor.hint' },
   { id: 'TEXT', labelKey: 'draw.kind.text', icon: 'text', command: 'TEXT' },
   { id: 'UCS', labelKey: 'concept.tool.axes', icon: 'axes', command: 'UCS' },
   pending('TEXT3D', 'concept.tool.text3d', 'mtext'),

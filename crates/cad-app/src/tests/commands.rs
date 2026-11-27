@@ -525,3 +525,53 @@ fn undo_to_empty_still_allows_redo_and_refresh_is_pure() {
     assert!(availability.can_undo);
     assert!(!availability.can_redo);
 }
+
+#[test]
+fn the_protractor_captures_vertex_first_and_measures_the_angle_at_it() {
+    let (mut app, mut session) = application_with_document();
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::MeasureTool(MeasurementToolKind::Protractor),
+        ),
+    )
+    .unwrap();
+    // SketchUp's order: the vertex first, then one point on each ray.
+    app.execute(
+        &mut session,
+        command(
+            CommandId::Measure,
+            CommandPayload::Points(vec![point(0.0, 0.0)]),
+        ),
+    )
+    .unwrap();
+    let preview = session.measurement_preview().expect("preview");
+    assert_eq!(preview.kind, MeasurementToolKind::Protractor);
+    assert_eq!(
+        preview.status_line(),
+        "protractor: pick a point on the first ray"
+    );
+    let outcome = app
+        .execute(
+            &mut session,
+            command(
+                CommandId::Measure,
+                CommandPayload::Points(vec![point(1.0, 0.0), point(0.0, 1.0)]),
+            ),
+        )
+        .unwrap();
+    let record = outcome.measurement.expect("auto-completed record");
+    assert_eq!(record.algorithm, MeasurementAlgorithm::Angle3Points);
+    // `Angle3Points` records degrees (the display formatter takes them as-is).
+    assert!(
+        (record.value - 90.0).abs() < 1e-9,
+        "a right angle at the vertex: {}",
+        record.value
+    );
+    // The engine measures at its second point, so the record's inputs are the
+    // adapted order (ray, vertex, ray); the capture order is preserved only for
+    // display.
+    assert_eq!(record.inputs[1], point(0.0, 0.0));
+    assert!(matches!(session.tool, ToolState::Idle));
+}

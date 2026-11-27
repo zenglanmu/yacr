@@ -234,6 +234,9 @@ impl CadSession {
             super::commands::SCENE_SELECTOR => self.scene_argument(argument, text),
             // `SOFTENEDGES [<angle>]`: the SketchUp soften-edges display write.
             super::commands::SOFTENEDGES_SELECTOR => self.softenedges_argument(argument, text),
+            // `PROTRACTOR GUIDE`: the guide mode is a named refusal (the bare
+            // selector is a measurement selector and never reaches this arm).
+            super::commands::PROTRACTOR_SELECTOR => self.protractor_argument(argument, text),
             // `SHADOWS`/`FOG`: the per-document display record.
             super::commands::SHADOWS_SELECTOR => self.shadows_argument(argument, text),
             super::commands::FOG_SELECTOR => self.fog_argument(argument, text),

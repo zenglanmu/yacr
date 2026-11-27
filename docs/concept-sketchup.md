@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 10 | 14.5% |
-| `pending` | 5 | 7.2% |
+| `partial` | 11 | 15.9% |
+| `pending` | 4 | 5.8% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 64/69 = 92.8% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 65/69 = 94.2% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -126,7 +126,7 @@
 |---|---|---|---|
 | Tape Measure | `DIST` | partial | 距离 only，无 guide |
 | Dimension | `DIMLINEAR` | full | 是 CAD 标注，不是 SketchUp LayOut 尺寸 |
-| Protractor | `PROTRACTOR` | pending | 没有角度构造/guide |
+| Protractor | `PROTRACTOR` | partial | 真实三点角度量具（`BeginMeasurement(Protractor)`：先点顶点、再各点一条射线，结果按 `Angle3Points` 记录并格式化角度；只读、不写文档）+ 托盘/工具栏/菜单真实工具；**guide 线创建未建模**：`PROTRACTOR GUIDE` 以 `protractor.guide_not_implemented` 具名拒绝 |
 | Text | `TEXT` | full | 二维文字 |
 | Axes | `UCS` | full | 会话坐标轴 |
 | 3D Text | `TEXT3D` | pending | 没有三维文字网格 |
@@ -206,7 +206,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
-- 其余 `pending` 工具（Freehand/Protractor/3D Text/Outer Shell/Trim/Split/Camera/Walk/
-  Look Around/...）保持显式 pending；Shadows/Fog/Overlays/Outliner 托盘面板仍是 pending，
-  Scenes 与 Soften Edges 已是有真实命令与面板的 `partial`。
+- 其余 `pending` 工具（3D Text/Outer Shell/Trim/Split/Camera/Walk/Look Around）与
+  Match Photo/Overlays 托盘面板保持显式 pending；Shadows/Fog/Outliner/Scenes/Soften Edges/
+  Protractor 都已是有真实命令与面板的 `partial`（`cad_display`/`cad_outliner`/`cad_scenes`）。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

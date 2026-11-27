@@ -34,6 +34,7 @@ mod tests_outliner;
 mod tests_param;
 mod tests_polyline_width;
 mod tests_properties;
+mod tests_protractor;
 mod tests_scenes;
 mod tests_session_surfaces;
 mod tests_settings;

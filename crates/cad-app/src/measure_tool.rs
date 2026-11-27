@@ -23,18 +23,27 @@ pub enum MeasurementToolKind {
     /// [`MeasurementToolKind::algorithm`] (returns `None`) and
     /// [`crate::PointReport`].
     Id,
+    /// SketchUp's **Protractor**: the same `Angle3Points` algorithm, captured as
+    /// **vertex, first-ray point, second-ray point** (SketchUp's order). The
+    /// engine measures at its *second* point, so [`Self::engine_points`] maps the
+    /// capture order onto it; the stored picks are never reordered for display.
+    ///
+    /// Guide-line creation is **not modeled**: `PROTRACTOR GUIDE` is refused by
+    /// name (`protractor.guide_not_implemented`) instead of drawing a guide.
+    Protractor,
 }
 
 impl MeasurementToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI panel mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [MeasurementToolKind; 5] = [
+    pub const ALL: [MeasurementToolKind; 6] = [
         MeasurementToolKind::Distance,
         MeasurementToolKind::PolylineLength,
         MeasurementToolKind::Angle,
         MeasurementToolKind::Area,
         MeasurementToolKind::Id,
+        MeasurementToolKind::Protractor,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -45,6 +54,7 @@ impl MeasurementToolKind {
             Self::Angle => "angle",
             Self::Area => "area",
             Self::Id => "id",
+            Self::Protractor => "protractor",
         }
     }
 
@@ -57,6 +67,7 @@ impl MeasurementToolKind {
             "angle" => Some(Self::Angle),
             "area" => Some(Self::Area),
             "id" => Some(Self::Id),
+            "protractor" => Some(Self::Protractor),
             _ => None,
         }
     }
@@ -97,6 +108,9 @@ impl MeasurementToolKind {
             Self::Distance => MeasurementAlgorithm::Distance3d,
             Self::PolylineLength => MeasurementAlgorithm::PolylineLength,
             Self::Angle => MeasurementAlgorithm::Angle3Points,
+            // The Protractor measures the same angle; only its capture order and
+            // the guide refusal differ.
+            Self::Protractor => MeasurementAlgorithm::Angle3Points,
             Self::Area => MeasurementAlgorithm::PlanarPolygonArea,
             Self::Id => return None,
         };
@@ -107,7 +121,7 @@ impl MeasurementToolKind {
     pub fn min_points(self) -> usize {
         match self {
             Self::Distance | Self::PolylineLength => 2,
-            Self::Angle | Self::Area => 3,
+            Self::Angle | Self::Area | Self::Protractor => 3,
             Self::Id => 1,
         }
     }
@@ -116,7 +130,7 @@ impl MeasurementToolKind {
     pub fn exact_points(self) -> Option<usize> {
         match self {
             Self::Distance => Some(2),
-            Self::Angle => Some(3),
+            Self::Angle | Self::Protractor => Some(3),
             // ID is a single-pick command: the existing auto-complete path
             // (`MeasurementTool::auto_ready`) commits it as soon as the one point
             // lands, exactly like DISTANCE does after two.
@@ -128,6 +142,22 @@ impl MeasurementToolKind {
     /// Whether the tool commits automatically once it has enough points.
     pub fn auto_completes(self) -> bool {
         self.exact_points().is_some()
+    }
+
+    /// The captured points in the **engine's** order.
+    ///
+    /// The `Angle3Points` engine measures at its second point (`a, v, b`); the
+    /// Protractor captures the vertex first (`v, a, b`). This is the one place
+    /// the two orders meet: the preview and the recorded picks keep the capture
+    /// order, and only the evaluation request is adapted. Any other kind (or a
+    /// short capture) is returned unchanged.
+    pub fn engine_points(self, points: Vec<Point3>) -> Vec<Point3> {
+        match self {
+            Self::Protractor if points.len() == 3 => {
+                vec![points[1], points[0], points[2]]
+            }
+            _ => points,
+        }
     }
 
     /// Short user-facing label.
@@ -143,6 +173,8 @@ impl MeasurementToolKind {
             Self::Angle => "角度",
             Self::Area => "面积",
             Self::Id => "ID",
+            // SketchUp's own word; ASCII like ID (no new CJK literal).
+            Self::Protractor => "PROTRACTOR",
         }
     }
 }
@@ -177,6 +209,16 @@ impl MeasurementPreview {
     /// Kept in `cad-app` so the UI layer never re-implements the state
     /// machine's counting rules.
     pub fn status_line(&self) -> String {
+        // The Protractor captures in SketchUp's order, so its prompts name the
+        // step instead of only counting (locale-neutral ASCII, like the new
+        // CAD-side tool copy).
+        if self.kind == MeasurementToolKind::Protractor {
+            return match self.points.len() {
+                0 => "protractor: pick the angle vertex".to_string(),
+                1 => "protractor: pick a point on the first ray".to_string(),
+                _ => "protractor: pick a point on the second ray".to_string(),
+            };
+        }
         if self.remaining > 0 {
             format!(
                 "{}：已选 {} 点，还需 {} 点",
