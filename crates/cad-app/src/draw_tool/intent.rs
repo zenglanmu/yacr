@@ -127,6 +127,10 @@ pub enum DrawIntent {
     /// handler builds a perspective camera; the capture never invents an up
     /// vector or a field of view.
     PositionCamera { eye: Point3, target: Point3 },
+    /// `WALK`: walk horizontally to this world point (the eye keeps its z).
+    Walk { destination: Point3 },
+    /// `LOOKAROUND`: turn the fixed eye to look at this world point.
+    LookAround { target: Point3 },
     /// `WIPEOUT`: insert a closed polygon mask whose **implicit ring** is
     /// `points` (at least three, in capture order).
     ///

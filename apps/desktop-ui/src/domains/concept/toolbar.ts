@@ -86,8 +86,8 @@ const CAMERA = group('concept.camera', 'concept.toolbar.camera', [
   { id: 'FIT', labelKey: 'toolbar.zoom_extents', icon: 'fit', command: 'FIT' },
   { id: 'VIEWBACK', labelKey: 'toolbar.zoom_previous', icon: 'zoomPrevious', command: 'VIEWBACK' },
   { id: 'CAMERA', labelKey: 'concept.tool.position_camera', icon: 'view', command: 'CAMERA', hintKey: 'concept.tool.position_camera.hint' },
-  pending('WALK', 'concept.tool.walk', 'pan'),
-  pending('LOOKAROUND', 'concept.tool.look_around', 'eye'),
+  { id: 'WALK', labelKey: 'concept.tool.walk', icon: 'pan', command: 'WALK', hintKey: 'concept.tool.walk.hint' },
+  { id: 'LOOKAROUND', labelKey: 'concept.tool.look_around', icon: 'eye', command: 'LOOKAROUND', hintKey: 'concept.tool.look_around.hint' },
 ]);
 
 const VIEWS = group('concept.views', 'concept.toolbar.views', STANDARD_VIEWS.map(entry => ({ ...entry })));

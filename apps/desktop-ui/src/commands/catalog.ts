@@ -924,6 +924,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'TRIMSOLID', labelKey: 'draw.kind.trimsolid', icon: 'trim', group: 'modify' },
   { id: 'SPLITSOLID', labelKey: 'draw.kind.splitsolid', icon: 'explode', group: 'modify' },
   { id: 'CAMERA', labelKey: 'draw.kind.camera', icon: 'view', group: 'view' },
+  { id: 'WALK', labelKey: 'draw.kind.walk', icon: 'pan', group: 'view' },
+  { id: 'LOOKAROUND', labelKey: 'draw.kind.lookaround', icon: 'eye', group: 'view' },
   { id: 'SUBTRACT', labelKey: 'draw.kind.subtract', icon: 'dot', group: 'modify' },
   { id: 'SLICE', labelKey: 'draw.kind.slice', icon: 'dot', group: 'modify' },
   { id: 'THICKEN', labelKey: 'draw.kind.thicken', icon: 'dot', group: 'modify' },
@@ -993,7 +995,6 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DGNADJUST', labelKey: 'draw.kind.dgnadjust', icon: 'settings', group: 'properties' },
   // The 2026-11-12 interface wave (chrome-owned UI selectors).
   ...INTERFACE_COMMAND_CATALOG,
-  // IBL (image-based lighting) is the renderer's PBR toggle for meshes; a bare
-  // name toggles and `IBL ON|OFF|1|0` sets it. Appended last.
+  // IBL (image-based lighting) is the renderer's PBR toggle for meshes.
   { id: 'IBL', labelKey: 'ribbon.command.ibl', icon: 'sun', group: 'view' },
 ]);

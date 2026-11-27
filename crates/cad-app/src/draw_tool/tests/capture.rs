@@ -212,3 +212,34 @@ fn position_camera_takes_the_eye_then_the_target() {
     );
     assert!(tool.push_point(p(1.0, 1.0)).is_err(), "exactly two points");
 }
+
+#[test]
+fn walk_and_look_around_take_one_point_each() {
+    let mut walk = DrawTool::new(DrawToolKind::Walk, 0);
+    assert_eq!(DrawToolKind::Walk.arity(), PointArity::Exact(1));
+    assert_eq!(
+        walk.preview().status_line(),
+        "walk: pick the destination point"
+    );
+    walk.push_point(p(5.0, 6.0)).unwrap();
+    assert_eq!(
+        walk.intent().unwrap(),
+        DrawIntent::Walk {
+            destination: p(5.0, 6.0)
+        }
+    );
+
+    let mut look = DrawTool::new(DrawToolKind::LookAround, 0);
+    assert_eq!(DrawToolKind::LookAround.arity(), PointArity::Exact(1));
+    assert_eq!(
+        look.preview().status_line(),
+        "lookaround: pick a point to look at"
+    );
+    look.push_point(p(-2.0, 3.0)).unwrap();
+    assert_eq!(
+        look.intent().unwrap(),
+        DrawIntent::LookAround {
+            target: p(-2.0, 3.0)
+        }
+    );
+}

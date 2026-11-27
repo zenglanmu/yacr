@@ -100,7 +100,6 @@ pub fn draw_preview_overlay(
                 (chain.len() >= 2).then_some(chain)
             })
         }
-        // WIPEOUT: the closed ring of captured vertices plus the live cursor.
         DrawToolKind::Wipeout => {
             wipeout_points(&preview.points, preview.cursor).or_else(|| {
                 let chain = preview_chain(&preview.points, preview.cursor);
@@ -158,10 +157,11 @@ pub fn draw_preview_overlay(
         | DrawToolKind::XLine
         | DrawToolKind::Ray
         | DrawToolKind::Polyline
-        // FREEHAND: the sampled stroke plus the live cursor; the host also paints
-        // its own trail. POSITION CAMERA: the eye-to-target chain.
+        // FREEHAND: sampled stroke + cursor; CAMERA/WALK/LOOK AROUND: point chains.
         | DrawToolKind::Freehand
         | DrawToolKind::PositionCamera
+        | DrawToolKind::Walk
+        | DrawToolKind::LookAround
         | DrawToolKind::Move
         | DrawToolKind::Trim
         // BREAK's first click is an entity pick and its second is a free point;

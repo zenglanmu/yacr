@@ -50,4 +50,5 @@ mod tests_tools;
 mod tests_tools_routing;
 mod tests_trimsolid;
 mod tests_typed_dimensions;
+mod tests_walk;
 mod tests_wire;

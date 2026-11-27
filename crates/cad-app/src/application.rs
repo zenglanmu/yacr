@@ -440,6 +440,8 @@ impl Application {
             CommandId::TrimSolid => self.trim_solid(session, &command),
             CommandId::SplitSolid => self.split_solid(session, &command),
             CommandId::PositionCamera => self.position_camera(session, &command),
+            CommandId::Walk => self.walk(session, &command),
+            CommandId::LookAround => self.look_around(session, &command),
             CommandId::SoftenEdges => self.soften_selected_edges(session, &command),
             CommandId::ViewGo => self.view_go(session, &command),
             CommandId::ViewBack => self.view_back(session, &command),

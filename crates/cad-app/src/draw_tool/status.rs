@@ -64,6 +64,12 @@ impl DrawPreview {
                 "camera: pick the target point".to_string()
             };
         }
+        if self.kind == DrawToolKind::Walk {
+            return "walk: pick the destination point".to_string();
+        }
+        if self.kind == DrawToolKind::LookAround {
+            return "lookaround: pick a point to look at".to_string();
+        }
         if self.kind == DrawToolKind::PressPull {
             return if self.picks.is_empty() {
                 "presspull: pick a face on the selected body".to_string()

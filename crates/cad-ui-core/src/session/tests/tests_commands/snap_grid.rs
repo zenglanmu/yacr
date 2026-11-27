@@ -320,6 +320,8 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             "SCENE",
             "SOFTENEDGES",
             "CAMERA",
+            "WALK",
+            "LOOKAROUND",
             "TEXT3D",
             "PROTRACTOR",
             "SHADOWS",

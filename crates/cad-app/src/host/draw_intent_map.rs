@@ -83,6 +83,15 @@ impl HostController {
                 crate::CommandId::PositionCamera,
                 crate::CommandPayload::PositionCamera { eye, target },
             ),
+            // WALK / LOOK AROUND: one captured point each.
+            DrawIntent::Walk { destination } => (
+                crate::CommandId::Walk,
+                crate::CommandPayload::Walk(crate::WalkCommand::To(destination)),
+            ),
+            DrawIntent::LookAround { target } => (
+                crate::CommandId::LookAround,
+                crate::CommandPayload::LookAround(crate::LookAroundCommand::At(target)),
+            ),
             // WIPEOUT: every captured boundary vertex travels as `Points` (the
             // closed implicit ring). The plane/duplicate/area validation and the
             // `AcDbWipeout` mask construction are the command layer's, so the

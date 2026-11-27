@@ -50,6 +50,11 @@ pub enum CommandId {
     /// `CAMERA`: place a perspective viewpoint from a captured eye point and a
     /// target point (SketchUp Position Camera). View-only.
     PositionCamera,
+    /// `WALK`: move the perspective eye horizontally (SketchUp Walk). View-only.
+    Walk,
+    /// `LOOKAROUND`: turn the perspective view about its eye (SketchUp Look
+    /// Around). View-only.
+    LookAround,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

@@ -88,7 +88,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 66] = [
+    pub const ALL: [DrawToolKind; 68] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -206,8 +206,10 @@ impl DrawToolKind {
         // FREEHAND is appended for index stability (the shell mirrors `ALL` by
         // index); its capture is the drag stroke committed through `SKETCH`.
         DrawToolKind::Freehand,
-        // POSITION CAMERA is appended for index stability.
+        // POSITION CAMERA / WALK / LOOK AROUND are appended for index stability.
         DrawToolKind::PositionCamera,
+        DrawToolKind::Walk,
+        DrawToolKind::LookAround,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -219,6 +221,8 @@ impl DrawToolKind {
             Self::Polyline => "polyline",
             Self::Freehand => "freehand",
             Self::PositionCamera => "positioncamera",
+            Self::Walk => "walk",
+            Self::LookAround => "lookaround",
             Self::Rectang => "rectang",
             Self::Ellipse => "ellipse",
             Self::Polygon => "polygon",
@@ -292,6 +296,8 @@ impl DrawToolKind {
             "polyline" => Some(Self::Polyline),
             "freehand" => Some(Self::Freehand),
             "positioncamera" => Some(Self::PositionCamera),
+            "walk" => Some(Self::Walk),
+            "lookaround" => Some(Self::LookAround),
             "rectang" => Some(Self::Rectang),
             "ellipse" => Some(Self::Ellipse),
             "polygon" => Some(Self::Polygon),
@@ -388,6 +394,8 @@ impl DrawToolKind {
             Self::Freehand => "FREEHAND",
             // POSITION CAMERA uses the ASCII fallback like the other new kinds.
             Self::PositionCamera => "CAMERA",
+            Self::Walk => "WALK",
+            Self::LookAround => "LOOKAROUND",
             Self::Rectang => "矩形",
             Self::Ellipse => "椭圆",
             Self::Polygon => "正多边形",
@@ -532,6 +540,7 @@ impl DrawToolKind {
             Self::Polyline => PointArity::AtLeast(2),
             Self::Freehand => PointArity::AtLeast(2),
             Self::PositionCamera => PointArity::Exact(2),
+            Self::Walk | Self::LookAround => PointArity::Exact(1),
             Self::Spline => PointArity::AtLeast(4),
             Self::Wipeout => PointArity::AtLeast(3),
             // DIMBASELINE/DIMCONTINUE: the base **pick** consumes the first

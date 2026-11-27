@@ -37,6 +37,12 @@ pub enum DrawToolKind {
     /// `CAMERA TWO-POINT` / `CAMERA WALK` forms are refused by name instead of
     /// fabricating a different camera.
     PositionCamera,
+    /// SketchUp's **Walk**: one picked ground point; the perspective eye walks
+    /// there horizontally (its z is preserved). View-only.
+    Walk,
+    /// SketchUp's **Look Around**: one picked point to look at from the fixed
+    /// eye. View-only.
+    LookAround,
     /// FREEHAND: one open polyline traced by a drag (SketchUp's Freehand).
     ///
     /// Capture shape: the press starts the stroke, every pointer move appends a

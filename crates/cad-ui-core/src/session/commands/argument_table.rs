@@ -174,6 +174,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `CAMERA TWO-POINT|WALK`: the reference camera modes, refused by name (the
     // bare selector starts the two-point placement capture).
     CAMERA_SELECTOR,
+    // `WALK <distance>` and `LOOKAROUND <yaw> <pitch>`: the typed navigation forms.
+    WALK_SELECTOR,
+    LOOKAROUND_SELECTOR,
     // `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: one extruded glyph mesh.
     TEXT3D_SELECTOR,
     // `PROTRACTOR GUIDE`: the reference tool's guide mode, refused by name (no

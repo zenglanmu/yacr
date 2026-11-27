@@ -36,6 +36,8 @@ impl DrawToolKind {
             Self::Freehand => CommandId::Sketch,
             // POSITION CAMERA places a view-only perspective camera.
             Self::PositionCamera => CommandId::PositionCamera,
+            Self::Walk => CommandId::Walk,
+            Self::LookAround => CommandId::LookAround,
             // WIPEOUT stores one `Mask` entity (`AcDbWipeout`).
             Self::Wipeout => CommandId::Wipeout,
             Self::Rectang => CommandId::CreateRectangle,

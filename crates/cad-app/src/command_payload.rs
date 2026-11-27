@@ -837,11 +837,12 @@ pub enum CommandPayload {
     /// The typed `SHADOWS`/`FOG` line (display settings).
     Display(DisplayCommand),
     Text3d(Text3dInput),
-    /// `CAMERA`'s two captured points: the eye and the point it looks at.
     PositionCamera {
         eye: Point3,
         target: Point3,
     },
+    Walk(WalkCommand),
+    LookAround(LookAroundCommand),
     SoftenEdges(f64),
     ViewGo(String),
     VPoint(VPointInput),

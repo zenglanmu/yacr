@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 13 | 18.8% |
-| `pending` | 2 | 2.9% |
+| `partial` | 15 | 21.7% |
+| `pending` | 0 | 0.0% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 67/69 = 97.1% 有真实命令（其中 `full` 仍只有 54/69 = 78.3%；`partial` 不是验收，见各行的边界）；仍有 2 个工具 `pending`：Walk、Look Around。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 69/69 = 100% 有真实命令（其中 `full` 仍只有 54/69 = 78.3%；`partial` 不是验收，见各行的边界）；工具层不再有 `pending`。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -51,6 +51,8 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **漫游/环视**（2026-11-27，ADR-0074）：`WALK` 与 `LOOKAROUND` 从 pending 变成真实视图导航
+  （一点捕获或 typed 数值），只改透视相机、记 `ZOOM PREVIOUS`，平面/退化输入按名拒绝。
   **放置相机**（2026-11-27，ADR-0073）：`CAMERA` 从 pending 变成真实的两点工具——先点眼睛、
   再点目标，设一个透视相机（eye/target/世界 +Z up、沿用当前 FOV），只改视图并记 `ZOOM PREVIOUS`；
   `CAMERA TWO-POINT` / `CAMERA WALK` 按名拒绝，两点透视与漫游仍未建模。
@@ -157,8 +159,8 @@
 | Zoom Extents | `FIT` | full | |
 | Previous | `VIEWBACK` | full | |
 | Position Camera | `CAMERA` | partial | 真实两点放置：先点眼睛、再点目标 → `CAMERA` 设一个透视相机（eye/target/世界 +Z up、沿用当前 FOV），保存 2D 相机并进入 3D（只改视图，无文档写入/撤销，记 `ZOOM PREVIOUS`）；`CAMERA TWO-POINT` / `CAMERA WALK` 按 `camera.two_point_not_implemented` / `camera.walk_not_implemented` 具名拒绝；无两点透视、无 walk/look-around、无相机高度锁定 |
-| Walk | `WALK` | pending | `3DWALK` 是具名拒绝 |
-| Look Around | `LOOKAROUND` | pending | 没有独立视线工具 |
+| Walk | `WALK` | partial | 真实视图导航：裸 `WALK` 一点捕获（走到该地面点，眼睛 z 不变）或 `WALK <distance>` 沿水平视向前进（负值后退），target 随 eye 平移（视向/距离不变），记 `ZOOM PREVIOUS`，只改视图、Viewer 合法；平面/正交视图 `walk.requires_perspective`、零步 `walk.no_distance`、垂直视向 `walk.degenerate_view`；不含碰撞/上下楼/连续按键漫游 |
+| Look Around | `LOOKAROUND` | partial | 真实视图导航：裸 `LOOKAROUND` 一点捕获（固定 eye 看向该点）或 `LOOKAROUND <yaw> <pitch>`（度，绕世界 +Z 偏航、绕相机右轴俯仰，保持视距），记 `ZOOM PREVIOUS`，只改视图、Viewer 合法；平面视图 `lookaround.requires_perspective`、看向眼点 `lookaround.no_direction`、垂直极点 `lookaround.pole`；不含自由拖动/连续环视 |
 
 ### Views（7；full 7）
 
@@ -221,6 +223,6 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
-- 仍有 2 个工具 `pending`（Walk、Look Around），以及 Match Photo/Overlays 两个托盘面板；Shadows/Fog/Outliner/Scenes/Soften Edges/
+- 工具层没有 `pending`；Match Photo/Overlays 两个托盘面板仍是 pending；Shadows/Fog/Outliner/Scenes/Soften Edges/
   Protractor 都已是有真实命令与面板的 `partial`（`cad_display`/`cad_outliner`/`cad_scenes`）。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

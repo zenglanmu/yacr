@@ -67,7 +67,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             // CHAMFEREDGE captures the one pixel pick hit point (the kernel's
             // nearest-edge seed).
             | DrawToolKind::ChamferEdge
-            | DrawToolKind::PressPull => 1,
+            | DrawToolKind::PressPull
+            // WALK / LOOK AROUND take one picked point each.
+            | DrawToolKind::Walk
+            | DrawToolKind::LookAround => 1,
             // WIPEOUT is the open-ended polygon capture: three vertices are the
             // minimum a closed ring needs.
             DrawToolKind::Wipeout => 3,

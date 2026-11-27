@@ -84,8 +84,8 @@ const CAMERA_NAVIGATE = panel('concept.camera.navigate', 'concept.section.naviga
 
 const CAMERA_MORE = panel('concept.camera.more', 'concept.section.other_cameras', [
   { id: 'CAMERA', labelKey: 'concept.tool.position_camera', icon: 'view', command: 'CAMERA', hintKey: 'concept.tool.position_camera.hint' },
-  pending('WALK', 'concept.tool.walk', 'pan'),
-  pending('LOOKAROUND', 'concept.tool.look_around', 'eye'),
+  { id: 'WALK', labelKey: 'concept.tool.walk', icon: 'pan', command: 'WALK', hintKey: 'concept.tool.walk.hint' },
+  { id: 'LOOKAROUND', labelKey: 'concept.tool.look_around', icon: 'eye', command: 'LOOKAROUND', hintKey: 'concept.tool.look_around.hint' },
   pending('MATCHPHOTO', 'concept.tool.match_photo', 'reference'),
 ]);
 

@@ -240,6 +240,9 @@ impl CadSession {
             // `CAMERA TWO-POINT|WALK`: named refusals (the bare selector is a
             // capture and never reaches this arm).
             super::commands::CAMERA_SELECTOR => self.camera_argument(argument, text),
+            // `WALK <distance>` / `LOOKAROUND <yaw> <pitch>`: typed navigation.
+            super::commands::WALK_SELECTOR => self.walk_argument(argument, text),
+            super::commands::LOOKAROUND_SELECTOR => self.lookaround_argument(argument, text),
             // `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: the extruded
             // glyph mesh command.
             super::commands::TEXT3D_SELECTOR => self.text3d_argument(argument, text),

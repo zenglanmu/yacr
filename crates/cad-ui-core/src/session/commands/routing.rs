@@ -51,6 +51,9 @@ pub(crate) fn interaction_request_for(
         CommandId::PositionCamera => {
             Some(InteractionRequest::BeginDraw(DrawToolKind::PositionCamera))
         }
+        // WALK / LOOK AROUND are one-point view navigation captures.
+        CommandId::Walk => Some(InteractionRequest::BeginDraw(DrawToolKind::Walk)),
+        CommandId::LookAround => Some(InteractionRequest::BeginDraw(DrawToolKind::LookAround)),
         // WIPEOUT starts the open-ended polygon capture (first point, then every
         // further boundary point, Enter finishes); the command stores one mask.
         CommandId::Wipeout => Some(InteractionRequest::BeginDraw(DrawToolKind::Wipeout)),

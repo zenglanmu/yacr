@@ -28,6 +28,7 @@ mod command_overrides;
 mod commands;
 mod diagnostics;
 mod param;
+mod walk_arguments;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
 mod dim_arguments;
 mod directory_pick;

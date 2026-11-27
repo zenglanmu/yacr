@@ -18,7 +18,7 @@ use super::*;
 
 use cad_domain::Point3;
 
-use crate::camera::{add, dot3, normalize3, scale3};
+use crate::camera::{add, cross, dot3, length3, normalize3, scale3, sub};
 use crate::{CommandPayload, VPointInput, ViewCommand, ViewSnapshot};
 
 impl Application {
@@ -720,6 +720,260 @@ impl Application {
                 "CAMERA: eye ({:.4}, {:.4}, {:.4}) looking at ({:.4}, {:.4}, {:.4}); the model is \
                  unchanged",
                 eye.x, eye.y, eye.z, target.x, target.y, target.z
+            ),
+        ))
+    }
+}
+
+/// Rotate `v` about the unit `axis` by `angle` radians (Rodrigues).
+fn rotate_about(v: Point3, axis: Point3, angle: f64) -> Point3 {
+    let cos = angle.cos();
+    let sin = angle.sin();
+    add(
+        add(scale3(v, cos), scale3(cross(axis, v), sin)),
+        scale3(axis, dot3(axis, v) * (1.0 - cos)),
+    )
+}
+
+/// The up hint for a view direction: world `+Z`, or `+Y` for a vertical look.
+fn up_for(forward: Point3) -> Point3 {
+    let z = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    };
+    if dot3(forward, z).abs() > 1.0 - 1e-9 {
+        Point3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        }
+    } else {
+        z
+    }
+}
+
+fn camera_refusal(code: &str, detail: impl std::fmt::Display) -> CadError {
+    CadError::InvalidInput(format!("{code}: {detail}"))
+}
+
+impl Application {
+    /// `WALK`: move the perspective eye horizontally.
+    ///
+    /// `WalkCommand::To` walks to the picked ground point (the eye keeps its z,
+    /// so the walker never climbs); `WalkCommand::By` walks the signed distance
+    /// along the horizontal component of the current view direction. The target
+    /// moves with the eye, so the view direction and distance are unchanged.
+    ///
+    /// View-only: no document write, no revision, no undo step; a
+    /// `ZOOM PREVIOUS` snapshot is recorded, and Viewer mode is legal.
+    ///
+    /// Refusals: `walk.payload`, `walk.requires_perspective` (only a 3D
+    /// perspective view can walk), `walk.invalid_point`, `walk.invalid_distance`,
+    /// `walk.no_distance` (a zero/vanishing step), `walk.degenerate_view` (the
+    /// view has no horizontal forward direction) and `walk.invalid_frame`.
+    pub(crate) fn walk(
+        &mut self,
+        _session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::Walk(action) = command.payload else {
+            return Err(camera_refusal(
+                "walk.payload",
+                "WALK needs a destination point or a distance",
+            ));
+        };
+        let viewport = self.viewport_mut(command)?;
+        if viewport.view_mode.kind() != ProjectionKind::ThreeD
+            || viewport.camera.projection.is_orthographic()
+        {
+            return Err(camera_refusal(
+                "walk.requires_perspective",
+                "WALK needs a 3D perspective view; switch to a perspective viewpoint first",
+            ));
+        }
+        let eye = viewport.camera.eye;
+        let target = viewport.camera.target;
+        let delta = match action {
+            WalkCommand::To(destination) => {
+                if !crate::camera::is_finite_point(destination) {
+                    return Err(camera_refusal(
+                        "walk.invalid_point",
+                        "the walk destination must be finite",
+                    ));
+                }
+                Point3 {
+                    x: destination.x - eye.x,
+                    y: destination.y - eye.y,
+                    z: 0.0,
+                }
+            }
+            WalkCommand::By(distance) => {
+                if !distance.is_finite() {
+                    return Err(camera_refusal(
+                        "walk.invalid_distance",
+                        "the walk distance must be finite",
+                    ));
+                }
+                let forward = Point3 {
+                    x: target.x - eye.x,
+                    y: target.y - eye.y,
+                    z: 0.0,
+                };
+                let Some(forward) = normalize3(forward) else {
+                    return Err(camera_refusal(
+                        "walk.degenerate_view",
+                        "the view has no horizontal forward direction (it looks straight up or                          down); look around first",
+                    ));
+                };
+                scale3(forward, distance)
+            }
+        };
+        let step = length3(delta);
+        if !(step.is_finite() && step > 1e-9) {
+            return Err(camera_refusal(
+                "walk.no_distance",
+                "the walk step is zero; pick a different destination or a non-zero distance",
+            ));
+        }
+        let camera = Camera {
+            eye: add(eye, delta),
+            target: add(target, delta),
+            up: viewport.camera.up,
+            projection: viewport.camera.projection,
+        };
+        camera.validate().map_err(|error| {
+            camera_refusal(
+                "walk.invalid_frame",
+                format!("the walk produced an invalid camera frame ({error})"),
+            )
+        })?;
+        viewport.push_view_snapshot();
+        viewport.camera = camera;
+        Ok(view_outcome(
+            "walk.moved",
+            format!(
+                "WALK: moved {step:.4} model units ({:.4}, {:.4}); the eye keeps z = {:.4} and the                  model is unchanged",
+                camera.eye.x, camera.eye.y, camera.eye.z
+            ),
+        ))
+    }
+
+    /// `LOOKAROUND`: turn the perspective view about its eye.
+    ///
+    /// `LookAroundCommand::At` points the view at the picked point (the eye does
+    /// not move); `LookAroundCommand::By` turns by yaw (about world `+Z`) and
+    /// pitch (about the camera's right axis), in degrees, keeping the eye and the
+    /// view distance. View-only, `ZOOM PREVIOUS`-undoable, Viewer-legal.
+    ///
+    /// Refusals: `lookaround.payload`, `lookaround.requires_perspective`,
+    /// `lookaround.invalid_point`, `lookaround.invalid_angle`,
+    /// `lookaround.no_direction` (looking at the eye itself),
+    /// `lookaround.pole` (a vertical view direction) and
+    /// `lookaround.invalid_frame`.
+    pub(crate) fn look_around(
+        &mut self,
+        _session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::LookAround(action) = command.payload else {
+            return Err(camera_refusal(
+                "lookaround.payload",
+                "LOOKAROUND needs a target point or yaw/pitch angles",
+            ));
+        };
+        let viewport = self.viewport_mut(command)?;
+        if viewport.view_mode.kind() != ProjectionKind::ThreeD
+            || viewport.camera.projection.is_orthographic()
+        {
+            return Err(camera_refusal(
+                "lookaround.requires_perspective",
+                "LOOKAROUND needs a 3D perspective view; switch to a perspective viewpoint first",
+            ));
+        }
+        let eye = viewport.camera.eye;
+        let target = viewport.camera.target;
+        let distance = {
+            let distance = viewport.camera.distance();
+            if distance.is_finite() && distance > 1e-6 {
+                distance
+            } else {
+                1000.0
+            }
+        };
+        let direction = match action {
+            LookAroundCommand::At(point) => {
+                if !crate::camera::is_finite_point(point) {
+                    return Err(camera_refusal(
+                        "lookaround.invalid_point",
+                        "the look-at point must be finite",
+                    ));
+                }
+                let Some(direction) = normalize3(sub(point, eye)) else {
+                    return Err(camera_refusal(
+                        "lookaround.no_direction",
+                        "the picked point coincides with the eye, so there is no direction to look",
+                    ));
+                };
+                direction
+            }
+            LookAroundCommand::By {
+                yaw_degrees,
+                pitch_degrees,
+            } => {
+                if !yaw_degrees.is_finite() || !pitch_degrees.is_finite() {
+                    return Err(camera_refusal(
+                        "lookaround.invalid_angle",
+                        "yaw and pitch must be finite degrees",
+                    ));
+                }
+                let basis = viewport.camera.view_basis().map_err(|error| {
+                    camera_refusal(
+                        "lookaround.invalid_frame",
+                        format!("the current view has no camera basis ({error})"),
+                    )
+                })?;
+                let world_z = Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                };
+                let yawed = rotate_about(basis.forward, world_z, yaw_degrees.to_radians());
+                let pitch_axis = normalize3(cross(yawed, world_z)).unwrap_or(basis.right);
+                rotate_about(yawed, pitch_axis, pitch_degrees.to_radians())
+            }
+        };
+        let world_z = Point3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        if length3(cross(direction, world_z)) < 1e-6 {
+            return Err(camera_refusal(
+                "lookaround.pole",
+                "the resulting view direction is vertical; choose another yaw/pitch or look-at                  point",
+            ));
+        }
+        let camera = Camera {
+            eye,
+            target: add(eye, scale3(direction, distance)),
+            up: up_for(direction),
+            projection: viewport.camera.projection,
+        };
+        camera.validate().map_err(|error| {
+            camera_refusal(
+                "lookaround.invalid_frame",
+                format!("the turn produced an invalid camera frame ({error})"),
+            )
+        })?;
+        viewport.push_view_snapshot();
+        viewport.camera = camera;
+        let _ = target;
+        Ok(view_outcome(
+            "lookaround.turned",
+            format!(
+                "LOOKAROUND: the eye stays at ({:.4}, {:.4}, {:.4}); the model is unchanged",
+                camera.eye.x, camera.eye.y, camera.eye.z
             ),
         ))
     }

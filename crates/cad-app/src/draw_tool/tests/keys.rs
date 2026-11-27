@@ -24,25 +24,33 @@ fn keys_indices_and_labels_round_trip_and_reject_unknowns() {
     assert_eq!(DrawToolKind::from_label("半径"), None);
     // The catalogue length is mirrored by the UI selector, so a new kind must be
     // appended (never inserted) and the count updated deliberately.
-    assert_eq!(DrawToolKind::ALL.len(), 66);
+    assert_eq!(DrawToolKind::ALL.len(), 68);
     assert_eq!(
         DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 1),
-        Some(DrawToolKind::PositionCamera)
+        Some(DrawToolKind::LookAround)
     );
     assert_eq!(
-        DrawToolKind::PositionCamera.index(),
+        DrawToolKind::LookAround.index(),
         DrawToolKind::ALL.len() - 1
     );
     assert_eq!(
         DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 2),
-        Some(DrawToolKind::Freehand)
+        Some(DrawToolKind::Walk)
     );
     assert_eq!(
         DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 3),
-        Some(DrawToolKind::Pie)
+        Some(DrawToolKind::PositionCamera)
     );
     assert_eq!(
         DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 4),
+        Some(DrawToolKind::Freehand)
+    );
+    assert_eq!(
+        DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 5),
+        Some(DrawToolKind::Pie)
+    );
+    assert_eq!(
+        DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 6),
         Some(DrawToolKind::RectangRotated)
     );
 }
