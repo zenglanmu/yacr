@@ -174,6 +174,40 @@ export function ungroupCommands(
   return commands;
 }
 
+/** One Outliner draw-order move. */
+export interface ReorderPlan {
+  /** Selection ids in the command's [reference, moving] order. */
+  readonly ids: readonly number[];
+  /** `DRAWORDER BELOW` moves earlier; `ABOVE` moves later. */
+  readonly command: 'DRAWORDER BELOW' | 'DRAWORDER ABOVE';
+}
+
+/**
+ * The `DRAWORDER` plan for moving one top-level row up/down.
+ *
+ * Only depth-0 entity/INSERT rows participate; group rows carry no draw order
+ * and block members are not model-space addresses. The reference is the sibling
+ * above (move up) or below (move down), and the row to move is second.
+ */
+export function reorderPlan(
+  rows: readonly OutlinerRow[],
+  key: string,
+  direction: 'up' | 'down',
+): ReorderPlan | null {
+  const targets = rows.filter(row =>
+    row.depth === 0 && row.kind !== 'group' && row.selectable
+    && row.selectIds.length === 1);
+  const index = targets.findIndex(row => outlinerRowKey(row) === key);
+  if (index < 0) return null;
+  const row = targets[index];
+  const sibling = direction === 'up' ? targets[index - 1] : targets[index + 1];
+  if (!sibling) return null;
+  return {
+    ids: [sibling.selectIds[0], row.selectIds[0]],
+    command: direction === 'up' ? 'DRAWORDER BELOW' : 'DRAWORDER ABOVE',
+  };
+}
+
 /** The stable key for one row (its kind and id are unique in one tree). */
 export function outlinerRowKey(row: Pick<OutlinerRow, 'kind' | 'id'>): string {
   return `${row.kind}:${row.id}`;

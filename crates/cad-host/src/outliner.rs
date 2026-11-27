@@ -141,13 +141,14 @@ impl HostCore {
                 });
             }
         }
-        // Top-level model-space entities in id order: stable output, and the same
-        // id order the reference's "Model" list uses for ungrouped geometry.
+        // Top-level model-space entities in draw order (then id): the Outliner's
+        // up/down actions dispatch `DRAWORDER`, so the list must reflect the
+        // drawing's paint order rather than a fixed id order.
         let mut top_level: Vec<&cad_db::DbEntity> = database
             .entities()
             .filter(|entity| entity.space == SpaceId::Model && !grouped.contains(&entity.id))
             .collect();
-        top_level.sort_by_key(|entity| entity.id.0);
+        top_level.sort_by_key(|entity| (entity.draw_order, entity.id.0));
         for entity in top_level {
             match &entity.geometry {
                 SemanticGeometry::Insert { block, .. } => {

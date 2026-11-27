@@ -7,7 +7,7 @@
 //! is involved.
 
 use super::*;
-use cad_app::{AnnotationBatchPayload, GroupCommand};
+use cad_app::{AnnotationBatchPayload, Draw2Payload, DrawOrderMode, GroupCommand};
 
 /// A core with **no** document (`StartDocument::Empty`), so the empty answer is
 /// a real one rather than the demo document's rows.
@@ -187,4 +187,32 @@ fn a_session_hidden_entity_is_marked_hidden_in_the_tree() {
         .find(|row| row.kind == "entity" && row.id == entity.0 as u64)
         .expect("the entity row");
     assert!(!row.hidden);
+}
+
+#[test]
+fn top_level_rows_follow_draw_order_after_draworder() {
+    let core = core();
+    let (a, b) = add_two_lines(&core);
+    let document = core.controller.borrow().document_id;
+    core.controller.borrow_mut().session.selection.replace([
+        cad_app::selection::model_ref(document, b),
+        cad_app::selection::model_ref(document, a),
+    ]);
+    run_controller_command(
+        &core,
+        CommandId::DrawOrder,
+        CommandPayload::Draw2(Box::new(Draw2Payload::DrawOrder(DrawOrderMode::Above))),
+    );
+    let tree = core.outliner_tree();
+    let position = |id: cad_domain::EntityId| {
+        tree.rows
+            .iter()
+            .position(|row| row.kind == "entity" && row.id == id.0 as u64)
+            .expect("the entity row")
+    };
+    let (pb, pa) = (position(b), position(a));
+    assert!(
+        pb < pa,
+        "the moved row follows the drawing's new draw order: b={pb}, a={pa}"
+    );
 }

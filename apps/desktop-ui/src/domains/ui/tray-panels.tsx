@@ -14,6 +14,7 @@ import {
   outlinerRowKey,
   ungroupCommands,
   readOutliner,
+  reorderPlan,
   selectedOutlinerIds,
   visibleOutlinerRows,
 } from '../concept/outliner.ts';
@@ -334,6 +335,19 @@ export function OutlinerBody() {
     dragKeys.has(outlinerRowKey(candidate))
     && candidate.selectable
     && candidate.kind !== 'group');
+  const reorder = (row: OutlinerRow, direction: 'up' | 'down') => {
+    const plan = reorderPlan(rows, outlinerRowKey(row), direction);
+    if (plan === null) return;
+    setSelectionError('');
+    void selectBimEntities(invoke, plan.ids).then(result => {
+      if (result.kind === 'error') {
+        setSelectionError(result.reason);
+        return;
+      }
+      shell.runCommand(plan.command);
+      setNonce(value => value + 1);
+    });
+  };
   const dropToUngroup = () => {
     const commands = ungroupCommands(rows, dragKeys);
     if (commands.length === 0) return;
@@ -609,6 +623,30 @@ export function OutlinerBody() {
                   >
                     {t('concept.outliner.remove_from_group')}
                   </button>
+                ) : null}
+                {row.depth === 0 && row.kind !== 'group' && row.selectable ? (
+                  <>
+                    <button
+                      type="button"
+                      className="concept-panel__action"
+                      disabled={reorderPlan(rows, key, 'up') === null
+                        || !shell.canCommand('DRAWORDER')}
+                      title={t('concept.outliner.move_up')}
+                      onClick={() => reorder(row, 'up')}
+                    >
+                      {'\u2191'}
+                    </button>
+                    <button
+                      type="button"
+                      className="concept-panel__action"
+                      disabled={reorderPlan(rows, key, 'down') === null
+                        || !shell.canCommand('DRAWORDER')}
+                      title={t('concept.outliner.move_down')}
+                      onClick={() => reorder(row, 'down')}
+                    >
+                      {'\u2193'}
+                    </button>
+                  </>
                 ) : null}
                 {renaming !== key && row.kind === 'group'
                   && groupRenameCommand(row.label, row.label) !== null ? (

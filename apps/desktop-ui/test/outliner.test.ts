@@ -14,6 +14,7 @@ import {
   ungroupCommands,
   outlinerRowKey,
   parseOutlinerAnswer,
+  reorderPlan,
   readOutliner,
   visibleOutlinerRows,
 } from '../src/domains/concept/outliner.ts';
@@ -178,4 +179,23 @@ test('ungroup commands group the selected rows by their old parent', () => {
     'GROUPEDIT "Roof" REMOVE 12',
   ]);
   assert.deepEqual(ungroupCommands(rows, new Set([outlinerRowKey(rows[4])])), []);
+});
+
+test('reorder plans use the sibling as reference and skip groups', () => {
+  const rows = parseOutlinerAnswer({ rows: [
+    { kind: 'group', id: 1, label: 'Walls', depth: 0, selectable: true, selectIds: [10] },
+    { kind: 'entity', id: 10, label: 'a', depth: 0, selectable: true, selectIds: [10] },
+    { kind: 'entity', id: 11, label: 'b', depth: 0, selectable: true, selectIds: [11] },
+  ] }).rows;
+  assert.deepEqual(
+    reorderPlan(rows, outlinerRowKey(rows[2]), 'up'),
+    { ids: [10, 11], command: 'DRAWORDER BELOW' },
+  );
+  assert.deepEqual(
+    reorderPlan(rows, outlinerRowKey(rows[1]), 'down'),
+    { ids: [11, 10], command: 'DRAWORDER ABOVE' },
+  );
+  assert.equal(reorderPlan(rows, outlinerRowKey(rows[0]), 'up'), null);
+  assert.equal(reorderPlan(rows, outlinerRowKey(rows[1]), 'up'), null);
+  assert.equal(reorderPlan(rows, outlinerRowKey(rows[2]), 'down'), null);
 });

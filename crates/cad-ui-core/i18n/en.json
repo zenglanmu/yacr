@@ -3661,6 +3661,8 @@
   "concept.outliner.group_name": "New group name",
   "concept.outliner.group_selected": "Group selected",
   "concept.outliner.drop_to_ungroup": "Drop rows here to remove them from their groups",
+  "concept.outliner.move_up": "Move up (earlier in draw order)",
+  "concept.outliner.move_down": "Move down (later in draw order)",
   "concept.outliner.regroup_hint": "Drag rows onto a group to add them; a group member row can be removed from its group.",
   "concept.outliner.remove_from_group": "Remove from group",
   "concept.outliner.remove_named": "Remove from {name}",
