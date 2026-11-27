@@ -414,7 +414,7 @@ impl Application {
             .min()
             .unwrap_or(0);
         if !meshes.is_empty() {
-            return self.boolean_meshes(command, op, meshes, diagnostics);
+            return self.boolean_meshes(command, op, meshes, diagnostics, op_label(op));
         }
         let Some(modeler) = self.solid_modeler.clone() else {
             return Err(CadError::Unsupported(SOLID_MODELER_UNSUPPORTED.into()));

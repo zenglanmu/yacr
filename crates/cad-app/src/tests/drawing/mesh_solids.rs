@@ -496,3 +496,180 @@ impl cad_kernel_adapter::SolidModeler for StubSolidModeler {
         })
     }
 }
+
+fn open_mesh_entity(id: u128, order: i64) -> DbEntity {
+    DbEntity {
+        object: DbObject {
+            id: ObjectId(id),
+            type_key: "AcDbSubDMesh".into(),
+            revision: Revision(0),
+            source_handle: None,
+        },
+        id: EntityId(id),
+        layer: LayerId(0),
+        space: SpaceId::Model,
+        geometry: SemanticGeometry::Mesh(cad_domain::Mesh {
+            vertices: vec![
+                cad_domain::Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                cad_domain::Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                cad_domain::Point3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ],
+            triangles: vec![[0, 1, 2]],
+            ..cad_domain::Mesh::default()
+        }),
+        draw_order: order,
+    }
+}
+
+#[test]
+fn outer_shell_starts_one_union_job_over_two_closed_meshes() {
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    let ops = attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::OuterShell,
+        CommandPayload::None,
+    )
+    .expect("a valid outer shell must start a union job");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "mesh.boolean_started")
+        .expect("the outcome names the mesh job");
+    assert!(diagnostic.message.contains("OUTERSHELL"), "{diagnostic:?}");
+    assert!(
+        ops.lock().expect("op log").is_empty(),
+        "the worker runs later"
+    );
+    assert_eq!(entity_count(&app), 2, "the command writes nothing itself");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match app.poll_mesh_job_take() {
+            MeshJobTake::Running => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the mesh job did not settle"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            MeshJobTake::Done { topology, .. } => {
+                assert_eq!(topology.topology, MeshTopology::ClosedManifold);
+                break;
+            }
+            other => panic!("the fake mesh job must succeed, got {other:?}"),
+        }
+    }
+    assert_eq!(
+        ops.lock().expect("op log").as_slice(),
+        &["boolean:union".to_string()],
+        "outer shell is a mesh union at the kernel"
+    );
+}
+
+#[test]
+fn outer_shell_needs_two_bodies_and_writes_nothing_without_one() {
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids[..1]);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::OuterShell,
+        CommandPayload::None,
+    )
+    .expect_err("one body is not a shell");
+    assert!(invalid_text(error).contains("outershell.needs_two"));
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(revision(&app), Revision(0));
+}
+
+#[test]
+fn outer_shell_refuses_an_open_shell_before_the_kernel() {
+    let (mut app, mut session, ids) =
+        app_with_entities(vec![mesh_entity(10, 0), open_mesh_entity(11, 1)]);
+    let ops = attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::OuterShell,
+        CommandPayload::None,
+    )
+    .expect_err("an open shell cannot be unioned");
+    let text = invalid_text(error);
+    assert!(text.contains("outershell.open_shell"), "{text}");
+    assert!(text.contains("boundary edge"), "{text}");
+    assert!(ops.lock().expect("op log").is_empty(), "no worker started");
+    assert_eq!(entity_count(&app), 2);
+    assert_eq!(revision(&app), Revision(0));
+}
+
+#[test]
+fn outer_shell_refuses_an_exact_solid_operand_by_name() {
+    let (mut app, mut session, ids) =
+        app_with_entities(vec![mesh_entity(10, 0), exact_entity(11, 1)]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::OuterShell,
+        CommandPayload::None,
+    )
+    .expect_err("outer shell is mesh-only");
+    let text = invalid_text(error);
+    assert!(text.contains("outershell.not_mesh"), "{text}");
+    assert!(text.contains("exact solid"), "{text}");
+    assert_eq!(entity_count(&app), 2);
+}
+
+#[test]
+fn outer_shell_refuses_without_a_mesh_modeler_and_over_budget() {
+    // No modeler installed: a valid two-mesh selection reports the carrier's
+    // stable refusal.
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::OuterShell,
+        CommandPayload::None,
+    )
+    .expect_err("no mesh modeler");
+    assert!(unsupported_text(error).contains("unsupported-runtime: mesh-modeler"));
+
+    // Budget: one operand over the input cap is refused before any topology walk.
+    let mut huge = domain_mesh();
+    huge.triangles =
+        vec![[0, 1, 2]; crate::app_drawing::mesh_solids::OUTERSHELL_MAX_INPUT_TRIANGLES + 1];
+    let huge_entity = DbEntity {
+        geometry: SemanticGeometry::Mesh(huge),
+        ..mesh_entity(12, 0)
+    };
+    let (mut app, mut session, ids) = app_with_entities(vec![mesh_entity(10, 0), huge_entity]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::OuterShell,
+        CommandPayload::None,
+    )
+    .expect_err("over the shell budget");
+    assert!(invalid_text(error).contains("outershell.budget"));
+}

@@ -43,6 +43,7 @@ mod mechanical;
 mod named_file;
 mod navigation;
 mod ortho;
+mod outer_shell;
 mod outliner;
 mod p4_origin_dispatch;
 mod p4_trace;

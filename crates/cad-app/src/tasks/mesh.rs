@@ -98,7 +98,7 @@ impl MeshJobOperand {
 /// A `Sheet`/`Wire` body, or a body with exact geometry, is **not** a mesh
 /// operand: a sheet has no volume and an exact body must go through the solid
 /// seam, never be silently tessellated.
-fn mesh_geometry(entity: &DbEntity) -> Option<&cad_domain::Mesh> {
+pub(crate) fn mesh_geometry(entity: &DbEntity) -> Option<&cad_domain::Mesh> {
     match &entity.geometry {
         SemanticGeometry::Mesh(mesh) if !mesh.triangles.is_empty() && !mesh.vertices.is_empty() => {
             Some(mesh)

@@ -391,3 +391,55 @@ fn an_edited_operand_discards_the_mesh_result_as_stale() {
     assert_eq!(revision(&controller), Revision(0));
     assert_eq!(undo_depth(&controller), 0);
 }
+
+#[test]
+fn outer_shell_commits_one_mesh_row_and_one_undo_step_through_the_command() {
+    let mut controller = controller_with(&[(40, cube_data()), (41, cube_data())]);
+    controller
+        .application
+        .set_mesh_modeler(Some(Arc::new(FakeMeshModeler { refusal: None })));
+    let references: Vec<cad_domain::SelectionRef> = [40_u128, 41]
+        .into_iter()
+        .map(|id| cad_domain::SelectionRef {
+            document: controller.document_id,
+            entity: EntityId(id),
+            instance: cad_domain::InstancePath::default(),
+            sub_element: None,
+        })
+        .collect();
+    controller.session.selection.replace(references);
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::OuterShell,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: CommandPayload::None,
+        })
+        .expect("OUTERSHELL starts the union job");
+
+    let MeshJobPoll::Done { object, .. } = wait(&mut controller) else {
+        panic!("the fake outer shell must commit");
+    };
+    assert_eq!(
+        entity_count(&controller),
+        1,
+        "the shell replaces both operands"
+    );
+    let committed = controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entity(EntityId(object.0))
+        .expect("the committed row");
+    assert_eq!(committed.object.type_key, "AcDbSubDMesh");
+    assert_eq!(undo_depth(&controller), 1);
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::Undo,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: CommandPayload::None,
+        })
+        .expect("the shell is undoable");
+    assert_eq!(entity_count(&controller), 2);
+}

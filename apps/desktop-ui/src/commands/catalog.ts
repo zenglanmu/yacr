@@ -922,6 +922,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'LOFT', labelKey: 'draw.kind.loft', icon: 'dot', group: 'modify' },
   { id: 'INTERSECT', labelKey: 'draw.kind.intersect', icon: 'dot', group: 'modify' },
   { id: 'UNION', labelKey: 'draw.kind.union', icon: 'dot', group: 'modify' },
+  { id: 'OUTERSHELL', labelKey: 'draw.kind.outershell', icon: 'dot', group: 'modify' },
   { id: 'SUBTRACT', labelKey: 'draw.kind.subtract', icon: 'dot', group: 'modify' },
   { id: 'SLICE', labelKey: 'draw.kind.slice', icon: 'dot', group: 'modify' },
   { id: 'THICKEN', labelKey: 'draw.kind.thicken', icon: 'dot', group: 'modify' },

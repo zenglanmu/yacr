@@ -19,10 +19,10 @@
 
 use super::*;
 use crate::app_utility::require_none_payload;
-use crate::tasks::{is_mesh_operand, MeshJobKind, MeshJobOperand, MeshJobPlan};
-use cad_kernel_adapter::{BooleanOp, MeshBooleanOp, MeshRepairMode, MeshWindingRule};
+use crate::tasks::{is_mesh_operand, mesh_geometry, MeshJobKind, MeshJobOperand, MeshJobPlan};
+use cad_kernel_adapter::{BooleanOp, MeshBooleanOp, MeshData, MeshRepairMode, MeshWindingRule};
 
-use super::solids::{boolean_operand_brep, describe_operand, invalid, op_label};
+use super::solids::{boolean_operand_brep, describe_operand, invalid};
 
 /// The ACIS-style class key every mesh boolean/repair result is stored under.
 ///
@@ -90,6 +90,7 @@ impl Application {
         op: BooleanOp,
         entities: Vec<DbEntity>,
         mut diagnostics: Vec<Diagnostic>,
+        started_label: &str,
     ) -> CadResult<CommandOutcome> {
         let Some(modeler) = self.mesh_modeler.clone() else {
             return Err(CadError::Unsupported(MESH_MODELER_UNSUPPORTED.into()));
@@ -122,10 +123,7 @@ impl Application {
         diagnostics.push(Diagnostic {
             object: None,
             code: "mesh.boolean_started".into(),
-            message: format!(
-                "{}: {MESH_JOB_SETTLEMENT} ({operand_count} meshes)",
-                op_label(op)
-            ),
+            message: format!("{started_label}: {MESH_JOB_SETTLEMENT} ({operand_count} meshes)"),
         });
         Ok(CommandOutcome {
             objects: Vec::new(),
@@ -232,5 +230,179 @@ impl Application {
             measurement: None,
             point_report: None,
         })
+    }
+}
+
+/// The safety valve on the combined OUTERSHELL input.
+///
+/// A shell union over more input than this is refused by name instead of tying
+/// up a worker for an interaction the user cannot reasonably wait for. The
+/// per-carrier `mesh.sync_budget` (dom-canvas inline execution) still applies.
+pub(crate) const OUTERSHELL_MAX_INPUT_TRIANGLES: usize = 1_000_000;
+
+impl Application {
+    /// `OUTERSHELL`: union the selected closed mesh bodies into one shell.
+    ///
+    /// SketchUp's Outer Shell keeps only the outer surface of the selected
+    /// solids, which for closed manifold bodies is exactly a mesh **union**
+    /// through the same kernel the `UNION` command uses (ADR-0061). Unlike
+    /// `UNION`, this command is mesh-only: an exact B-rep operand is refused by
+    /// name instead of being silently tessellated, and every operand's topology
+    /// is checked **before** a worker starts, so an open shell or a non-manifold
+    /// row never reaches the kernel.
+    ///
+    /// Refusals (nothing written, no worker): `outershell.payload`,
+    /// `outershell.needs_two`, `outershell.sub_element_not_supported`,
+    /// `outershell.layer_mismatch`, `outershell.space_mismatch`,
+    /// `outershell.not_mesh`, `outershell.open_shell`,
+    /// `outershell.non_manifold`, `outershell.budget`, the carrier's
+    /// `unsupported-runtime: mesh-modeler`, and Viewer's `PermissionDenied`.
+    pub(crate) fn outer_shell(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command, "OUTERSHELL")?;
+        if session.app_mode() == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
+        let refs = session.selection.refs().to_vec();
+        if refs.len() < 2 {
+            return Err(invalid(
+                "outershell.needs_two",
+                format!(
+                    "OUTERSHELL needs at least two selected closed mesh bodies, got {}",
+                    refs.len()
+                ),
+            ));
+        }
+        if refs
+            .iter()
+            .any(|reference| reference.sub_element.is_some() || !reference.instance.0.is_empty())
+        {
+            return Err(invalid(
+                "outershell.sub_element_not_supported",
+                "OUTERSHELL combines whole bodies; a sub-element or instance-path reference is not \
+                 a body",
+            ));
+        }
+        let (entities, diagnostics) = {
+            let Some(document) = self.workspace.documents.get(&command.document) else {
+                return Err(CadError::InvalidInput("document not open".into()));
+            };
+            let drawing = document.drawing.as_ref();
+            Self::resolve_selection(
+                drawing,
+                command.document,
+                &refs,
+                "outershell",
+                "OUTERSHELL",
+                "combined",
+                false,
+            )?
+        };
+        if entities.len() < 2 {
+            return Err(invalid(
+                "outershell.needs_two",
+                "OUTERSHELL needs at least two distinct selected bodies",
+            ));
+        }
+        let layer = entities[0].layer;
+        let space = entities[0].space.clone();
+        for entity in &entities {
+            if entity.layer != layer {
+                return Err(invalid(
+                    "outershell.layer_mismatch",
+                    format!(
+                        "entity {} is on layer {} but the first operand is on layer {}",
+                        entity.id.0, entity.layer.0, layer.0
+                    ),
+                ));
+            }
+            if entity.space != space {
+                return Err(invalid(
+                    "outershell.space_mismatch",
+                    format!(
+                        "entity {} is in another space than the first operand; OUTERSHELL never \
+                         crosses model/paper space",
+                        entity.id.0
+                    ),
+                ));
+            }
+        }
+        let mut total_triangles = 0usize;
+        for entity in &entities {
+            match classify_boolean_operand(entity) {
+                Some(BooleanOperand::Mesh) => {}
+                Some(BooleanOperand::Exact(_)) => {
+                    return Err(invalid(
+                        "outershell.not_mesh",
+                        format!(
+                            "entity {} is an exact solid; OUTERSHELL unions closed mesh bodies                              (use UNION for exact solids)",
+                            entity.id.0
+                        ),
+                    ))
+                }
+                None => {
+                    return Err(invalid(
+                        "outershell.not_mesh",
+                        format!(
+                            "entity {} is {}; OUTERSHELL needs closed mesh bodies",
+                            entity.id.0,
+                            describe_operand(entity)
+                        ),
+                    ))
+                }
+            }
+            let Some(mesh) = mesh_geometry(entity) else {
+                return Err(invalid(
+                    "outershell.not_mesh",
+                    format!("entity {} carries no mesh geometry", entity.id.0),
+                ));
+            };
+            total_triangles += mesh.triangles.len();
+            if total_triangles > OUTERSHELL_MAX_INPUT_TRIANGLES {
+                return Err(invalid(
+                    "outershell.budget",
+                    format!(
+                        "the selected meshes hold {total_triangles} triangles, over the \
+                         {OUTERSHELL_MAX_INPUT_TRIANGLES} OUTERSHELL input budget; reduce the \
+                         selection"
+                    ),
+                ));
+            }
+            let data = MeshData::from_parts(mesh.vertices.clone(), mesh.triangles.clone());
+            let topology = cad_kernel_adapter::inspect_topology_welded(&data);
+            match topology.topology() {
+                cad_kernel_adapter::MeshTopology::ClosedManifold => {}
+                cad_kernel_adapter::MeshTopology::OpenShell => {
+                    return Err(invalid(
+                        "outershell.open_shell",
+                        format!(
+                            "entity {} is an open shell ({} boundary edge(s)); OUTERSHELL needs \
+                             closed bodies",
+                            entity.id.0, topology.boundary_edges
+                        ),
+                    ))
+                }
+                cad_kernel_adapter::MeshTopology::NonManifold => {
+                    return Err(invalid(
+                        "outershell.non_manifold",
+                        format!(
+                            "entity {} is non-manifold ({} edge(s) shared by three or more \
+                             triangles); OUTERSHELL needs closed manifold bodies",
+                            entity.id.0, topology.non_manifold_edges
+                        ),
+                    ))
+                }
+            }
+        }
+        self.boolean_meshes(
+            command,
+            BooleanOp::Union,
+            entities,
+            diagnostics,
+            "OUTERSHELL",
+        )
     }
 }

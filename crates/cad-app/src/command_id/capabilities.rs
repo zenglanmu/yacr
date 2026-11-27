@@ -153,6 +153,8 @@ impl CommandId {
                 | Self::Fog
                 // TEXT3D writes one extruded glyph mesh row.
                 | Self::Text3d
+                // OUTERSHELL replaces >=2 mesh bodies with one union mesh.
+                | Self::OuterShell
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock

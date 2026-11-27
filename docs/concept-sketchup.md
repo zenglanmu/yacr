@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 12 | 17.4% |
-| `pending` | 3 | 4.3% |
+| `partial` | 13 | 18.8% |
+| `pending` | 2 | 2.9% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 66/69 = 95.7% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 67/69 = 97.1% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -51,6 +51,9 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **外壳**（2026-11-27，ADR-0070）：`OUTERSHELL` 复用 `UNION` 的 manifold 网格布尔，把所选闭合
+  网格体合并成一个外壳（一次事务/一步撤销）；开放壳/非流形/精确实体/超预算/无 modeler 都在启动前
+  按名拒绝。
   **三维文字**（2026-11-27，ADR-0069）：`TEXT3D` 用宿主 outline 引擎的**已填充字形网格**挤出
   一个 `AcDbSubDMesh`（盖沿用显示三角形、侧墙来自边界边），一次事务/一步撤销；SHX 描边与超预算
   按名拒绝，无字体对话框/旋转/对齐。
@@ -160,7 +163,7 @@
 | Union | `UNION` | full | 精确 `Body3d{Solid,Exact}` 或闭合网格；混合选择拒绝；网格结果非精确 |
 | Subtract | `SUBTRACT` | full | 同上 |
 | Intersect | `INTERSECT` | full | 同上 |
-| Outer Shell | `OUTERSHELL` | pending | 没有“只留外表面”的网格操作 |
+| Outer Shell | `OUTERSHELL` | partial | `OUTERSHELL` 把所选**闭合网格体**经既有 manifold 布尔路径合并成一个外壳（`AcDbSubDMesh`，一次事务/一步撤销）；启动前按名拒绝 `<2` 个操作数、开放壳（`outershell.open_shell`）、非流形（`non_manifold`）、精确实体（`not_mesh`）、超预算（`budget`）与无 modeler 载体；不含“保留内部空腔/逐体 shell 偏移”，也不接受精确实体或混合类 |
 | Trim | `TRIMSOLID` | pending | 没有保留刀具的裁剪 |
 | Split | `SPLITSOLID` | pending | 没有双结果分割 |
 
@@ -209,7 +212,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
-- 其余 `pending` 工具（Outer Shell/Trim/Split/Camera/Walk/Look Around）与
+- 其余 `pending` 工具（Trim/Split/Camera/Walk/Look Around）与
   Match Photo/Overlays 托盘面板保持显式 pending；Shadows/Fog/Outliner/Scenes/Soften Edges/
   Protractor 都已是有真实命令与面板的 `partial`（`cad_display`/`cad_outliner`/`cad_scenes`）。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

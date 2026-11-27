@@ -553,6 +553,7 @@ export const HOST_NAMES = [
   'LOFT',
   'INTERSECT',
   'UNION',
+  'OUTERSHELL',
   'SUBTRACT',
   'SLICE',
   'THICKEN',

@@ -771,6 +771,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // commits when it settles. The sentence is the command's own hint, so the
   // disabled row and the refusal word the rule once.
   UNION: Object.freeze({ count: 2, reasonKey: 'draw.kind.union.hint' }),
+  // OUTERSHELL unions the selected closed mesh bodies into one shell, so two is
+  // the real minimum; the host refuses non-mesh/open/budget operands by name.
+  OUTERSHELL: Object.freeze({ count: 2, reasonKey: 'draw.kind.outershell.hint' }),
   SUBTRACT: Object.freeze({ count: 2, reasonKey: 'draw.kind.subtract.hint' }),
   INTERSECT: Object.freeze({ count: 2, reasonKey: 'draw.kind.intersect.hint' }),
   // CHAMFEREDGE (ADR-0036 P2.0) cuts one edge of the **one** selected exact

@@ -38,6 +38,9 @@ pub enum CommandId {
     /// `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: one extruded glyph
     /// mesh (`AcDbSubDMesh`) from the host's outline font engine.
     Text3d,
+    /// `OUTERSHELL`: union the selected closed mesh bodies into one
+    /// `AcDbSubDMesh`, keeping only the outer surface (SketchUp Outer Shell).
+    OuterShell,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
