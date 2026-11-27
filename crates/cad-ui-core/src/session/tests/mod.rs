@@ -30,6 +30,7 @@ mod tests_layers;
 mod tests_mechanical;
 mod tests_mesh;
 mod tests_native_pinch;
+mod tests_outliner;
 mod tests_param;
 mod tests_polyline_width;
 mod tests_properties;

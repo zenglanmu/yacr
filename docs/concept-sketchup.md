@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 8 | 11.6% |
-| `pending` | 7 | 10.1% |
+| `partial` | 9 | 13.0% |
+| `pending` | 6 | 8.7% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 62/69 = 89.9% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 63/69 = 91.3% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -48,6 +48,9 @@
   （方位角/高度角 + 开关）与雾区间/颜色；`SHADOWS`/`FOG` 各一次 revision/一步撤销，渲染器把太阳
   当方向光替换相机 key light、可见 shader 按视距向雾色混合；**投射阴影仍未实现**。
   托盘 Shadows/Fog 面板通过 `cad_display` host read 显示当前值并 dispatch 上述命令。
+  **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
+  （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
+  点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
   **场景**（2026-11-27，ADR-0063）：`tables/scenes.json`（minor 20）存命名相机/空间/样式快照，
   `SCENE SAVE/RESTORE/LIST/DELETE` 各按一条 revision/一步撤销（RESTORE 是会话应用，记
   `ZOOM PREVIOUS`），托盘 Scenes 面板通过 `cad_scenes` host read 列表并 dispatch 恢复/保存/
@@ -175,7 +178,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Match Photo | pending | 无照片匹配 |
 | Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化/场景快照 |
 | Overlays | pending | 无 overlay 系统 |
-| Outliner | pending | 无层级树编辑 |
+| Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**只读**：改名/重排/拖拽归组/建组/隐藏都未实现，只投影模型空间、只展开一层 |
 
 ## 5. 本轮验收与后续
 

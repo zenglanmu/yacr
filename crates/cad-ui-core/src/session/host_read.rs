@@ -29,6 +29,7 @@ use crate::host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
 };
 use crate::mechanical::MechanicalTreeResponse;
+use crate::outliner::OutlinerResponse;
 use crate::param::ParamListResponse;
 use crate::scene::ScenesResponse;
 
@@ -58,6 +59,7 @@ impl CadSession {
             }
             HostReadRequest::Scenes => Ok(HostReadAnswer::Scenes(self.scenes())),
             HostReadRequest::Display => Ok(HostReadAnswer::Display(self.display())),
+            HostReadRequest::Outliner => Ok(HostReadAnswer::Outliner(self.outliner())),
         }
     }
 }
@@ -79,6 +81,15 @@ impl CadSession {
     /// reports its own refusal at the wire layer.
     pub fn display(&self) -> DisplayResponse {
         DisplayResponse::from_host(self.core.display())
+    }
+
+    /// The open document's Outliner tree.
+    ///
+    /// Host content only: no document answers an empty tree (the panel's empty
+    /// state), never an error; a carrier with no lane still reports its own
+    /// refusal at the wire layer.
+    pub fn outliner(&self) -> OutlinerResponse {
+        OutlinerResponse::from_host(self.core.outliner_tree())
     }
 }
 
@@ -123,7 +134,8 @@ pub fn bim_query(
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::ActionRecorder(_)
         | HostReadAnswer::Scenes(_)
-        | HostReadAnswer::Display(_) => Err(format!(
+        | HostReadAnswer::Display(_)
+        | HostReadAnswer::Outliner(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a BIM query"
         )),
     }
@@ -142,7 +154,8 @@ pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::ActionRecorder(_)
         | HostReadAnswer::Scenes(_)
-        | HostReadAnswer::Display(_) => Err(format!(
+        | HostReadAnswer::Display(_)
+        | HostReadAnswer::Outliner(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a parameter list"
         )),
     }
@@ -161,7 +174,8 @@ pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, 
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::Scenes(_)
-        | HostReadAnswer::Display(_) => Err(format!(
+        | HostReadAnswer::Display(_)
+        | HostReadAnswer::Outliner(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an action-recorder read"
         )),
     }
@@ -181,7 +195,8 @@ pub fn scenes(reads: &dyn HostReads) -> Result<ScenesResponse, String> {
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::ActionRecorder(_)
-        | HostReadAnswer::Display(_) => Err(format!(
+        | HostReadAnswer::Display(_)
+        | HostReadAnswer::Outliner(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a scenes read"
         )),
     }
@@ -194,7 +209,8 @@ pub fn mechanical_tree(reads: &dyn HostReads) -> Result<MechanicalTreeResponse, 
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::ActionRecorder(_)
         | HostReadAnswer::Scenes(_)
-        | HostReadAnswer::Display(_) => Err(format!(
+        | HostReadAnswer::Display(_)
+        | HostReadAnswer::Outliner(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a mechanical tree"
         )),
     }
@@ -212,8 +228,28 @@ pub fn display(reads: &dyn HostReads) -> Result<DisplayResponse, String> {
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::ActionRecorder(_)
-        | HostReadAnswer::Scenes(_) => Err(format!(
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Outliner(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a display read"
+        )),
+    }
+}
+
+/// `cad_outliner`: the open document's hierarchy.
+///
+/// One request-carrying read over the shared seam; the session's handler is
+/// [`CadSession::outliner`]. A carrier without a lane answers its own
+/// `unsupported-runtime: outliner` refusal, never an empty tree.
+pub fn outliner(reads: &dyn HostReads) -> Result<OutlinerResponse, String> {
+    match reads.host_read(&HostReadRequest::Outliner)? {
+        HostReadAnswer::Outliner(response) => Ok(response),
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::ParamList(_)
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Display(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an outliner read"
         )),
     }
 }

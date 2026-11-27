@@ -67,6 +67,7 @@ mod input;
 mod mechanical;
 mod open;
 mod orbit_sensitivity;
+mod outliner;
 mod p4;
 pub mod param;
 pub mod policy;
@@ -90,6 +91,7 @@ pub use command_log::{
 pub(crate) use document_archive::sha256_hex;
 pub use mechanical::{MechanicalTree, MechanicalTreeRow, MECHANICAL_TREE_MAX_ROWS};
 pub use open::PathOpenOutcome;
+pub use outliner::{OutlinerRow, OutlinerTree, OUTLINER_MAX_ROWS};
 pub use param::{ParamList, ParamListRow};
 pub use recent::{
     recent_files_from_preference, RecentEntry, RECENT_FILES_CAP, RECENT_FILES_PREFERENCE_KEY,

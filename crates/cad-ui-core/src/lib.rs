@@ -20,6 +20,7 @@ pub mod i18n;
 pub mod launch;
 pub mod layout;
 pub mod mechanical;
+pub mod outliner;
 pub mod param;
 pub mod popup;
 pub mod protocol;

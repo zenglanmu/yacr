@@ -182,6 +182,10 @@ macro_rules! cad_wire_registry {
             // (`kind: "display"`, no fields) over the same seam. Writes go
             // through the ordinary `SHADOWS`/`FOG` command path, never here.
             @row(shared, reads, NoArgs, cad_display, { }, $crate::display::DisplayResponse, { $crate::session::host_read::display(reads) })
+            // The Outliner: one request-carrying read (`kind: "outliner"`, no
+            // fields) over the same seam. Rows carry their `selectIds`; a click
+            // dispatches the existing `cad_select_entities` row, never a write.
+            @row(shared, reads, NoArgs, cad_outliner, { }, $crate::outliner::OutlinerResponse, { $crate::session::host_read::outliner(reads) })
             // The action-recorder state (ADR-0056): one request-carrying read
             // (`kind: "actionRecorder"`, no fields) over the same seam. A
             // carrier with no named-file bridge answers its own

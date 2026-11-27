@@ -26,5 +26,5 @@ export const CONCEPT_TRAY: readonly TrayPanel[] = Object.freeze<TrayPanel[]>([
   { id: 'concept.soften_edges', titleKey: 'concept.panel.soften_edges', kind: 'soften' },
   pending('concept.overlays', 'concept.panel.overlays'),
   { id: 'concept.instructor', titleKey: 'concept.panel.instructor', kind: 'instructor' },
-  pending('concept.outliner', 'concept.panel.outliner'),
+  { id: 'concept.outliner', titleKey: 'concept.panel.outliner', kind: 'outliner' },
 ]);

@@ -58,6 +58,7 @@ use crate::display::{DisplayResponse, DISPLAY_KIND, DISPLAY_UNSUPPORTED};
 use crate::mechanical::{
     MechanicalTreeResponse, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
 };
+use crate::outliner::{OutlinerResponse, OUTLINER_KIND, OUTLINER_UNSUPPORTED};
 use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 use crate::scene::{ScenesResponse, SCENES_KIND, SCENES_UNSUPPORTED};
 
@@ -109,6 +110,8 @@ pub enum HostReadRequest {
     Scenes,
     /// `kind: "display"` — the open document's Shadows/Fog record. No fields.
     Display,
+    /// `kind: "outliner"` — the open document's hierarchy. No fields.
+    Outliner,
 }
 
 impl HostReadRequest {
@@ -121,6 +124,7 @@ impl HostReadRequest {
             Self::ActionRecorder => ACTION_RECORDER_KIND,
             Self::Scenes => SCENES_KIND,
             Self::Display => DISPLAY_KIND,
+            Self::Outliner => OUTLINER_KIND,
         }
     }
 }
@@ -146,6 +150,8 @@ pub enum HostReadAnswer {
     Scenes(ScenesResponse),
     /// `kind: "display"` — the Shadows/Fog record.
     Display(DisplayResponse),
+    /// `kind: "outliner"` — the document hierarchy.
+    Outliner(OutlinerResponse),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -192,6 +198,11 @@ impl Serialize for HostReadRequest {
                 state.serialize_field("kind", DISPLAY_KIND)?;
                 state.end()
             }
+            Self::Outliner => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", OUTLINER_KIND)?;
+                state.end()
+            }
         }
     }
 }
@@ -232,10 +243,11 @@ impl<'de> Deserialize<'de> for HostReadRequest {
             ACTION_RECORDER_KIND => Ok(Self::ActionRecorder),
             SCENES_KIND => Ok(Self::Scenes),
             DISPLAY_KIND => Ok(Self::Display),
+            OUTLINER_KIND => Ok(Self::Outliner),
             other => Err(serde::de::Error::custom(format!(
                 "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
                  {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}, \
-                 {SCENES_KIND:?}, {DISPLAY_KIND:?}]"
+                 {SCENES_KIND:?}, {DISPLAY_KIND:?}, {OUTLINER_KIND:?}]"
             ))),
         }
     }
@@ -306,6 +318,7 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
         HostReadRequest::ActionRecorder => ACTION_RECORDER_UNSUPPORTED.to_string(),
         HostReadRequest::Scenes => SCENES_UNSUPPORTED.to_string(),
         HostReadRequest::Display => DISPLAY_UNSUPPORTED.to_string(),
+        HostReadRequest::Outliner => OUTLINER_UNSUPPORTED.to_string(),
     }
 }
 

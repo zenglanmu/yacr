@@ -45,6 +45,7 @@ export type TrayPanelKind =
   | 'soften'
   | 'shadows'
   | 'fog'
+  | 'outliner'
   | 'pending';
 
 /** One tray panel, in vertical order. */
