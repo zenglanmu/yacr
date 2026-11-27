@@ -55,10 +55,12 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::action_recorder::{ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED};
 use crate::bim::{BimFilterWire, BimQueryResponse, BIM_DEFAULT_LIMIT, BIM_UNSUPPORTED};
 use crate::display::{DisplayResponse, DISPLAY_KIND, DISPLAY_UNSUPPORTED};
+use crate::match_photo::{MatchPhotoResponse, MATCH_PHOTO_KIND, MATCH_PHOTO_UNSUPPORTED};
 use crate::mechanical::{
     MechanicalTreeResponse, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
 };
 use crate::outliner::{OutlinerResponse, OUTLINER_KIND, OUTLINER_UNSUPPORTED};
+use crate::overlays::{OverlaysResponse, OVERLAYS_KIND, OVERLAYS_UNSUPPORTED};
 use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
 use crate::scene::{ScenesResponse, SCENES_KIND, SCENES_UNSUPPORTED};
 
@@ -112,6 +114,10 @@ pub enum HostReadRequest {
     Display,
     /// `kind: "outliner"` — the open document's hierarchy. No fields.
     Outliner,
+    /// `kind: "matchPhoto"` — the photo-matching capability (not modeled).
+    MatchPhoto,
+    /// `kind: "overlays"` — the renderer-owned overlay channels.
+    Overlays,
 }
 
 impl HostReadRequest {
@@ -125,6 +131,8 @@ impl HostReadRequest {
             Self::Scenes => SCENES_KIND,
             Self::Display => DISPLAY_KIND,
             Self::Outliner => OUTLINER_KIND,
+            Self::MatchPhoto => MATCH_PHOTO_KIND,
+            Self::Overlays => OVERLAYS_KIND,
         }
     }
 }
@@ -152,6 +160,10 @@ pub enum HostReadAnswer {
     Display(DisplayResponse),
     /// `kind: "outliner"` — the document hierarchy.
     Outliner(OutlinerResponse),
+    /// `kind: "matchPhoto"` — the photo-matching capability.
+    MatchPhoto(MatchPhotoResponse),
+    /// `kind: "overlays"` — the overlay channel list.
+    Overlays(OverlaysResponse),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -203,6 +215,16 @@ impl Serialize for HostReadRequest {
                 state.serialize_field("kind", OUTLINER_KIND)?;
                 state.end()
             }
+            Self::MatchPhoto => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", MATCH_PHOTO_KIND)?;
+                state.end()
+            }
+            Self::Overlays => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", OVERLAYS_KIND)?;
+                state.end()
+            }
         }
     }
 }
@@ -244,10 +266,13 @@ impl<'de> Deserialize<'de> for HostReadRequest {
             SCENES_KIND => Ok(Self::Scenes),
             DISPLAY_KIND => Ok(Self::Display),
             OUTLINER_KIND => Ok(Self::Outliner),
+            MATCH_PHOTO_KIND => Ok(Self::MatchPhoto),
+            OVERLAYS_KIND => Ok(Self::Overlays),
             other => Err(serde::de::Error::custom(format!(
                 "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
                  {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}, \
-                 {SCENES_KIND:?}, {DISPLAY_KIND:?}, {OUTLINER_KIND:?}]"
+                 {SCENES_KIND:?}, {DISPLAY_KIND:?}, {OUTLINER_KIND:?}, {MATCH_PHOTO_KIND:?}, \
+                 {OVERLAYS_KIND:?}]"
             ))),
         }
     }
@@ -319,6 +344,8 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
         HostReadRequest::Scenes => SCENES_UNSUPPORTED.to_string(),
         HostReadRequest::Display => DISPLAY_UNSUPPORTED.to_string(),
         HostReadRequest::Outliner => OUTLINER_UNSUPPORTED.to_string(),
+        HostReadRequest::MatchPhoto => MATCH_PHOTO_UNSUPPORTED.to_string(),
+        HostReadRequest::Overlays => OVERLAYS_UNSUPPORTED.to_string(),
     }
 }
 

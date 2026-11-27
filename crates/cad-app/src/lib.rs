@@ -76,6 +76,7 @@ mod app_display;
 mod app_extrude;
 mod app_follow_me;
 mod app_materials;
+mod app_panels;
 mod app_press_pull;
 mod app_scene;
 mod app_text3d;

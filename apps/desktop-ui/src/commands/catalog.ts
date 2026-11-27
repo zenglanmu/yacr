@@ -656,7 +656,6 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VIEWFORWARD', labelKey: 'draw.kind.viewforward', icon: 'view', group: 'view' },
   { id: 'VPOINT', labelKey: 'draw.kind.vpoint', icon: 'axes', group: 'view' },
 
-  // Extras batch; SKETCH is Freehand, MSTRETCH takes an IPC payload.
   { id: 'SKETCH', labelKey: 'draw.kind.sketch', icon: 'spline', group: 'draw' },
   { id: 'TEXT3D', labelKey: 'draw.kind.text3d', icon: 'pushPull', group: 'draw' },
   { id: 'TRACE', labelKey: 'draw.kind.trace', icon: 'line', group: 'draw' },
@@ -926,6 +925,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'CAMERA', labelKey: 'draw.kind.camera', icon: 'view', group: 'view' },
   { id: 'WALK', labelKey: 'draw.kind.walk', icon: 'pan', group: 'view' },
   { id: 'LOOKAROUND', labelKey: 'draw.kind.lookaround', icon: 'eye', group: 'view' },
+  { id: 'MATCHPHOTO', labelKey: 'draw.kind.matchphoto', icon: 'reference', group: 'view' },
+  { id: 'OVERLAYS', labelKey: 'draw.kind.overlays', icon: 'layers', group: 'view' },
   { id: 'SUBTRACT', labelKey: 'draw.kind.subtract', icon: 'dot', group: 'modify' },
   { id: 'SLICE', labelKey: 'draw.kind.slice', icon: 'dot', group: 'modify' },
   { id: 'THICKEN', labelKey: 'draw.kind.thicken', icon: 'dot', group: 'modify' },
@@ -995,6 +996,5 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'DGNADJUST', labelKey: 'draw.kind.dgnadjust', icon: 'settings', group: 'properties' },
   // The 2026-11-12 interface wave (chrome-owned UI selectors).
   ...INTERFACE_COMMAND_CATALOG,
-  // IBL (image-based lighting) is the renderer's PBR toggle for meshes.
   { id: 'IBL', labelKey: 'ribbon.command.ibl', icon: 'sun', group: 'view' },
 ]);

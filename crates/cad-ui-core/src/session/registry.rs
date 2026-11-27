@@ -186,6 +186,11 @@ macro_rules! cad_wire_registry {
             // fields) over the same seam. Rows carry their `selectIds`; a click
             // dispatches the existing `cad_select_entities` row, never a write.
             @row(shared, reads, NoArgs, cad_outliner, { }, $crate::outliner::OutlinerResponse, { $crate::session::host_read::outliner(reads) })
+            // Match Photo: a capability read (`kind: "matchPhoto"`); the model is
+            // not implemented, and the panel's action is the MATCHPHOTO refusal.
+            @row(shared, reads, NoArgs, cad_match_photo, { }, $crate::match_photo::MatchPhotoResponse, { $crate::session::host_read::match_photo(reads) })
+            // Overlays: the renderer-owned overlay channels this build draws.
+            @row(shared, reads, NoArgs, cad_overlays, { }, $crate::overlays::OverlaysResponse, { $crate::session::host_read::overlays(reads) })
             // The action-recorder state (ADR-0056): one request-carrying read
             // (`kind: "actionRecorder"`, no fields) over the same seam. A
             // carrier with no named-file bridge answers its own

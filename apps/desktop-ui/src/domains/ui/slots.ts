@@ -46,6 +46,8 @@ export type TrayPanelKind =
   | 'shadows'
   | 'fog'
   | 'outliner'
+  | 'matchPhoto'
+  | 'overlays'
   | 'pending';
 
 /** One tray panel, in vertical order. */

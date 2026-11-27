@@ -64,10 +64,12 @@ mod document_archive;
 mod domain;
 mod fonts;
 mod input;
+mod match_photo;
 mod mechanical;
 mod open;
 mod orbit_sensitivity;
 mod outliner;
+mod overlays;
 mod p4;
 pub mod param;
 pub mod policy;
@@ -89,9 +91,11 @@ pub use command_log::{
     CommandLogEntry, CommandLogKind, CommandLogMeasurement, CommandLogPoint, COMMAND_LOG_CAPACITY,
 };
 pub(crate) use document_archive::sha256_hex;
+pub use match_photo::{MatchPhotoStatus, MATCH_PHOTO_NOT_MODELED};
 pub use mechanical::{MechanicalTree, MechanicalTreeRow, MECHANICAL_TREE_MAX_ROWS};
 pub use open::PathOpenOutcome;
 pub use outliner::{OutlinerRow, OutlinerTree, OUTLINER_MAX_ROWS};
+pub use overlays::{OverlayList, OverlayRow, OVERLAY_ROW_KEYS};
 pub use param::{ParamList, ParamListRow};
 pub use recent::{
     recent_files_from_preference, RecentEntry, RECENT_FILES_CAP, RECENT_FILES_PREFERENCE_KEY,

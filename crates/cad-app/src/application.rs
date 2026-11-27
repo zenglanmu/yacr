@@ -442,6 +442,8 @@ impl Application {
             CommandId::PositionCamera => self.position_camera(session, &command),
             CommandId::Walk => self.walk(session, &command),
             CommandId::LookAround => self.look_around(session, &command),
+            CommandId::MatchPhoto => self.match_photo(session, &command),
+            CommandId::Overlays => self.overlays(session, &command),
             CommandId::SoftenEdges => self.soften_selected_edges(session, &command),
             CommandId::ViewGo => self.view_go(session, &command),
             CommandId::ViewBack => self.view_back(session, &command),

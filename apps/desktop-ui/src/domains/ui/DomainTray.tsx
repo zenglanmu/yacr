@@ -32,6 +32,7 @@ import { useDomainUi } from './use-ui-layout.ts';
 import { bodyKindKey, featureOperationKey, mechanicalStatusKey, readMechanicalTree } from '../mechanical/tree.ts';
 import type { MechanicalTreeAnswer } from '../mechanical/tree.ts';
 import type { TrayPanel } from './slots.ts';
+import { MatchPhotoBody, OverlaysBody } from './tray-panels.tsx';
 import { BUILTIN_MATERIALS, paintCommand } from '../concept/materials.ts';
 import { readScenes } from '../concept/scenes.ts';
 import type { ScenesAnswer } from '../concept/scenes.ts';
@@ -768,6 +769,7 @@ function OutlinerBody() {
   );
 }
 
+
 function SoftenBody() {
   const { t } = useI18n();
   const shell = useShell();
@@ -828,6 +830,8 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'shadows': return <DisplayBody part="shadows" />;
     case 'fog': return <DisplayBody part="fog" />;
     case 'outliner': return <OutlinerBody />;
+    case 'matchPhoto': return <MatchPhotoBody />;
+    case 'overlays': return <OverlaysBody />;
     case 'pending':
     default: return <PendingBody panel={panel} />;
   }

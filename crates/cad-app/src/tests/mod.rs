@@ -296,6 +296,7 @@ mod materials;
 mod measure_extra;
 mod measure_massprop;
 mod model_space;
+mod panels;
 mod pedit;
 mod plan_view;
 mod point_display_style;

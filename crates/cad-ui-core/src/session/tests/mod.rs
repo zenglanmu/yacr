@@ -33,6 +33,7 @@ mod tests_mesh;
 mod tests_native_pinch;
 mod tests_outershell;
 mod tests_outliner;
+mod tests_panels;
 mod tests_param;
 mod tests_polyline_width;
 mod tests_properties;

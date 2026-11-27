@@ -51,6 +51,9 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **照片匹配/叠加层面板**（2026-11-27，ADR-0075）：`MATCHPHOTO`/`OVERLAYS` 从 pending 变成真实
+  host-read 面板——Match Photo 报告 `modeled:false` + 稳定原因，Overlays 只读列出渲染器拥有的通道；
+  两个动作都是具名拒绝（`matchphoto.not_implemented` / `overlays.not_implemented`），不写文档。
   **漫游/环视**（2026-11-27，ADR-0074）：`WALK` 与 `LOOKAROUND` 从 pending 变成真实视图导航
   （一点捕获或 typed 数值），只改透视相机、记 `ZOOM PREVIOUS`，平面/退化输入按名拒绝。
   **放置相机**（2026-11-27，ADR-0073）：`CAMERA` 从 pending 变成真实的两点工具——先点眼睛、
@@ -196,9 +199,9 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20）；不含可见 Tags/图层、阴影、雾、剖面、软边与缩略图 |
 | Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
 | Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |
-| Match Photo | pending | 无照片匹配 |
+| Match Photo | partial | 真实面板 + host read（`cad_match_photo` / `kind:"matchPhoto"`）：明确报告 `modeled:false` 与稳定原因（照片匹配模型未建模：无照片导入/相机求解/照片背景），动作按钮 dispatch `MATCHPHOTO`，命令以 `matchphoto.not_implemented` 具名拒绝；不伪造照片列表 |
 | Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化/场景快照 |
-| Overlays | pending | 无 overlay 系统 |
+| Overlays | partial | 真实面板 + host read（`cad_overlays` / `kind:"overlays"`）：只读列出**渲染器实际拥有**的叠加通道（坐标轴/网格/选中高亮/捕捉提示/选择框/悬停高亮/测量读数/绘制预览）及其当前开关；没有用户管理的叠加定义模型，动作按钮 dispatch `OVERLAYS`，以 `overlays.not_implemented` 具名拒绝 |
 | Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**只读**：改名/重排/拖拽归组/建组/隐藏都未实现，只投影模型空间、只展开一层 |
 
 ## 5. 本轮验收与后续
@@ -223,6 +226,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
-- 工具层没有 `pending`；Match Photo/Overlays 两个托盘面板仍是 pending；Shadows/Fog/Outliner/Scenes/Soften Edges/
+- 工具层与托盘面板都没有 `pending`；Match Photo/Overlays 是只读/具名拒绝的真实面板（ADR-0075），
+  其余面板也都已有真实 body；Shadows/Fog/Outliner/Scenes/Soften Edges/
   Protractor 都已是有真实命令与面板的 `partial`（`cad_display`/`cad_outliner`/`cad_scenes`）。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

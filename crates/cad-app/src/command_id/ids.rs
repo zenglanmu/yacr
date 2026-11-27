@@ -55,6 +55,12 @@ pub enum CommandId {
     /// `LOOKAROUND`: turn the perspective view about its eye (SketchUp Look
     /// Around). View-only.
     LookAround,
+    /// `MATCHPHOTO`: the photo-matching panel's action; the model is NOT
+    /// IMPLEMENTED, so it is a stable named refusal.
+    MatchPhoto,
+    /// `OVERLAYS`: the overlays panel's management action; there is no
+    /// user-managed overlay model, so it is a stable named refusal.
+    Overlays,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

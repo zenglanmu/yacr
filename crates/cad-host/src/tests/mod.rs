@@ -47,6 +47,7 @@ mod outer_shell;
 mod outliner;
 mod p4_origin_dispatch;
 mod p4_trace;
+mod panels;
 mod param_list;
 mod point_style;
 mod position_camera;

@@ -554,6 +554,8 @@ export const HOST_NAMES = [
   'INTERSECT',
   'UNION',
   'OUTERSHELL',
+  'MATCHPHOTO',
+  'OVERLAYS',
   'TRIMSOLID',
   'SPLITSOLID',
   'SUBTRACT',
