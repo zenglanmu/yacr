@@ -36,7 +36,10 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::DimRotated
             // CIRCLE 3P is the three-point circumcircle.
             | DrawToolKind::Circle3P
-            | DrawToolKind::DimAngular => 3,
+            | DrawToolKind::DimAngular
+            // RECTANGROTATED and PIE are three free construction clicks.
+            | DrawToolKind::RectangRotated
+            | DrawToolKind::Pie => 3,
             DrawToolKind::Spline | DrawToolKind::Align | DrawToolKind::Stretch => 4,
             DrawToolKind::Offset
             | DrawToolKind::Point
@@ -79,6 +82,7 @@ fn required_points_and_selection_are_explicit_per_kind() {
             | DrawToolKind::Divide
             | DrawToolKind::Lengthen
             | DrawToolKind::Extrude
+            | DrawToolKind::FollowMe
             | DrawToolKind::ScaleText => 0,
             _ => 2,
         };

@@ -451,6 +451,27 @@ impl HostController {
                 crate::CommandId::Extended(crate::ExtendedCommandId::Extrude),
                 crate::CommandPayload::ExtrudeProfile(selection.to_vec()),
             ),
+            // FOLLOWME: the selection snapshot carries both the profile and the
+            // path; the command partitions and validates it. There is no
+            // parameter, so nothing else travels.
+            DrawIntent::FollowMe => (
+                crate::CommandId::Extended(crate::ExtendedCommandId::FollowMe),
+                crate::CommandPayload::FollowMeProfile(selection.to_vec()),
+            ),
+            // RECTANGROTATED/PIE: the clicks are the whole input and travel as
+            // `Points`, exactly as captured.
+            DrawIntent::RectangRotated {
+                corner,
+                edge_end,
+                width_point,
+            } => (
+                crate::CommandId::Extended(crate::ExtendedCommandId::RectangRotated),
+                crate::CommandPayload::Points(vec![corner, edge_end, width_point]),
+            ),
+            DrawIntent::Pie { center, start, end } => (
+                crate::CommandId::Extended(crate::ExtendedCommandId::Pie),
+                crate::CommandPayload::Points(vec![center, start, end]),
+            ),
             // ARRAYRECT/ARRAYPOLAR: the selection snapshot travels as the refs;
             // the row/column/item parameters and the fill angle are the session
             // typed channel the command layer reads, so they never ride the

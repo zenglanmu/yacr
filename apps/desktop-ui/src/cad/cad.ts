@@ -282,6 +282,20 @@ export const TOOL_STEP_PROMPTS: Readonly<Record<string, readonly string[]>> = Ob
   // EXTRUDE is zero-point and pre-selection based: the sentence names the
   // profile and the typed distance, never a pick.
   'draw.extrude': ['tool.prompt.extrude.profile'],
+  // FOLLOWME is the same zero-point pre-selection shape over a profile **and** a
+  // path; the sentence names both and no parameter.
+  'draw.followme': ['tool.prompt.followme.select'],
+  // RECTANGROTATED and PIE take three named free points each.
+  'draw.rectangrotated': [
+    'tool.prompt.rectangrotated.corner',
+    'tool.prompt.rectangrotated.edge',
+    'tool.prompt.rectangrotated.width',
+  ],
+  'draw.pie': [
+    'tool.prompt.pie.center',
+    'tool.prompt.pie.start',
+    'tool.prompt.pie.end',
+  ],
   'draw.ray': [
     'tool.prompt.ray.base',
     'tool.prompt.ray.through',
@@ -530,6 +544,10 @@ export const TOOL_READY_PROMPTS: Readonly<Record<string, string>> = Object.freez
   // the typed distance, so the ready copy names that move.
   'draw.presspull': 'tool.prompt.presspull.ready',
   'draw.extrude': 'tool.prompt.extrude.ready',
+  // FOLLOWME names the sweep Enter performs; nothing is dimensioned.
+  'draw.followme': 'tool.prompt.followme.ready',
+  'draw.rectangrotated': 'tool.prompt.rectangrotated.ready',
+  'draw.pie': 'tool.prompt.pie.ready',
   'draw.dimcenter': 'tool.prompt.dim.center_ready',
   // STRETCH's complement is four picks (rectangle) or a closed window ring plus
   // two displacement picks (polygon/lasso), so once the complement is captured

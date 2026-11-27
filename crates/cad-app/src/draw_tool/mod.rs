@@ -320,6 +320,11 @@ impl DrawTool {
         if self.kind == DrawToolKind::Extrude {
             return Ok(DrawIntent::Extrude);
         }
+        // FOLLOWME is the same zero-point pre-selection shape: the selected
+        // profile and path are the whole input and there is no parameter.
+        if self.kind == DrawToolKind::FollowMe {
+            return Ok(DrawIntent::FollowMe);
+        }
         // DIVIDE is the zero-point pre-selection shape by default. Its block
         // option adds a **terminal block name** (the `text_required_now` gate
         // above refuses a missing name) and the command inserts INSERTs at the
@@ -665,6 +670,20 @@ impl DrawTool {
             // EXTRUDE: the early return above supplies the zero-point intent; this
             // arm keeps the match exhaustive.
             DrawToolKind::Extrude => DrawIntent::Extrude,
+            // FOLLOWME: supplied by the early return above; this arm keeps the
+            // match exhaustive.
+            DrawToolKind::FollowMe => DrawIntent::FollowMe,
+            // RECTANGROTATED/PIE: three free clicks, in capture order.
+            DrawToolKind::RectangRotated => DrawIntent::RectangRotated {
+                corner: self.points[0],
+                edge_end: self.points[1],
+                width_point: self.points[2],
+            },
+            DrawToolKind::Pie => DrawIntent::Pie {
+                center: self.points[0],
+                start: self.points[1],
+                end: self.points[2],
+            },
             // ARRAYPOLAR: the single captured point is the array centre; the item
             // count, fill angle and rotate-items flag are the session typed channel,
             // read by the command layer.

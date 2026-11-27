@@ -56,12 +56,8 @@
   },
   "pendingTools": [
     "FREEHAND",
-    "RECTANGROTATED",
     "ARC2POINT",
     "ARC3POINT",
-    "PIE",
-    "PRESSPULL",
-    "FOLLOWME",
     "PROTRACTOR",
     "TEXT3D",
     "OUTERSHELL",

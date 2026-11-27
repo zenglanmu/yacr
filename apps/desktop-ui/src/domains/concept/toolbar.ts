@@ -52,18 +52,18 @@ const DRAWING = group('concept.drawing', 'concept.toolbar.drawing', [
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE' },
   pending('FREEHAND', 'concept.tool.freehand', 'spline'),
   { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
-  pending('RECTANGROTATED', 'concept.tool.rotated_rectangle', 'rectang'),
+  { id: 'RECTANGROTATED', labelKey: 'concept.tool.rotated_rectangle', icon: 'rectang', command: 'RECTANGROTATED', hintKey: 'draw.kind.rectangrotated.hint' },
   CIRCLE_ITEM,
   POLYGON_ITEM,
   { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', command: 'ARC' },
-  pending('PIE', 'concept.tool.pie', 'circle'),
+  { id: 'PIE', labelKey: 'concept.tool.pie', icon: 'circle', command: 'PIE', hintKey: 'draw.kind.pie.hint' },
 ]);
 
 const EDIT = group('concept.edit', 'concept.toolbar.edit', [
   { id: 'MOVE', labelKey: 'draw.kind.move', icon: 'move', command: 'MOVE' },
   { id: 'PRESSPULL', labelKey: 'concept.tool.push_pull', icon: 'pushPull', command: 'PRESSPULL', hintKey: 'concept.tool.push_pull.hint' },
   { id: 'ROTATE', labelKey: 'draw.kind.rotate', icon: 'rotate', command: 'ROTATE' },
-  pending('FOLLOWME', 'concept.tool.follow_me', 'spline'),
+  { id: 'FOLLOWME', labelKey: 'concept.tool.follow_me', icon: 'spline', command: 'FOLLOWME', hintKey: 'concept.tool.follow_me.hint' },
   { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', command: 'SCALE' },
   { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', command: 'MIRROR' },
   { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },

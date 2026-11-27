@@ -84,6 +84,9 @@ impl DrawToolKind {
             Self::ChamferEdge => CommandId::Extended(ExtendedCommandId::ChamferEdge),
             Self::PressPull => CommandId::Extended(ExtendedCommandId::PressPull),
             Self::Extrude => CommandId::Extended(ExtendedCommandId::Extrude),
+            Self::FollowMe => CommandId::Extended(ExtendedCommandId::FollowMe),
+            Self::RectangRotated => CommandId::Extended(ExtendedCommandId::RectangRotated),
+            Self::Pie => CommandId::Extended(ExtendedCommandId::Pie),
             Self::Text => CommandId::CreateText,
             // INSERT is point-then-name; the reference is created from existing
             // block metadata, never by writing the block table.

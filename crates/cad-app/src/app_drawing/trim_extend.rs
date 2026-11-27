@@ -430,7 +430,7 @@ impl Application {
 
     /// Shared insert path for LINE/CIRCLE/ARC creation (active layer, model space,
     /// the session `COLOR` colour).
-    pub(super) fn commit_new_entity(
+    pub(crate) fn commit_new_entity(
         &mut self,
         session: &SessionState,
         command: &Command,

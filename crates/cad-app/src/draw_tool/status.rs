@@ -38,6 +38,13 @@ impl DrawPreview {
                 "extrude: profile ready, press Enter".to_string()
             };
         }
+        // FOLLOWME: zero points, no parameter. The selection is the whole input,
+        // and the command is the one that can name a bad partition, so the copy
+        // names Enter and nothing it cannot check here.
+        if self.kind == DrawToolKind::FollowMe {
+            return "followme: press Enter to sweep the selected profile along the selected path"
+                .to_string();
+        }
         if self.kind == DrawToolKind::PressPull {
             return if self.picks.is_empty() {
                 "presspull: pick a face on the selected body".to_string()

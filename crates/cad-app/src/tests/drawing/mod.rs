@@ -310,6 +310,7 @@ mod param_value;
 mod chamfer_edge;
 mod circle_options;
 mod clipboard;
+mod concept_shapes;
 mod construction_line;
 mod create_color;
 mod create_draw_order;
@@ -333,6 +334,7 @@ mod ellipse;
 mod explode;
 mod extrim;
 mod extrude_profile;
+mod follow_me;
 mod press_pull;
 // The imported-content (picture-branch DIMENSION / spline-path MULTILEADER)
 // decomposition tests, split out of `explode` so both files stay inside the

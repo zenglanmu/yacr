@@ -763,7 +763,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),
     ("PYRAMID", CommandId::Extended(ExtendedCommandId::Pyramid)), ("POLYSOLID", CommandId::Extended(ExtendedCommandId::PolySolid)),
-    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
+    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
     ("SWEEP", CommandId::Extended(ExtendedCommandId::Sweep)), ("LOFT", CommandId::Extended(ExtendedCommandId::Loft)),
     ("INTERSECT", CommandId::Extended(ExtendedCommandId::Intersect)), ("UNION", CommandId::Extended(ExtendedCommandId::Union)),
     ("SUBTRACT", CommandId::Extended(ExtendedCommandId::Subtract)), ("SLICE", CommandId::Extended(ExtendedCommandId::Slice)),

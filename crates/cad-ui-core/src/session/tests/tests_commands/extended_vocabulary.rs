@@ -161,6 +161,12 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::MeshRefine
                 | ExtendedCommandId::MeshSmooth
                 | ExtendedCommandId::MeshCap
+                // FOLLOWME inserts one closed mesh body from the selected
+                // profile and path; RECTANGROTATED/PIE insert one closed
+                // polyline (one transaction, one undo each).
+                | ExtendedCommandId::FollowMe
+                | ExtendedCommandId::RectangRotated
+                | ExtendedCommandId::Pie
         );
         assert_eq!(
             variant.requires_work_mode(),

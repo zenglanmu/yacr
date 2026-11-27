@@ -24,10 +24,14 @@ fn keys_indices_and_labels_round_trip_and_reject_unknowns() {
     assert_eq!(DrawToolKind::from_label("半径"), None);
     // The catalogue length is mirrored by the UI selector, so a new kind must be
     // appended (never inserted) and the count updated deliberately.
-    assert_eq!(DrawToolKind::ALL.len(), 61);
+    assert_eq!(DrawToolKind::ALL.len(), 64);
     assert_eq!(
         DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 1),
-        Some(DrawToolKind::Extrude)
+        Some(DrawToolKind::Pie)
     );
-    assert_eq!(DrawToolKind::Extrude.index(), DrawToolKind::ALL.len() - 1);
+    assert_eq!(DrawToolKind::Pie.index(), DrawToolKind::ALL.len() - 1);
+    assert_eq!(
+        DrawToolKind::from_index(DrawToolKind::ALL.len() as i32 - 2),
+        Some(DrawToolKind::RectangRotated)
+    );
 }

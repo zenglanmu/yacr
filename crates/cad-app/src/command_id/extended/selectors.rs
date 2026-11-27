@@ -1,10 +1,8 @@
 //! The extended command selector and enumeration tables.
 //!
-//! Split out of `command_id/extended.rs` to keep every Rust file inside the
-//! 1000-line code gate. The enum, its documentation and the Work-mode
-//! declaration stay in the parent module; this file owns the exhaustive
-//! selector spelling and the declaration-order `ALL` set that the vocabulary
-//! contract test uses to prove the table cannot drift.
+//! Split out of `command_id/extended.rs` for the 1000-line gate; the enum and
+//! its Work-mode declaration stay in the parent. This file owns the exhaustive
+//! selector spelling and the declaration-order `ALL` set.
 
 use super::ExtendedCommandId;
 
@@ -343,6 +341,9 @@ impl ExtendedCommandId {
             Self::Pyramid => "PYRAMID",
             Self::PolySolid => "POLYSOLID",
             Self::Extrude => "EXTRUDE",
+            Self::FollowMe => "FOLLOWME",
+            Self::RectangRotated => "RECTANGROTATED",
+            Self::Pie => "PIE",
             Self::Revolve => "REVOLVE",
             Self::Sweep => "SWEEP",
             Self::Loft => "LOFT",
@@ -760,6 +761,9 @@ impl ExtendedCommandId {
         Self::Pyramid,
         Self::PolySolid,
         Self::Extrude,
+        Self::FollowMe,
+        Self::RectangRotated,
+        Self::Pie,
         Self::Revolve,
         Self::Sweep,
         Self::Loft,
@@ -842,11 +846,8 @@ impl ExtendedCommandId {
 }
 
 impl ExtendedCommandId {
-    /// Whether the command needs Work mode.
-    ///
-    /// Session-only commands, read-only reports and named refusals are
-    /// Viewer-legal; every command that writes the drawing (`MVIEW`, the typed
-    /// `PAGESETUP`/`PSETUPIN` forms and the existing edits) declares itself here.
+    /// Whether the command needs Work mode (session toggles and reports do not;
+    /// every command that writes the drawing declares itself here).
     pub fn requires_work_mode(self) -> bool {
         matches!(
             self,
@@ -967,6 +968,11 @@ impl ExtendedCommandId {
                 | Self::PressPull
                 // EXTRUDE inserts one new exact body from the selected profile.
                 | Self::Extrude
+                // FOLLOWME inserts one closed mesh body from the selected
+                // profile and path; RECTANGROTATED/PIE insert one closed
+                // polyline (one transaction / one undo step each).
+                | Self::FollowMe
+                | Self::RectangRotated | Self::Pie
                 // XEDGES inserts one LINE per stored display-edge segment (one
                 // transaction / one undo step), so it is a drawing write.
                 | Self::Xedges

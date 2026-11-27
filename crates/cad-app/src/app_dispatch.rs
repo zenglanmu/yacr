@@ -484,6 +484,13 @@ impl Application {
             // EXTRUDE turns the selected closed planar profile into one new exact
             // solid (the "draw a shape, pull it up" command).
             ExtendedCommandId::Extrude => self.extrude_selected_profile(session, command)?,
+            // FOLLOWME sweeps the selected profile along the selected path into
+            // one closed mesh body (kernel-free, one transaction / one undo).
+            ExtendedCommandId::FollowMe => self.follow_me(session, command)?,
+            // SketchUp construction shapes: one closed polyline each, from the
+            // three captured points (kernel-free).
+            ExtendedCommandId::RectangRotated => self.rotated_rectangle(session, command)?,
+            ExtendedCommandId::Pie => self.pie(session, command)?,
             // `XEDGES` extracts the selected bodies' stored display edges as
             // LINE rows (one transaction / one undo step; the body stays).
             ExtendedCommandId::Xedges => self.extract_body_edges(session, command)?,

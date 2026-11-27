@@ -563,6 +563,27 @@ pub enum DrawIntent {
     /// input and the signed distance is the session typed channel
     /// ([`super::ToolParameter::ExtrudeDistance`]), read by the command layer.
     Extrude,
+    /// `RECTANGROTATED`: the corner, the far end of the first edge, and a point
+    /// that sets the plane and the width.
+    RectangRotated {
+        corner: Point3,
+        edge_end: Point3,
+        width_point: Point3,
+    },
+    /// `PIE`: the centre, a point on the circle, and a point that sets the end
+    /// angle.
+    Pie {
+        center: Point3,
+        start: Point3,
+        end: Point3,
+    },
+    /// `FOLLOWME`: sweep the selected closed profile along the selected open
+    /// path into a new mesh body.
+    ///
+    /// Carries no field: the selection snapshot the caller supplies is the whole
+    /// input (one profile loop plus one open path), and the command partitions
+    /// and validates it. There is no parameter, so this kind captures no points.
+    FollowMe,
     /// DIVIDE the one pre-selected curve into equal arc-length parts, placing
     /// POINT marks at the division parameters (2026-11-01).
     ///

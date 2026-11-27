@@ -1,8 +1,6 @@
 // The chrome's declarative command catalog: every command name the app exposes,
-// in AutoCAD-style listing order. Split verbatim out of `commands.ts` (which
-// owns the functions that read it) so neither module approaches the 1000-line
-// code gate. This is a plain sibling module, not a barrel: importers name it
-// directly.
+// in AutoCAD-style listing order. A plain sibling module (not a barrel): the
+// functions that read it live in `commands.ts`.
 
 /** One entry of the chrome's display catalog. */
 export interface CommandCatalogEntry {
@@ -80,6 +78,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'RAY', labelKey: 'draw.kind.ray', icon: 'ray', group: 'draw' },
   { id: 'PLINE', labelKey: 'draw.kind.polyline', icon: 'polyline', group: 'draw' },
   { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', group: 'draw' },
+  { id: 'RECTANGROTATED', labelKey: 'draw.kind.rectangrotated', icon: 'rectang', group: 'draw' },
+  { id: 'PIE', labelKey: 'draw.kind.pie', icon: 'circle', group: 'draw' },
   { id: 'ELLIPSE', labelKey: 'draw.kind.ellipse', icon: 'ellipse', group: 'draw' },
   { id: 'POLYGON', labelKey: 'draw.kind.polygon', icon: 'polygon', group: 'draw' },
   // POLYGON CIRCUMSCRIBED (2026-11-07) is AutoCAD's `POLYGON` →
@@ -916,6 +916,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'PYRAMID', labelKey: 'draw.kind.pyramid', icon: 'dot', group: 'draw' },
   { id: 'POLYSOLID', labelKey: 'draw.kind.polysolid', icon: 'polyline', group: 'draw' },
   { id: 'EXTRUDE', labelKey: 'draw.kind.extrude', icon: 'pushPull', group: 'modify' },
+  { id: 'FOLLOWME', labelKey: 'draw.kind.followme', icon: 'spline', group: 'modify' },
   { id: 'REVOLVE', labelKey: 'draw.kind.revolve', icon: 'dot', group: 'modify' },
   { id: 'SWEEP', labelKey: 'draw.kind.sweep', icon: 'dot', group: 'modify' },
   { id: 'LOFT', labelKey: 'draw.kind.loft', icon: 'dot', group: 'modify' },

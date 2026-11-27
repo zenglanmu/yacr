@@ -789,6 +789,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // EXTRUDE reads the selected closed profile (one row or a chain), so a
   // selection is the real minimum; the hint words the profile rule.
   EXTRUDE: Object.freeze({ count: 1, reasonKey: 'draw.kind.extrude.hint' }),
+  // FOLLOWME needs one closed profile **and** one open path, so two rows is the
+  // real minimum; the host names the role-specific refusals.
+  FOLLOWME: Object.freeze({ count: 2, reasonKey: 'draw.kind.followme.hint' }),
   // MEASUREGEOM itself takes no selection up front: its tool options capture
   // their own points and only RADIUS reads the selection, so pre-gating the
   // command would disable the tool entries with an unrelated sentence. The host

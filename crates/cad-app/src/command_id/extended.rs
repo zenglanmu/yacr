@@ -795,8 +795,15 @@ pub enum ExtendedCommandId {
     Pyramid,
     /// `POLYSOLID`: 3D solid primitives are not implemented.
     PolySolid,
-    /// `EXTRUDE`: 3D extrusion is not implemented.
+    /// `EXTRUDE`: extrude one closed planar profile into a new exact solid
+    /// (Work-only; the host builds the profile payload from the selection).
     Extrude,
+    /// `FOLLOWME`: sweep a closed profile along an open path (Work-only).
+    FollowMe,
+    /// `RECTANGROTATED`: SketchUp's three-click rotated rectangle (Work-only).
+    RectangRotated,
+    /// `PIE`: a centre plus a sampled arc as one closed polyline (Work-only).
+    Pie,
     /// `REVOLVE`: 3D revolution is not implemented.
     Revolve,
     /// `SWEEP`: 3D sweep is not implemented.

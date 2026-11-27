@@ -181,13 +181,9 @@ pub fn draw_preview_overlay(
         | DrawToolKind::Chamfer
         | DrawToolKind::Fillet
         // ARRAYPOLAR captures one point (the centre); the live cursor is the
-        // existing chain. ARRAYRECT captures no points at all, so `preview_chain`
-        // yields nothing for it (no fabricated preview) — the array result depends
-        // on the session parameters plus the selection, not on the cursor. HATCH
-        // has the same zero-point pre-selection shape (ADR 0018 decision D), so it
-        // also yields no chain. DIVIDE/LENGTHEN are the same zero-point shape: the
-        // one selected curve and the typed parameters define the result, so no
-        // cursor geometry is fabricated.
+        // existing chain. ARRAYRECT/HATCH/DIVIDE/LENGTHEN capture no points at
+        // all: the selection plus the session parameters define the result, so
+        // no cursor geometry is fabricated for them.
         | DrawToolKind::ArrayRect
         | DrawToolKind::ArrayPolar
         | DrawToolKind::Hatch
@@ -206,6 +202,10 @@ pub fn draw_preview_overlay(
         // candidate polyline is fabricated here.
         | DrawToolKind::Boundary
         | DrawToolKind::ChamferEdge | DrawToolKind::PressPull | DrawToolKind::Extrude
+        // FOLLOWME is the same zero-point pre-selection shape.
+        | DrawToolKind::FollowMe
+        // RECTANGROTATED/PIE preview as the same rubber-band chain.
+        | DrawToolKind::RectangRotated | DrawToolKind::Pie
         // ALIGN captures four free points (two source/destination pairs); STRETCH
         // captures four free points (two window corners plus a base and a
         // displacement point). Both use the existing cursor/chain preview (no new

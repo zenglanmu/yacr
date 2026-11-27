@@ -758,6 +758,19 @@ pub enum DrawToolKind {
     /// CIRCLE, all in a plane parallel to XY; anything else is refused by name
     /// (see `app_extrude`). Work-only.
     Extrude,
+    /// `FOLLOWME`: the selected closed planar profile swept along the selected
+    /// open path into a new closed mesh body (SketchUp Follow Me).
+    ///
+    /// Zero points and no parameter: the selection (one profile loop plus one
+    /// open path) is the whole input. It is kernel-free, so it works on every
+    /// carrier, and the result is a mesh with per-face identity. Work-only.
+    FollowMe,
+    /// `RECTANGROTATED`: a closed four-vertex rectangle from three clicks (a
+    /// corner, the far end of the first edge, then a width point).
+    RectangRotated,
+    /// `PIE`: a closed polyline of a centre plus a sampled arc, from the centre,
+    /// a point on the circle and an end-angle point.
+    Pie,
     /// BREAK: pick one LINE/ARC/CIRCLE/SPLINE (the first click is also the
     /// **first break point**) and then click the second break point.
     ///

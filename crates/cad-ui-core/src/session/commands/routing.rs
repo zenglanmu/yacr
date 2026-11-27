@@ -155,6 +155,18 @@ pub(crate) fn interaction_request_for(
         CommandId::Extended(cad_app::ExtendedCommandId::Extrude) => {
             Some(InteractionRequest::BeginDraw(DrawToolKind::Extrude))
         }
+        // FOLLOWME is the same zero-point pre-selection shape: the selected
+        // closed profile and open path are the whole input, there is no parameter.
+        CommandId::Extended(cad_app::ExtendedCommandId::FollowMe) => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::FollowMe))
+        }
+        // RECTANGROTATED/PIE are three-point construction captures.
+        CommandId::Extended(cad_app::ExtendedCommandId::RectangRotated) => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::RectangRotated))
+        }
+        CommandId::Extended(cad_app::ExtendedCommandId::Pie) => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::Pie))
+        }
         CommandId::FilletLines => Some(InteractionRequest::BeginDraw(DrawToolKind::Fillet)),
         CommandId::ArrayRectangular => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayRect)),
         CommandId::ArrayPolar => Some(InteractionRequest::BeginDraw(DrawToolKind::ArrayPolar)),

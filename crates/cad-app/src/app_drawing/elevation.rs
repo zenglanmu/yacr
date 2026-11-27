@@ -86,9 +86,14 @@ impl Application {
         // A `Body3d` is an explicitly placed 3D object: its own Z is the
         // author's intent (the primitive commands take full 3D points), so the
         // session `ELEV` token — AutoCAD's "current elevation for new objects" —
-        // never translates it. Exempted here, in the one funnel, so no create
-        // path can sneak an offset in.
-        if matches!(&geometry, SemanticGeometry::Body3d(_)) {
+        // never translates it. A `Mesh` is the same: `FOLLOWME` builds it in
+        // world coordinates from a profile and a path, and offsetting it would
+        // tear it away from those rows. Exempted here, in the one funnel, so no
+        // create path can sneak an offset in.
+        if matches!(
+            &geometry,
+            SemanticGeometry::Body3d(_) | SemanticGeometry::Mesh(_)
+        ) {
             return Ok(geometry);
         }
         if elevation == 0.0 {

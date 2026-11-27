@@ -28,6 +28,7 @@ mod edit_receipt;
 mod engine_config;
 mod export_formats;
 mod file_open_save;
+mod follow_me;
 mod fonts;
 mod gate;
 mod grid_overlay;

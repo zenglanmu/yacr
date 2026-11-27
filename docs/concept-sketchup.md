@@ -21,22 +21,26 @@
 `partial` 不计入分子；它只用于说明“有命令但语义未满”。分母固定为本文列出的 69 个单元；
 新增工具必须同时更新分母与表。
 
-## 2. 汇总（2026-11-26）
+## 2. 汇总（2026-11-27）
 
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
-| `full` | 52 | **75.4%** |
-| `partial` | 4 | 5.8% |
-| `pending` | 13 | 18.8% |
+| `full` | 54 | **78.3%** |
+| `partial` | 5 | 7.2% |
+| `pending` | 10 | 14.5% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（52/69 = 75.4%）。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 59/69 = 85.5% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
   结果仍是**非精确**网格。`PRESSPULL` 现在同时支持精确面与带 `face_sources` 的网格面；
   `MOVE` 面选择、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 边界环补洞（含共面嵌套环带）
   已接线。
+  `FOLLOWME`（2026-11-27）把「闭合轮廓 + 开放路径」扫掠成**闭合网格**（非精确 B-Rep）：
+  轮廓/路径都保持原位、一次事务/一步撤销，拐角在角平分面上剪切，结果是单壳、外向、每面有
+  `face_sources` 的 `AcDbSubDMesh`。轮廓可以是闭合直线 `LWPOLYLINE`、`LINE` 闭环或 `CIRCLE`
+  （圆按 48 边形采样，SketchUp 的圆也是多边形）；弧线/bulge 轮廓、闭合路径与反向路径按名拒绝。
   边身份使用几何派生 `mesh:edge:<bits>` key，`MOVE` 可移动边；wire-only 边/跨多个三角形边的
   stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
 - **矩形→推拉的核心回路已闭环**（2026-11-27）：Push/Pull 在所选是闭合平面轮廓时（闭合直线
@@ -70,27 +74,27 @@
 | Pan | `PAN` | full | |
 | Zoom Extents | `FIT` | full | |
 
-### Drawing（8；full 5 / pending 3）
+### Drawing（8；full 6 / partial 1 / pending 1）
 
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
 | Line | `LINE` | full | 同上 |
 | Freehand | `FREEHAND` | pending | 没有自由手绘命令（`REVCLOUD` 的 Freehand 是另一语义） |
 | Rectangle | `RECTANG` | full | |
-| Rotated Rectangle | `RECTANGROTATED` | pending | 没有旋转矩形构造 |
+| Rotated Rectangle | `RECTANGROTATED` | full | 三次点击：角点、第一边端点、宽度点；在三点确定的平面上生成一个闭合四顶点 `LWPOLYLINE`（可直接推拉/跟随） |
 | Circle | `CIRCLE` | full | |
 | Polygon | `POLYGON` | full | |
 | Arc | `ARC` | full | |
-| Pie | `PIE` | pending | 没有扇形构造 |
+| Pie | `PIE` | partial | 三次点击：圆心、圆周点（半径）、终点角；弧按 24 段/圈采样成**闭合直线** `LWPOLYLINE`。三点捕获只能确定 ≤180° 的转向，更大的扇形需 `ARC`+`LINE` |
 
-### Edit（7；full 4 / partial 2 / pending 1）
+### Edit（7；full 6 / partial 1）
 
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
 | Move | `MOVE` | full | |
 | Push/Pull | `PRESSPULL` | full | 精确面或带 `face_sources` 的网格面；**所选为闭合平面轮廓时把轮廓拉成新精确实体**（矩形/圆的第一次推拉，走 `EXTRUDE` 的同一命令与事务，轮廓保持原位）；无面身份且非轮廓时拒绝；边移动由 `MOVE` 处理 |
 | Rotate | `ROTATE` | full | |
-| Follow Me | `FOLLOWME` | pending | 没有沿路径扫掠 |
+| Follow Me | `FOLLOWME` | full | 把所选闭合直线轮廓沿所选开放直线路径扫掠成闭合网格体（拐角按角平分面剪切、两端封盖，一面一个 `face_sources` 身份，可继续 `PRESSPULL`）；不支持圆/弧轮廓（投影会变椭圆）、闭合路径、通过点选路径面驱动 |
 | Scale | `SCALE` | full | |
 | Mirror/Flip | `MIRROR` | partial | CAD 镜像，不是 Flip |
 | Offset | `OFFSET` | full | 二维 |
@@ -181,6 +185,6 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 closed / 41 open / 2 non-manifold（后者也带 boundary edge，按 `mesh.not_closed` 拒绝），
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
-- 其余 `pending` 工具（Freehand/Rotated Rectangle/Pie/Follow Me/Protractor/3D Text/
-  Outer Shell/Trim/Split/Camera/Walk/Look Around/Materials/Scenes/...）保持显式 pending；
+- 其余 `pending` 工具（Freehand/Protractor/3D Text/Outer Shell/Trim/Split/Camera/Walk/
+  Look Around/Materials/Scenes/...）保持显式 pending；
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

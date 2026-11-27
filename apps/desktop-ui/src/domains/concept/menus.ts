@@ -96,7 +96,7 @@ const DRAW_LINES = panel('concept.draw.lines', 'concept.section.lines', [
 
 const DRAW_SHAPES = panel('concept.draw.shapes', 'concept.section.shapes', [
   { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
-  pending('RECTANGROTATED', 'concept.tool.rotated_rectangle', 'rectang'),
+  { id: 'RECTANGROTATED', labelKey: 'concept.tool.rotated_rectangle', icon: 'rectang', command: 'RECTANGROTATED', hintKey: 'draw.kind.rectangrotated.hint' },
   CIRCLE_ITEM,
   POLYGON_ITEM,
 ]);
@@ -105,7 +105,7 @@ const DRAW_ARCS = panel('concept.draw.arcs', 'concept.section.arcs', [
   { id: 'ARC', labelKey: 'draw.kind.arc', icon: 'arc', command: 'ARC' },
   pending('ARC2POINT', 'concept.tool.arc_2point', 'arc'),
   pending('ARC3POINT', 'concept.tool.arc_3point', 'arc'),
-  pending('PIE', 'concept.tool.pie', 'circle'),
+  { id: 'PIE', labelKey: 'concept.tool.pie', icon: 'circle', command: 'PIE', hintKey: 'draw.kind.pie.hint' },
 ]);
 
 const TOOLS_SELECT = panel('concept.tools.select', 'concept.section.selection', [
@@ -118,7 +118,7 @@ const TOOLS_MODIFY = panel('concept.tools.modify', 'concept.section.modify', [
   { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', command: 'SCALE' },
   { id: 'OFFSET', labelKey: 'draw.kind.offset', icon: 'offset', command: 'OFFSET' },
   { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', command: 'MIRROR' },
-  pending('PRESSPULL', 'concept.tool.push_pull', 'move'),
+  { id: 'PRESSPULL', labelKey: 'concept.tool.push_pull', icon: 'pushPull', command: 'PRESSPULL', hintKey: 'concept.tool.push_pull.hint' },
 ]);
 
 const TOOLS_MEASURE = panel('concept.tools.measure', 'concept.section.measure', [
@@ -143,7 +143,7 @@ const TOOLS_SOLID = panel('concept.tools.solid', 'concept.section.solid', [
 ]);
 
 const TOOLS_OTHER = panel('concept.tools.other', 'concept.section.other', [
-  pending('FOLLOWME', 'concept.tool.follow_me', 'spline'),
+  { id: 'FOLLOWME', labelKey: 'concept.tool.follow_me', icon: 'spline', command: 'FOLLOWME', hintKey: 'concept.tool.follow_me.hint' },
   { id: 'LAYER', labelKey: 'layers.panel', icon: 'layers', command: 'LAYER' },
 ]);
 

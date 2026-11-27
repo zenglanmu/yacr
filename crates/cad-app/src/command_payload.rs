@@ -986,15 +986,15 @@ pub enum CommandPayload {
         body: SelectionRef,
         seed: Point3,
     },
-    /// `PRESSPULL`: selected exact body + the pixel pick's face hit point; the
-    /// kernel resolves the nearest trimmed face and the signed distance is the
-    /// session channel.
+    /// `PRESSPULL`: selected exact body + the pixel pick's face hit point.
     PressPullFace {
         body: SelectionRef,
         seed: Point3,
     },
     /// `EXTRUDE`: the selected closed profile rows (the distance is the channel).
     ExtrudeProfile(Vec<SelectionRef>),
+    /// `FOLLOWME`: the selected profile and path rows.
+    FollowMeProfile(Vec<SelectionRef>),
     /// 3D primitive option construction; see [`SolidPrimitiveCommand`].
     Solid(SolidPrimitiveCommand),
 }

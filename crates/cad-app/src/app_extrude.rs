@@ -444,7 +444,7 @@ fn validate_extrude_distance(value: f64) -> CadResult<f64> {
 }
 
 /// A short locale-neutral name of a geometry family, for the refusal sentence.
-fn geometry_name(geometry: &SemanticGeometry) -> &'static str {
+pub(crate) fn geometry_name(geometry: &SemanticGeometry) -> &'static str {
     match geometry {
         SemanticGeometry::Line { .. } => "line",
         SemanticGeometry::Arc { .. } => "arc",
@@ -461,7 +461,7 @@ fn geometry_name(geometry: &SemanticGeometry) -> &'static str {
     }
 }
 
-/// A plan-level `EXTRUDE` refusal: `InvalidInput` carrying its stable code.
-fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
+/// A plan-level command refusal: `InvalidInput` carrying its stable code.
+pub(crate) fn invalid(code: &str, detail: impl std::fmt::Display) -> CadError {
     CadError::InvalidInput(format!("{code}: {detail}"))
 }

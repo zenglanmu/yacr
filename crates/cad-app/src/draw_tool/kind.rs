@@ -88,7 +88,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 61] = [
+    pub const ALL: [DrawToolKind; 64] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -196,6 +196,13 @@ impl DrawToolKind {
         DrawToolKind::PressPull,
         // EXTRUDE is the zero-point pre-selection shape over a closed profile.
         DrawToolKind::Extrude,
+        // FOLLOWME is the same zero-point pre-selection shape over a closed
+        // profile **and** an open path; no parameter, no captured point.
+        DrawToolKind::FollowMe,
+        // RECTANGROTATED and PIE are three-point construction shapes appended for
+        // index stability.
+        DrawToolKind::RectangRotated,
+        DrawToolKind::Pie,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -262,6 +269,9 @@ impl DrawToolKind {
             Self::ChamferEdge => "chamferedge",
             Self::PressPull => "presspull",
             Self::Extrude => "extrude",
+            Self::FollowMe => "followme",
+            Self::RectangRotated => "rectangrotated",
+            Self::Pie => "pie",
         }
     }
 
@@ -330,6 +340,9 @@ impl DrawToolKind {
             "chamferedge" => Some(Self::ChamferEdge),
             "presspull" => Some(Self::PressPull),
             "extrude" => Some(Self::Extrude),
+            "followme" => Some(Self::FollowMe),
+            "rectangrotated" => Some(Self::RectangRotated),
+            "pie" => Some(Self::Pie),
             _ => None,
         }
     }
@@ -490,6 +503,9 @@ impl DrawToolKind {
             Self::ChamferEdge => "CHAMFEREDGE",
             Self::PressPull => "PRESSPULL",
             Self::Extrude => "EXTRUDE",
+            Self::FollowMe => "FOLLOWME",
+            Self::RectangRotated => "RECTANGROTATED",
+            Self::Pie => "PIE",
         }
     }
 
@@ -565,7 +581,9 @@ impl DrawToolKind {
             | Self::BlockDefine => PointArity::Exact(1),
             // EXTRUDE is the zero-point pre-selection shape: the selected closed
             // profile is the input and the distance is the typed channel.
-            Self::Extrude => PointArity::Exact(0),
+            // FOLLOWME is the same shape with no parameter at all: the selected
+            // profile and path are the whole input.
+            Self::Extrude | Self::FollowMe => PointArity::Exact(0),
             // ARRAYRECT captures no points: it is defined entirely by the session
             // typed parameters plus the selection snapshot, so its complement is
             // the zero-point exact arity (ready as soon as the selection is
@@ -580,6 +598,9 @@ impl DrawToolKind {
             | Self::Divide
             | Self::Lengthen
             | Self::ScaleText => PointArity::Exact(0),
+            // RECTANGROTATED/PIE take three free points: a corner and the two
+            // construction points (edge end + width point / centre + arc + end).
+            Self::RectangRotated | Self::Pie => PointArity::Exact(3),
             // Two endpoints, centre+radius point, two opposite rectangle
             // corners, a move/copy delta, target+boundary, or a rotate angle /
             // mirror axis.
@@ -675,9 +696,11 @@ impl DrawToolKind {
                 // confirmable.
                 | Self::ChamferEdge
                 | Self::PressPull
-                // EXTRUDE reads the selected closed profile, so an empty
-                // selection must never be confirmable.
+                // EXTRUDE reads the selected closed profile and FOLLOWME reads
+                // the profile **and** the path, so an empty selection must never
+                // be confirmable.
                 | Self::Extrude
+                | Self::FollowMe
         )
     }
 
