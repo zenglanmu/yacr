@@ -520,6 +520,17 @@ impl DocumentSnapshot {
         })
     }
 
+    /// Whether any scene row captures hidden top-level entities (minor 31).
+    ///
+    /// Unlike the soften list, an **empty** array is a real capture ("nothing
+    /// was hidden") and still needs the tier: a minor-30 reader would refuse
+    /// the unknown `hidden` key rather than restore the wrong hidden state.
+    pub fn has_scene_hidden(&self) -> bool {
+        self.tables
+            .get(TableKind::Scenes)
+            .is_some_and(|rows| rows.iter().any(|row| row.get("hidden").is_some()))
+    }
+
     /// Whether any scene row captures explicit soften angles (minor 28).
     ///
     /// The writer omits an empty capture, so a scene without explicit soften

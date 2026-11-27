@@ -14,7 +14,7 @@ use cad_domain::scene::{Scene, SceneVisualStyle};
 use cad_domain::view::{NamedView, ViewCamera, ViewProjection};
 use cad_domain::ymodel::{DocumentHeader, IdCounters};
 use cad_domain::{
-    DatabaseId, DocumentIdentity, Point3, Revision, SpaceId, Unit, UnitContext, WorkPlane,
+    DatabaseId, DocumentIdentity, EntityId, Point3, Revision, SpaceId, Unit, UnitContext, WorkPlane,
 };
 use cad_store_zip::{ZipDocumentStore, MANIFEST_ENTRY};
 
@@ -97,6 +97,7 @@ fn scene_row() -> Value {
         display: None,
         soften: None,
         soften_cleared: None,
+        hidden: None,
     }
     .to_json()
 }
@@ -195,5 +196,52 @@ fn a_minor_above_the_ceiling_is_refused() {
         error.marker,
         cad_domain::ymodel::markers::UNSUPPORTED_MINOR,
         "{error}"
+    );
+}
+
+#[test]
+fn a_scene_hidden_snapshot_is_written_at_minor_thirty_one() {
+    let mut row = scene_row();
+    row["hidden"] = serde_json::json!([1, 2]);
+    let mut document = snapshot(false);
+    document.tables.set(TableKind::Scenes, vec![row]);
+    let bytes = write_bytes(&document);
+    assert_eq!(minor_of(&bytes), 31, "a scene hidden snapshot is minor 31");
+    let loaded = read_bytes(&bytes);
+    assert!(loaded.snapshot.has_scene_hidden());
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Scenes)
+        .expect("table entry");
+    let table = cad_domain::scene::SceneTable::from_json(rows).expect("decode");
+    assert_eq!(
+        table.resolve("Overview").expect("scene").hidden.as_deref(),
+        Some([EntityId(1), EntityId(2)].as_slice())
+    );
+}
+
+#[test]
+fn an_empty_hidden_capture_still_stamps_minor_thirty_one() {
+    let mut row = scene_row();
+    row["hidden"] = serde_json::json!([]);
+    let mut document = snapshot(false);
+    document.tables.set(TableKind::Scenes, vec![row]);
+    let bytes = write_bytes(&document);
+    assert_eq!(
+        minor_of(&bytes),
+        31,
+        "an empty capture is a real snapshot, not a pre-hidden scene"
+    );
+    let loaded = read_bytes(&bytes);
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Scenes)
+        .expect("table entry");
+    let table = cad_domain::scene::SceneTable::from_json(rows).expect("decode");
+    assert_eq!(
+        table.resolve("Overview").expect("scene").hidden.as_deref(),
+        Some([].as_slice())
     );
 }

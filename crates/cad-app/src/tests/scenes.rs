@@ -480,3 +480,77 @@ fn a_scene_without_an_explicit_soften_clears_the_later_value() {
         .expect("undo");
     assert_eq!(soften_of(&app, EntityId(7)), Some(45.0));
 }
+
+#[test]
+fn a_scene_captures_and_restores_hidden_top_level_entities() {
+    let (mut app, mut session) = application_with_bounds(point(0.0, 0.0), point(1.0, 1.0));
+    let entity = EntityId(1);
+    session.hidden_entities.insert(SelectionRef {
+        document: DocumentId(1),
+        entity,
+        instance: InstancePath::default(),
+        sub_element: None,
+    });
+    scene(&mut app, &mut session, SceneCommand::Save("Hidden".into())).expect("save");
+    let saved = scenes(&app);
+    assert_eq!(
+        saved.resolve("Hidden").expect("row").hidden.as_deref(),
+        Some([entity].as_slice())
+    );
+
+    // A nested-instance hide has no scene row form: it must survive the
+    // top-level replacement rather than be silently cleared.
+    let nested = SelectionRef {
+        document: DocumentId(1),
+        entity: EntityId(2),
+        instance: InstancePath(vec![EntityId(1)]),
+        sub_element: None,
+    };
+    session.hidden_entities.clear();
+    session.hidden_entities.insert(nested.clone());
+    let before = revision(&app);
+    scene(
+        &mut app,
+        &mut session,
+        SceneCommand::Restore("Hidden".into()),
+    )
+    .expect("restore");
+    assert_eq!(revision(&app), before, "a hidden restore is session-only");
+    assert!(session.hidden_entities.refs().iter().any(|reference| {
+        reference.entity == entity
+            && reference.instance.0.is_empty()
+            && reference.sub_element.is_none()
+    }));
+    assert!(
+        session.hidden_entities.contains(&nested),
+        "a nested-instance hide is not representable and must be preserved"
+    );
+}
+
+#[test]
+fn an_empty_hidden_capture_clears_the_session_hidden_set_on_restore() {
+    let (mut app, mut session) = application_with_bounds(point(0.0, 0.0), point(1.0, 1.0));
+    scene(
+        &mut app,
+        &mut session,
+        SceneCommand::Save("All visible".into()),
+    )
+    .expect("save");
+    let entity = EntityId(1);
+    session.hidden_entities.insert(SelectionRef {
+        document: DocumentId(1),
+        entity,
+        instance: InstancePath::default(),
+        sub_element: None,
+    });
+    scene(
+        &mut app,
+        &mut session,
+        SceneCommand::Restore("All visible".into()),
+    )
+    .expect("restore");
+    assert!(
+        session.hidden_entities.is_empty(),
+        "a saved empty capture is not the same as an old scene that never captured hidden state"
+    );
+}

@@ -112,6 +112,7 @@ fn scene_row(display: Option<DisplaySettings>) -> Value {
         display,
         soften: None,
         soften_cleared: None,
+        hidden: None,
     }
     .to_json()
 }

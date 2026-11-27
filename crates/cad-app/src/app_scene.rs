@@ -21,6 +21,7 @@
 
 use super::*;
 use cad_domain::scene::{Scene, SceneSoften, SceneTag, SceneVisualStyle};
+use cad_domain::{InstancePath, SelectionRef};
 use cad_history::DrawingUndoRecord;
 
 impl Application {
@@ -62,6 +63,7 @@ impl Application {
                 let display = self.drawing(command.document)?.display_settings();
                 let (soften, soften_cleared) =
                     capture_scene_soften(self.drawing(command.document)?);
+                let hidden = capture_scene_hidden(session, command.document);
                 let planned = self.drawing(command.document)?.plan_save_scene(Scene {
                     view: named,
                     style,
@@ -69,6 +71,7 @@ impl Application {
                     display: Some(display),
                     soften,
                     soften_cleared,
+                    hidden: Some(hidden),
                 })?;
                 let Some(planned) = planned else {
                     return Ok(scene_outcome(
@@ -168,6 +171,13 @@ impl Application {
                 soften_changes.push((*entity, None));
             }
         }
+        let hidden_kept: Option<Vec<EntityId>> = saved.hidden.as_ref().map(|hidden| {
+            hidden
+                .iter()
+                .copied()
+                .filter(|entity| drawing.entity(*entity).is_some())
+                .collect()
+        });
         if (display_changed || !soften_changes.is_empty()) && session.app_mode() == AppMode::Viewer
         {
             return Err(CadError::PermissionDenied);
@@ -196,6 +206,12 @@ impl Application {
                 &format!("SCENE RESTORE {name}"),
             )?;
         }
+        let hidden_count = if let Some(hidden) = &hidden_kept {
+            apply_scene_hidden(session, command.document, hidden);
+            hidden.len()
+        } else {
+            0
+        };
         session.active_space = saved.view.space.clone();
         snapshot.restore(self.viewport_mut(command)?);
         session.view_extras.set_visual_style(saved.style.token())?;
@@ -213,7 +229,8 @@ impl Application {
             "scene.restored",
             format!(
                 "SCENE RESTORE: applied scene `{name}` (camera, mode, work plane, space, \
-                 style {}, {tag_count} tag(s), {soften_count} soften value(s){display_note})",
+                 style {}, {tag_count} tag(s), {soften_count} soften value(s), {hidden_count} \
+                 hidden top-level entity/entities{display_note})",
                 saved.style.token()
             ),
         ))
@@ -316,6 +333,48 @@ fn resolve_layer_by_name<'a>(
         .filter(|layer| layer.name.eq_ignore_ascii_case(name));
     let first = matches.next()?;
     matches.next().is_none().then_some(first)
+}
+
+/// Replace this document's top-level hidden set with a scene's snapshot.
+///
+/// Sub-element and nested-instance hides are preserved: those have no row form
+/// in a scene, so clearing them would exceed what the capture can restore.
+fn apply_scene_hidden(session: &mut SessionState, document: DocumentId, hidden: &[EntityId]) {
+    session.hidden_entities.retain(|reference| {
+        !(reference.document == document
+            && reference.instance.0.is_empty()
+            && reference.sub_element.is_none())
+    });
+    for entity in hidden {
+        session.hidden_entities.insert(SelectionRef {
+            document,
+            entity: *entity,
+            instance: InstancePath::default(),
+            sub_element: None,
+        });
+    }
+}
+
+/// The session-hidden **top-level model-space** entities for one document.
+///
+/// A scene row addresses entities by id, so only refs with an empty instance
+/// path and no sub-element are captured. Nested/sub-element hides stay
+/// session-only and are not rewritten by a scene restore.
+fn capture_scene_hidden(session: &SessionState, document: DocumentId) -> Vec<EntityId> {
+    let mut hidden: Vec<EntityId> = session
+        .hidden_entities
+        .refs()
+        .iter()
+        .filter(|reference| {
+            reference.document == document
+                && reference.instance.0.is_empty()
+                && reference.sub_element.is_none()
+        })
+        .map(|reference| reference.entity)
+        .collect();
+    hidden.sort_unstable_by_key(|entity| entity.0);
+    hidden.dedup();
+    hidden
 }
 
 /// Capture the explicit per-entity soften angles (bounded by the scene codec).

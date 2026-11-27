@@ -1,6 +1,6 @@
 //! Persisted scenes (`tables/scenes.json`, `.ymodel` minor 20; a row with the
 //! `tags` snapshot makes the writer stamp minor 23, a row with `display` minor
-//! 24).
+//! 24, a row with `hidden` minor 31).
 //!
 //! A scene is SketchUp's page: a named snapshot of **presentation state** that a
 //! click restores. This cut captures exactly the state this build can restore
@@ -15,15 +15,19 @@
 //!   rewritten by a scene);
 //! * the document **Shadows/Fog record** (`tables/display.json`), applied on
 //!   restore as the same one-revision display write the `SHADOWS`/`FOG`
-//!   commands use when the saved record differs from the current one.
+//!   commands use when the saved record differs from the current one;
+//! * the **session-hidden top-level entities** at save time, restored by
+//!   replacing this document's top-level hidden set (nested/sub-element hides
+//!   are not representable in a row and stay untouched).
 //!
-//! It deliberately does **not** capture sections or soft edges: those have no
-//! scene application path yet, and storing a flag the renderer ignores would be
-//! a lie. The scene row is a named view plus the style key and optional tag and
-//! display snapshots, so it reuses the view's strict codec and camera
-//! validation. A row whose `tags` key is present makes the writer stamp the
-//! archive at minor 23, a row with `display` at minor 24; a row without either
-//! stays a minor-20 row and restores only the view/style.
+//! It deliberately does **not** capture sections, scene thumbnails or manual
+//! per-edge soften: those have no scene application path yet, and storing a
+//! flag the renderer ignores would be a lie. The scene row is a named view plus
+//! the style key and optional tag/display/soften/hidden snapshots, so it reuses
+//! the view's strict codec and camera validation. A row whose `tags` key is
+//! present makes the writer stamp the archive at minor 23, `display` at minor
+//! 24 and `hidden` at minor 31; a row without them stays a minor-20 row and
+//! restores only the view/style.
 //!
 //! # Bounds and names
 //!
@@ -54,6 +58,9 @@ pub const SCENE_SOFTEN_CAP: usize = 1024;
 /// How many body ids a scene may record as "no explicit soften at save".
 pub const SCENE_SOFTEN_CLEARED_CAP: usize = 1024;
 
+/// How many session-hidden top-level entity ids one scene may capture.
+pub const SCENE_HIDDEN_CAP: usize = 1024;
+
 /// The longest captured tag name (layer names are short in practice).
 pub const SCENE_TAG_NAME_MAX_CHARS: usize = 255;
 
@@ -82,6 +89,8 @@ pub mod markers {
     pub const SCENE_SOFTEN_INVALID: &str = "scene.soften_invalid";
     /// The captured "clear these soften values" list is malformed or over budget.
     pub const SCENE_SOFTEN_CLEARED_INVALID: &str = "scene.soften_cleared_invalid";
+    /// The captured hidden-entity snapshot is malformed, duplicated or over budget.
+    pub const SCENE_HIDDEN_INVALID: &str = "scene.hidden_invalid";
 }
 
 /// The visual style a scene restores.
@@ -197,6 +206,14 @@ pub struct Scene {
     /// softened after the save goes back to "no explicit value". Bounded like
     /// the explicit snapshot; absent for older scenes (nothing is cleared).
     pub soften_cleared: Option<Vec<EntityId>>,
+    /// Session-hidden top-level model-space entities at save time (minor 31).
+    ///
+    /// `Some([])` is a real capture ("nothing was hidden") and restores by
+    /// clearing the document's top-level hidden set; `None` is a scene written
+    /// before hidden capture and leaves the session hidden set untouched. Only
+    /// whole top-level entities are stored (no INSERT instance paths and no
+    /// sub-elements), matching what a scene row can address by id.
+    pub hidden: Option<Vec<EntityId>>,
 }
 
 impl Scene {
@@ -212,6 +229,7 @@ impl Scene {
             display: None,
             soften: None,
             soften_cleared: None,
+            hidden: None,
         }
     }
 
@@ -274,6 +292,33 @@ impl Scene {
                             "entity {} is both explicitly softened and in soften_cleared",
                             entity.0
                         ),
+                    ));
+                }
+                seen.push(*entity);
+            }
+        }
+        if let Some(hidden) = &self.hidden {
+            if hidden.len() > SCENE_HIDDEN_CAP {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_HIDDEN_INVALID,
+                    format!(
+                        "hidden: {} rows, over the {SCENE_HIDDEN_CAP}-row budget",
+                        hidden.len()
+                    ),
+                ));
+            }
+            let mut seen = Vec::with_capacity(hidden.len());
+            for entity in hidden {
+                if entity.0 == 0 || u64::try_from(entity.0).is_err() {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_HIDDEN_INVALID,
+                        format!("hidden: entity {} is not a persistable id", entity.0),
+                    ));
+                }
+                if seen.contains(entity) {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_HIDDEN_INVALID,
+                        format!("hidden: entity {} appears twice", entity.0),
                     ));
                 }
                 seen.push(*entity);
@@ -421,6 +466,19 @@ impl Scene {
                     ),
                 );
             }
+        }
+        if let Some(hidden) = &self.hidden {
+            // `Some([])` is a real capture and stays on the row so a restore
+            // clears the session hidden set; `None` omits the key.
+            row.insert(
+                "hidden".to_string(),
+                Value::Array(
+                    hidden
+                        .iter()
+                        .map(|entity| Value::from(u64::try_from(entity.0).unwrap_or(0)))
+                        .collect(),
+                ),
+            );
         }
         Value::Object(row)
     }
@@ -582,6 +640,28 @@ impl Scene {
             }
             None => None,
         };
+        let hidden = match map.remove("hidden") {
+            Some(Value::Array(rows)) => {
+                let mut hidden = Vec::with_capacity(rows.len());
+                for (index, row) in rows.iter().enumerate() {
+                    let entity = row.as_u64().filter(|raw| *raw > 0).ok_or_else(|| {
+                        SceneError::Invalid(
+                            markers::SCENE_HIDDEN_INVALID,
+                            format!("hidden[{index}]: expected a positive entity id"),
+                        )
+                    })?;
+                    hidden.push(EntityId(u128::from(entity)));
+                }
+                Some(hidden)
+            }
+            Some(_) => {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_HIDDEN_INVALID,
+                    "hidden: expected an array of entity ids".into(),
+                ))
+            }
+            None => None,
+        };
         let view = NamedView::from_json(&Value::Object(map))?;
         let scene = Scene {
             view,
@@ -590,6 +670,7 @@ impl Scene {
             display,
             soften,
             soften_cleared,
+            hidden,
         };
         scene.validate()?;
         Ok(scene)
@@ -652,6 +733,7 @@ impl SceneTable {
                 display: scene.display,
                 soften: scene.soften,
                 soften_cleared: scene.soften_cleared,
+                hidden: scene.hidden,
             });
             return Ok(true);
         }
@@ -671,6 +753,7 @@ impl SceneTable {
             display: scene.display,
             soften: scene.soften,
             soften_cleared: scene.soften_cleared,
+            hidden: scene.hidden,
         });
         Ok(false)
     }
