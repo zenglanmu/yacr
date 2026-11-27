@@ -22,6 +22,7 @@ import { useI18n, useShell } from '../../context.ts';
 import { Icon } from '../../icons.tsx';
 import { invoke } from '../../host/invoke.ts';
 import { blocksOf } from '../../cad/cad-status.ts';
+import { componentDefineCommand, componentInsertCommand } from '../concept/components.ts';
 import { toolLabelKey } from '../../commands/commands.ts';
 import { toolStepPromptKey } from '../../cad/cad.ts';
 import { propertyRowLabel } from '../../properties/property-labels.ts';
@@ -72,19 +73,72 @@ function EntityInfoBody() {
 function ComponentsBody() {
   const { t } = useI18n();
   const shell = useShell();
+  const [name, setName] = useState('');
+  const documentLabel = shell.status?.documentLabel ?? null;
   const blocks = blocksOf(shell.status);
-  if (blocks.length === 0) {
-    return <p className="concept-panel__hint">{t('concept.components.empty')}</p>;
+  if (documentLabel === null) {
+    return <p className="concept-panel__hint">{t('concept.components.no_document')}</p>;
   }
+  const defineCommand = componentDefineCommand(name);
+  const canDefine = defineCommand !== null && shell.canCommand('BLOCK');
+  const canInsert = shell.canCommand('INSERT');
   return (
-    <ul className="concept-rows">
-      {blocks.slice(0, 12).map((block, index) => (
-        <li key={`${block.name ?? 'unnamed'}-${index}`}>
-          <span className="concept-rows__label">{block.name ?? t('classicinsert.unnamed')}</span>
-          <span className="concept-rows__value">{t('concept.components.members', { count: block.memberCount })}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <p className="concept-panel__hint">{t('concept.components.hint')}</p>
+      <div className="concept-scenes__save">
+        <input
+          type="text"
+          className="concept-scenes__name"
+          value={name}
+          placeholder={t('concept.components.name')}
+          aria-label={t('concept.components.name')}
+          onChange={event => setName(event.currentTarget.value)}
+        />
+        <button
+          type="button"
+          className="concept-panel__action"
+          disabled={!canDefine}
+          onClick={() => {
+            if (defineCommand !== null) {
+              shell.runCommand(defineCommand);
+              setName('');
+            }
+          }}
+        >
+          {t('concept.components.create')}
+        </button>
+      </div>
+      {blocks.length === 0 ? (
+        <p className="concept-panel__hint">{t('concept.components.empty')}</p>
+      ) : (
+        <ul className="concept-rows">
+          {blocks.slice(0, 12).map((block, index) => {
+            const command = componentInsertCommand(block.name);
+            return (
+              <li key={`${block.name ?? 'unnamed'}-${index}`}>
+                <span className="concept-rows__label">
+                  {block.name ?? t('classicinsert.unnamed')}
+                </span>
+                <span className="concept-rows__value">
+                  {t('concept.components.members', { count: block.memberCount })}
+                </span>
+                <button
+                  type="button"
+                  className="concept-panel__action"
+                  title={t('concept.components.insert')}
+                  disabled={command === null || !canInsert}
+                  onClick={() => {
+                    if (command !== null) shell.runCommand(command);
+                  }}
+                >
+                  {t('concept.components.insert')}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
   );
 }
 

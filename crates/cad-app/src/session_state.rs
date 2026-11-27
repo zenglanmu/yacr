@@ -101,6 +101,12 @@ pub struct SessionState {
     pub modify_options: ModifyOptions,
 
     pub tool: ToolState,
+    /// A block name supplied by the typed `INSERT <name>` / `BLOCK <name>` form.
+    ///
+    /// Applied as the capture's terminal text as soon as its point complement is
+    /// complete (one click then places/defines the named block); cleared on every
+    /// tool lifecycle transition, so it can never leak into another capture.
+    pending_tool_text: Option<String>,
     /// Generation incremented whenever an active tool lifecycle is replaced.
     pub tool_generation: u64,
     pub generation: u64,
@@ -299,6 +305,7 @@ impl SessionState {
             modify_options: ModifyOptions::default(),
 
             tool: ToolState::Idle,
+            pending_tool_text: None,
             tool_generation: 0,
             generation: 0,
             backend: BackendChoice::Auto,
@@ -568,6 +575,7 @@ impl SessionState {
     pub fn cancel_tool(&mut self) -> CadResult<()> {
         if !matches!(self.tool, ToolState::Idle) {
             self.tool = ToolState::Idle;
+            self.pending_tool_text = None;
             self.bump_tool_generation();
         }
         // A pointer release ends the continuous pan/orbit run; the next one
@@ -582,6 +590,8 @@ impl SessionState {
 
     /// Begin drawing capture and snapshot the current selection identity.
     pub fn begin_draw(&mut self, kind: DrawToolKind) -> CadResult<()> {
+        // A new capture never inherits a previous typed block name.
+        self.pending_tool_text = None;
         // The command this capture belongs to is the one `DrawToolKind::command`
         // records (one mapping shared with the `MULTIPLE` repeat loop): the kind
         // is not always one command — `COPYBASE`/`CUTBASE` share the
@@ -724,9 +734,20 @@ impl SessionState {
         } else {
             self.constrained_point(self.ortho_previous_point(), point)
         };
+        let pending_text = self.pending_tool_text.clone();
         match &mut self.tool {
             ToolState::Drawing(capture) => {
                 capture.tool.push_point(point)?;
+                if matches!(
+                    capture.tool.kind(),
+                    DrawToolKind::InsertBlock | DrawToolKind::BlockDefine
+                ) && capture.tool.awaiting_text()
+                {
+                    if let Some(name) = pending_text {
+                        capture.tool.set_text(&name)?;
+                        return Ok(true);
+                    }
+                }
                 Ok(false)
             }
             ToolState::Measuring(tool) => {
@@ -896,8 +917,21 @@ impl SessionState {
     pub(crate) fn complete_tool(&mut self) {
         if !matches!(self.tool, ToolState::Idle) {
             self.tool = ToolState::Idle;
+            self.pending_tool_text = None;
             self.bump_tool_generation();
         }
+    }
+
+    /// Supply the block name of a typed `INSERT <name>` / `BLOCK <name>` line.
+    ///
+    /// The capture applies it as its terminal text once the point complement is
+    /// complete (see [`Self::capture_point_with_snap`]); a non-empty trimmed name
+    /// is required, and the create command re-validates it. Presentation/state
+    /// only: no database write happens here.
+    pub fn set_pending_tool_text(&mut self, text: Option<String>) {
+        self.pending_tool_text = text
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty());
     }
 }
 

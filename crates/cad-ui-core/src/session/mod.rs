@@ -5,7 +5,6 @@
 //! stays in `cad-db` behind the host boundary, the frontend sees derived state.
 //!
 //! Threading: it is created, driven and dropped on the host main thread only.
-//! Scope: status, commands, pointer/wheel input, metrics and diagnostics.
 //! Per-host IPC wiring and the GPU presenter live in each host and call here.
 //! The composed [`HostPlatform`] must report a surface when built; unmapped is `Cancelled`.
 mod action_recorder;
@@ -21,6 +20,7 @@ mod api_submit;
 mod application_domain;
 mod attribute_arguments;
 mod bim;
+mod block_arguments;
 mod bytes;
 mod camera_arguments;
 mod command_log;

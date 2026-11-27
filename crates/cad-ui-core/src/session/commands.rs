@@ -45,10 +45,8 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LAYERP", CommandId::LayerPrevious),
     // LAYISO hides every layer the selection is not on (plus the current layer), as session visibility overrides only — no payload, no database write. The restore half is the existing `RESTORELAYERS` path: `LAYUNISO`/`LAYON` are aliases of it below, so there is exactly one "clear the overrides" path and one "previous state" path (`LAYERP`).
     ("LAYISO", CommandId::IsolateLayers),
-    // LAYOFF is its sibling: hide exactly the selection's layers (the current layer is never turned off), again as session visibility overrides only.
     ("LAYOFF", CommandId::LayOff),
     ("SPACE", CommandId::SwitchSpace),
-    // `MODEL` (AutoCAD 2026) is the payload-free "switch to the Model tab" selector. It is the same validated session-state switch as `SPACE MODEL`, never a second space path, and takes no argument.
     ("MODEL", CommandId::ModelSpace),
     ("SELECT", CommandId::Select),
     ("SELECTALL", CommandId::SelectAll),
@@ -891,12 +889,14 @@ mod paint_grammar;
 pub use paint_grammar::*;
 mod scene_grammar;
 pub use scene_grammar::*;
+mod block_grammar;
 mod camera_grammar;
 mod display_grammar;
 mod protractor_grammar;
 mod soften_grammar;
 mod text3d_grammar;
 mod walk_grammar;
+pub use block_grammar::*;
 pub use camera_grammar::*;
 pub use display_grammar::*;
 pub use protractor_grammar::*;

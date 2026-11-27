@@ -171,6 +171,9 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     SCENE_SELECTOR,
     // `SOFTENEDGES [<angle>]`: SketchUp soften edges.
     SOFTENEDGES_SELECTOR,
+    // `INSERT <name>` / `BLOCK <name>`: the typed block-name forms.
+    INSERT_SELECTOR,
+    BLOCK_SELECTOR,
     // `CAMERA TWO-POINT|WALK`: the reference camera modes, refused by name (the
     // bare selector starts the two-point placement capture).
     CAMERA_SELECTOR,

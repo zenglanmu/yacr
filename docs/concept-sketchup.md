@@ -51,6 +51,9 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **组件面板**（2026-11-27，ADR-0076）：托盘 Components 从只读列表变成可操作面板——每行
+  `INSERT <name>`、名称输入 + `BLOCK <name>`（块名经 pending text 在捕获点后自动应用）；命令层
+  仍负责未知块/空选择/重名拒绝。
   **照片匹配/叠加层面板**（2026-11-27，ADR-0075）：`MATCHPHOTO`/`OVERLAYS` 从 pending 变成真实
   host-read 面板——Match Photo 报告 `modeled:false` + 稳定原因，Overlays 只读列出渲染器拥有的通道；
   两个动作都是具名拒绝（`matchphoto.not_implemented` / `overlays.not_implemented`），不写文档。
@@ -191,7 +194,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | 面板 | 状态 | 边界 |
 |---|---|---|
 | Entity Info | full | 属性行来自 `PropertyRow`；网格行有限 |
-| Components | partial | 列出块定义；创建/插入 Component 的完整语义未接线 |
+| Components | partial | 真实面板：列出块定义（名称 + 成员数）；每行 **Insert** 走 `INSERT <name>`（块名预先交给捕获，点一下就放置），名称输入 + **Create from selection** 走 `BLOCK <name>`（基点点一下即定义）；命令层仍负责未知块/空选择/重名等具名拒绝。**未建模**：组件缩略图、右键替换/重载、嵌套组件的就地编辑、拖放与组件浏览器搜索；面板只列出前 12 个（`cad_status.blocks` 的上限） |
 | Styles | partial | 只有主题切换，不是 SketchUp Style |
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
