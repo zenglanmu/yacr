@@ -1,0 +1,8 @@
+[probe] display backend policy=Wayland resolved=Wayland source=from environment
+[probe] cad session created
+[probe] initial configure took 9115 us surface=hwnd
+[probe] bridge wayland presenter ready generation=1 backend=vulkan adapter=Quadro P620 device_type=discrete_gpu present_mode=Mailbox configure_us=9115
+[probe] actual-render seq=1 device_epoch=1 view_rev=2 applied_rev=Some(2) applied_base=Some(2) cpu_ms=1.024 gpu_ms=None plan_ms=0.007 uniform_ms=0.010 encode_ms=0.015 submit_ms=0.324 wait_ms=0.294 draw_calls=2 verts=24 tris=8 instanced=1 mesh=0 legacy_opaque=1 arc=0 transparent=0 images=0 accelerated=false instance_streams=1 instanced_batches=4 tier=universal over_budget=false prog=Some(4)/Some(4) complete=true uploads_started=1 rev_resets=0 ready_none=0 pulled=unavailable budget_scale=1.000 budget_target_ms=13.00 budget_cost_ema_ms=0.00 budget_verts=8000000 budget_tris=2000000 pacing=active cull_chunks=1/1 gpu_time=disabled
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1012x689 frames=31 ticks=54 present_mode=Some("Mailbox") stopped=false marker=0.530 stages_us[write=0 acquire=19 configure=0 submit=110 scope=1 present=481 total=625] error=None
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1012x689 frames=93 ticks=116 present_mode=Some("Mailbox") stopped=false marker=0.150 stages_us[write=0 acquire=41 configure=0 submit=245 scope=2 present=539 total=877] error=None
+[probe] status backend=Some("vulkan") adapter=Some("Quadro P620") size=1012x689 frames=155 ticks=178 present_mode=Some("Mailbox") stopped=false marker=0.770 stages_us[write=0 acquire=34 configure=0 submit=180 scope=2 present=578 total=816] error=None

@@ -1,0 +1,2 @@
+backend	case	verdict	exit_code	screenshot	captured_utc	notes
+wayland	production	NATURAL_EXIT	0	captured	2026-11-27T19:34:56Z	app exited on its own; surfaceMode=native-below; production chrome over CAD; compositor frame (Mutter ScreenCast) of the full monitor
