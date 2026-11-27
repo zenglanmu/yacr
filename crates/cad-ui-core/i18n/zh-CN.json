@@ -3660,6 +3660,7 @@
   "concept.outliner.show_all": "显示全部隐藏对象",
   "concept.outliner.group_name": "新分组名称",
   "concept.outliner.group_selected": "将选中项分组",
+  "concept.outliner.drop_to_ungroup": "把行拖到这里即可从分组移除",
   "concept.outliner.regroup_hint": "把行拖到分组上即可加入；分组成员行可从其分组移除。",
   "concept.outliner.remove_from_group": "从分组移除",
   "concept.outliner.remove_named": "从 {name} 移除",

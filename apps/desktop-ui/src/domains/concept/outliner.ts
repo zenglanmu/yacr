@@ -143,6 +143,37 @@ export function groupEditCommand(
   return `GROUPEDIT "${name}" ${verb} ${entityIds.join(',')}`;
 }
 
+/**
+ * `GROUPEDIT "<parent>" REMOVE <ids>` commands for the selected rows that
+ * currently belong to a group.
+ *
+ * Rows are grouped by their `parentGroup`, so one undo step covers each old
+ * group; already-ungrouped rows contribute nothing.
+ */
+export function ungroupCommands(
+  rows: readonly OutlinerRow[],
+  selectedKeys: ReadonlySet<string>,
+): readonly string[] {
+  const byParent = new Map<string, number[]>();
+  for (const row of rows) {
+    if (!selectedKeys.has(outlinerRowKey(row)) || !row.selectable
+      || row.parentGroup === null) {
+      continue;
+    }
+    const ids = byParent.get(row.parentGroup) ?? [];
+    for (const id of row.selectIds) {
+      if (!ids.includes(id)) ids.push(id);
+    }
+    byParent.set(row.parentGroup, ids);
+  }
+  const commands: string[] = [];
+  for (const [parent, ids] of byParent) {
+    const command = groupEditCommand(parent, 'REMOVE', ids);
+    if (command !== null) commands.push(command);
+  }
+  return commands;
+}
+
 /** The stable key for one row (its kind and id are unique in one tree). */
 export function outlinerRowKey(row: Pick<OutlinerRow, 'kind' | 'id'>): string {
   return `${row.kind}:${row.id}`;

@@ -12,6 +12,7 @@ import {
   groupEditCommand,
   groupRenameCommand,
   outlinerRowKey,
+  ungroupCommands,
   readOutliner,
   selectedOutlinerIds,
   visibleOutlinerRows,
@@ -329,12 +330,20 @@ export function OutlinerBody() {
       else setNonce(value => value + 1);
     });
   };
+  const draggedRows = () => rows.filter(candidate =>
+    dragKeys.has(outlinerRowKey(candidate))
+    && candidate.selectable
+    && candidate.kind !== 'group');
+  const dropToUngroup = () => {
+    const commands = ungroupCommands(rows, dragKeys);
+    if (commands.length === 0) return;
+    for (const command of commands) shell.runCommand(command);
+    setDragKeys(new Set());
+    setNonce(value => value + 1);
+  };
   const dropOnGroup = (row: OutlinerRow) => {
     if (row.kind !== 'group') return;
-    const dragged = rows.filter(candidate =>
-      dragKeys.has(outlinerRowKey(candidate))
-      && candidate.selectable
-      && candidate.kind !== 'group');
+    const dragged = draggedRows();
     if (dragged.length === 0) return;
     const target = row.label;
     // A real regroup moves the rows: remove them from their current groups first,
@@ -485,6 +494,7 @@ export function OutlinerBody() {
                 onDrop={row.kind === 'group'
                   ? event => {
                     event.preventDefault();
+                    event.stopPropagation();
                     dropOnGroup(row);
                   }
                   : undefined}
@@ -616,6 +626,18 @@ export function OutlinerBody() {
           })}
         </ul>
       )}
+      <div
+        className="concept-outliner__ungroup"
+        onDragOver={event => {
+          if (ungroupCommands(rows, dragKeys).length > 0) event.preventDefault();
+        }}
+        onDrop={event => {
+          event.preventDefault();
+          dropToUngroup();
+        }}
+      >
+        {t('concept.outliner.drop_to_ungroup')}
+      </div>
       {state.answer !== null && state.answer.truncated ? (
         <p className="concept-panel__hint">
           {t('concept.outliner.truncated', {

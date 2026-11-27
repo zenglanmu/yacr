@@ -62,6 +62,8 @@
   场景改动；Viewer 有差异时在改动前拒绝。
   **Outliner 逐行显示**（2026-11-28，ADR-0091）：新增会话命令 `SHOWOBJECTS`，把当前选择从
   `hidden_entities` 移除；隐藏行 Show 先选中该行 ids 再 dispatch，Viewer 合法、不写文档。
+  **Outliner 拖拽撤销分组**（2026-11-28，ADR-0096）：行拖到 Ungroup 区域，按旧 `parentGroup`
+  分组 dispatch `GROUPEDIT "<旧组>" REMOVE`；无新命令/格式。
   **Outliner 拖拽归组**（2026-11-28，ADR-0095）：行拖到目标分组先 `GROUPEDIT REMOVE` 再从
   `GROUPEDIT ADD`（两步撤销）；分组成员行可 Remove from group；行顺序重排仍未实现。
   **Outliner 多选建组**（2026-11-28，ADR-0093）：Ctrl/Cmd/Shift 点击累计行选择，
@@ -247,7 +249,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Match Photo | partial | 真实面板 + host read（`cad_match_photo` / `kind:"matchPhoto"`）：明确报告 `modeled:false` 与稳定原因（照片匹配模型未建模：无照片导入/相机求解/照片背景），动作按钮 dispatch `MATCHPHOTO`，命令以 `matchphoto.not_implemented` 具名拒绝；不伪造照片列表 |
 | Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化；场景可捕获/恢复显式 `render_attributes.soften`，并清除保存时无显式值的 body（ADR-0090/0094） |
 | Overlays | partial | 真实面板 + host read（`cad_overlays` / `kind:"overlays"`）：只读列出**渲染器实际拥有**的叠加通道（坐标轴/网格/选中高亮/捕捉提示/选择框/悬停高亮/测量读数/绘制预览）及其当前开关；没有用户管理的叠加定义模型，动作按钮 dispatch `OVERLAYS`，以 `overlays.not_implemented` 具名拒绝 |
-| Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**分组行可改名**：行内输入 dispatch 既有 `GROUPEDIT "<name>" RENAME "<new>"`（一步撤销；名称含 `"`/换行时按钮不提供）；行可 **Hide**（先 `cad_select_entities` 再 `HIDEOBJECTS`，隐藏态由 `cad_outliner.hidden` 标注）、隐藏行可 **Show**（同一选择后 `SHOWOBJECTS`，只移除选中 refs）并有 **Show all hidden**（`UNISOLATEOBJECTS`）。**多选 + Group selected**：Ctrl/Cmd/Shift 点击行累计选择，名称输入 dispatch 既有 `GROUP CREATE "<name>"`（一步撤销；名称含 `"`/换行时按钮禁用）。**拖拽归组**：把行拖到分组行上先 `GROUPEDIT "<旧组>" REMOVE` 再从 `GROUPEDIT "<目标>" ADD`（两步撤销）；分组成员行有 **Remove from group**；行顺序重排仍未实现，只投影模型空间、只展开一层 |
+| Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**分组行可改名**：行内输入 dispatch 既有 `GROUPEDIT "<name>" RENAME "<new>"`（一步撤销；名称含 `"`/换行时按钮不提供）；行可 **Hide**（先 `cad_select_entities` 再 `HIDEOBJECTS`，隐藏态由 `cad_outliner.hidden` 标注）、隐藏行可 **Show**（同一选择后 `SHOWOBJECTS`，只移除选中 refs）并有 **Show all hidden**（`UNISOLATEOBJECTS`）。**多选 + Group selected**：Ctrl/Cmd/Shift 点击行累计选择，名称输入 dispatch 既有 `GROUP CREATE "<name>"`（一步撤销；名称含 `"`/换行时按钮禁用）。**拖拽归组**：把行拖到分组行上先 `GROUPEDIT "<旧组>" REMOVE` 再从 `GROUPEDIT "<目标>" ADD`（两步撤销）；分组成员行有 **Remove from group**；拖到 **Ungroup** 区域按旧组 `GROUPEDIT REMOVE`（一步/组）。行顺序重排仍未实现，只投影模型空间、只展开一层 |
 
 ## 5. 本轮验收与后续
 

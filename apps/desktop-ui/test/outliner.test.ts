@@ -11,6 +11,7 @@ import {
   groupEditCommand,
   groupRenameCommand,
   selectedOutlinerIds,
+  ungroupCommands,
   outlinerRowKey,
   parseOutlinerAnswer,
   readOutliner,
@@ -155,4 +156,26 @@ test('regroup commands use GROUPEDIT with quoted names and deduplicated ids', ()
   for (const ids of [[], ['10'], [1.5], [-2]]) {
     assert.equal(groupEditCommand('Walls', 'ADD', ids), null, String(ids));
   }
+});
+
+test('ungroup commands group the selected rows by their old parent', () => {
+  const rows = parseOutlinerAnswer({ rows: [
+    { kind: 'group', id: 1, label: 'Walls', selectable: true, selectIds: [10, 11] },
+    { kind: 'entity', id: 10, label: 'a', parentGroup: 'Walls', selectable: true, selectIds: [10] },
+    { kind: 'entity', id: 11, label: 'b', parentGroup: 'Walls', selectable: true, selectIds: [11] },
+    { kind: 'entity', id: 12, label: 'c', parentGroup: 'Roof', selectable: true, selectIds: [12] },
+    { kind: 'entity', id: 13, label: 'd', selectable: true, selectIds: [13] },
+  ] }).rows;
+  const commands = ungroupCommands(rows, new Set([
+    outlinerRowKey(rows[0]),
+    outlinerRowKey(rows[1]),
+    outlinerRowKey(rows[2]),
+    outlinerRowKey(rows[3]),
+    outlinerRowKey(rows[4]),
+  ]));
+  assert.deepEqual(commands, [
+    'GROUPEDIT "Walls" REMOVE 10,11',
+    'GROUPEDIT "Roof" REMOVE 12',
+  ]);
+  assert.deepEqual(ungroupCommands(rows, new Set([outlinerRowKey(rows[4])])), []);
 });
