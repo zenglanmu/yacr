@@ -78,6 +78,11 @@ impl HostController {
                 crate::CommandId::Sketch,
                 crate::CommandPayload::Points(points),
             ),
+            // POSITION CAMERA: the two captured points are the whole input.
+            DrawIntent::PositionCamera { eye, target } => (
+                crate::CommandId::PositionCamera,
+                crate::CommandPayload::PositionCamera { eye, target },
+            ),
             // WIPEOUT: every captured boundary vertex travels as `Points` (the
             // closed implicit ring). The plane/duplicate/area validation and the
             // `AcDbWipeout` mask construction are the command layer's, so the

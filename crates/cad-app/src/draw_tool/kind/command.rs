@@ -34,6 +34,8 @@ impl DrawToolKind {
             // FREEHAND commits through the existing `SKETCH` write: one open
             // polyline from the sampled hand path.
             Self::Freehand => CommandId::Sketch,
+            // POSITION CAMERA places a view-only perspective camera.
+            Self::PositionCamera => CommandId::PositionCamera,
             // WIPEOUT stores one `Mask` entity (`AcDbWipeout`).
             Self::Wipeout => CommandId::Wipeout,
             Self::Rectang => CommandId::CreateRectangle,

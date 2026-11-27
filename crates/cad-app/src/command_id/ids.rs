@@ -47,6 +47,9 @@ pub enum CommandId {
     /// `SPLITSOLID`: split the first selected mesh body by the union of the
     /// others into an outside and an inside piece, keeping the cutters.
     SplitSolid,
+    /// `CAMERA`: place a perspective viewpoint from a captured eye point and a
+    /// target point (SketchUp Position Camera). View-only.
+    PositionCamera,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

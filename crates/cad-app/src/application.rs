@@ -439,6 +439,7 @@ impl Application {
             CommandId::OuterShell => self.outer_shell(session, &command),
             CommandId::TrimSolid => self.trim_solid(session, &command),
             CommandId::SplitSolid => self.split_solid(session, &command),
+            CommandId::PositionCamera => self.position_camera(session, &command),
             CommandId::SoftenEdges => self.soften_selected_edges(session, &command),
             CommandId::ViewGo => self.view_go(session, &command),
             CommandId::ViewBack => self.view_back(session, &command),

@@ -49,6 +49,7 @@ mod p4_origin_dispatch;
 mod p4_trace;
 mod param_list;
 mod point_style;
+mod position_camera;
 mod properties;
 mod protractor;
 mod queue;

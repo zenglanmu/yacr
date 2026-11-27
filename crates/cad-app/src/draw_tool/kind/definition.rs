@@ -30,6 +30,13 @@ pub enum DrawToolKind {
     ///   subset, so points carry only the `+Z` the picker produced and are never
     ///   silently reprojected onto another plane.
     Polyline,
+    /// SketchUp's **Position Camera**: two points, an eye and the point it looks
+    /// at, set a perspective viewpoint. View-only (no document write).
+    ///
+    /// Two-point perspective and walk mode are **not** this capture; the typed
+    /// `CAMERA TWO-POINT` / `CAMERA WALK` forms are refused by name instead of
+    /// fabricating a different camera.
+    PositionCamera,
     /// FREEHAND: one open polyline traced by a drag (SketchUp's Freehand).
     ///
     /// Capture shape: the press starts the stroke, every pointer move appends a

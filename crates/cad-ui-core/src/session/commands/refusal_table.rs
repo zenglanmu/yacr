@@ -39,7 +39,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("BREP", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Brep))),
     ("BROWSER", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Browser))),
     ("BSEARCH", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Bsearch))),
-    ("CAMERA", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Camera))),
     ("CENTERDISASSOCIATE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Centerdisassociate))),
     ("CENTERREASSOCIATE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Centerreassociate))),
     ("CENTERRESET", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Centerreset))),

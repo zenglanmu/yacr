@@ -1,5 +1,4 @@
-//! The typed input payloads of the command funnel (split out for the code-size
-//! limit); each is the input of one [`crate::CommandId`] and carries no behaviour.
+//! The typed input payloads of the command funnel; one [`crate::CommandId`] each.
 
 use cad_domain::{
     LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
@@ -828,21 +827,21 @@ pub enum CommandPayload {
     /// by name; the conversion never guesses a scale.
     SpaceTrans(f64),
     MRedo(u32),
-    /// `MULTIPLE [command]`: the session repeat arm. `None` (bare `MULTIPLE`)
-    /// repeats the next interactive draw/edit capture command; `Some(target)`
-    /// names one admitted capture command ([`crate::MultipleTarget`]); anything
-    /// else is refused by name when dispatched.
+    /// `MULTIPLE [command]`: the session repeat arm; `None` is bare `MULTIPLE`.
     Multiple(Option<crate::MultipleTarget>),
     /// The 2026-11-07 draw/modify batch; contracts in `command_id::draw2`.
     Draw2(Box<crate::Draw2Payload>),
-    /// `VIEW`/`VIEWGO`/`VPOINT`; contracts in [`crate::app_view`].
     View(ViewCommand),
     /// The typed `SCENE <option>` line (SketchUp pages).
     Scene(SceneCommand),
     /// The typed `SHADOWS`/`FOG` line (display settings).
     Display(DisplayCommand),
     Text3d(Text3dInput),
-    /// `SOFTENEDGES <angle>` in degrees (bare uses the default).
+    /// `CAMERA`'s two captured points: the eye and the point it looks at.
+    PositionCamera {
+        eye: Point3,
+        target: Point3,
+    },
     SoftenEdges(f64),
     ViewGo(String),
     VPoint(VPointInput),

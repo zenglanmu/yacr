@@ -83,7 +83,7 @@ const CAMERA_NAVIGATE = panel('concept.camera.navigate', 'concept.section.naviga
 ]);
 
 const CAMERA_MORE = panel('concept.camera.more', 'concept.section.other_cameras', [
-  pending('CAMERA', 'concept.tool.position_camera', 'view'),
+  { id: 'CAMERA', labelKey: 'concept.tool.position_camera', icon: 'view', command: 'CAMERA', hintKey: 'concept.tool.position_camera.hint' },
   pending('WALK', 'concept.tool.walk', 'pan'),
   pending('LOOKAROUND', 'concept.tool.look_around', 'eye'),
   pending('MATCHPHOTO', 'concept.tool.match_photo', 'reference'),

@@ -184,3 +184,31 @@ fn freehand_samplers_accumulate_into_one_open_stroke_intent() {
     // the intent (the `SKETCH` command derives both).
     assert!(tool.preview().can_confirm());
 }
+
+#[test]
+fn position_camera_takes_the_eye_then_the_target() {
+    let mut tool = DrawTool::new(DrawToolKind::PositionCamera, 0);
+    assert_eq!(DrawToolKind::PositionCamera.arity(), PointArity::Exact(2));
+    assert_eq!(
+        DrawToolKind::PositionCamera.command(),
+        crate::CommandId::PositionCamera
+    );
+    assert_eq!(
+        tool.preview().status_line(),
+        "camera: pick the eye position"
+    );
+    tool.push_point(p(10.0, 10.0)).unwrap();
+    assert_eq!(
+        tool.preview().status_line(),
+        "camera: pick the target point"
+    );
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::PositionCamera {
+            eye: p(10.0, 10.0),
+            target: p(0.0, 0.0),
+        }
+    );
+    assert!(tool.push_point(p(1.0, 1.0)).is_err(), "exactly two points");
+}

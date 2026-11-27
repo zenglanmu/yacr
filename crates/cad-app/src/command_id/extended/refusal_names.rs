@@ -1,7 +1,7 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (310 AutoCAD 2026
-//! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
-//! commands and ADR-0056 graduated the seven action-recorder names to the real
-//! recorder: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (309 AutoCAD 2026
+//! names: the numbered batches less the names that graduated to real commands
+//! (`CAMERA`, `XCLIP`, `XEDGES`, the refedit set) and ADR-0056's seven
+//! action-recorder names: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
 //! in-place block-edit session in [`crate::app_refedit`]; `XCLIP` also graduated
 //! to a real display-only block-reference clip; `XEDGES` to the real
 //! display-edge extraction in `cad_app::app_drawing::xedges`; and `PARAMETERS`,
@@ -85,7 +85,6 @@ refusal_names! {
     Brep => "BREP" => "brep.unsupported: this build has no 3D solid history/brep model",
     Browser => "BROWSER" => "browser.unsupported: the host owns this browser/store/chrome action",
     Bsearch => "BSEARCH" => "bsearch.unsupported: this build has no convert-to-block search model",
-    Camera => "CAMERA" => "camera.unsupported: this build has no 3D camera/target view model",
     Centerdisassociate => "CENTERDISASSOCIATE" => "centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit",
     Centerreassociate => "CENTERREASSOCIATE" => "centerreassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit",
     Centerreset => "CENTERRESET" => "centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit",

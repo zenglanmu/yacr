@@ -47,6 +47,10 @@ pub(crate) fn interaction_request_for(
         // SKETCH is the freehand capture: the press starts the stroke, the
         // release commits it through the same command with the sampled points.
         CommandId::Sketch => Some(InteractionRequest::BeginDraw(DrawToolKind::Freehand)),
+        // CAMERA is the two-point eye/target placement (view-only).
+        CommandId::PositionCamera => {
+            Some(InteractionRequest::BeginDraw(DrawToolKind::PositionCamera))
+        }
         // WIPEOUT starts the open-ended polygon capture (first point, then every
         // further boundary point, Enter finishes); the command stores one mask.
         CommandId::Wipeout => Some(InteractionRequest::BeginDraw(DrawToolKind::Wipeout)),

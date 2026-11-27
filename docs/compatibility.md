@@ -2133,7 +2133,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `BREP` | **部分实现（具名拒绝）**：`brep.unsupported: this build has no 3D solid history/brep model` | 不写库/不升修订/不入历史 |
 | `BROWSER` | **部分实现（具名拒绝）**：`browser.unsupported: the host owns this browser/store/chrome action` | 不写库/不升修订/不入历史 |
 | `BSEARCH` | **部分实现（具名拒绝）**：`bsearch.unsupported: this build has no convert-to-block search model` | 不写库/不升修订/不入历史 |
-| `CAMERA` | **部分实现（具名拒绝）**：`camera.unsupported: this build has no 3D camera/target view model` | 不写库/不升修订/不入历史 |
+| `CAMERA` | **部分实现（真实视图工具）**：两点捕获（眼睛、目标）设透视相机并进入 3D；`CAMERA TWO-POINT`/`CAMERA WALK` 具名拒绝；只改视图、记 `ZOOM PREVIOUS` | 不写库/不升修订/不入历史（Viewer 合法） |
 | `CENTERDISASSOCIATE` | **部分实现（具名拒绝）**：`centerdisassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit` | 不写库/不升修订/不入历史 |
 | `CENTERREASSOCIATE` | **部分实现（具名拒绝）**：`centerreassociate.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit` | 不写库/不升修订/不入历史 |
 | `CENTERRESET` | **部分实现（具名拒绝）**：`centerreset.unsupported: center marks/centerlines are not modeled, so associativity/reset has nothing to edit` | 不写库/不升修订/不入历史 |

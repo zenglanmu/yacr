@@ -429,6 +429,9 @@ impl DrawTool {
             DrawToolKind::Freehand => DrawIntent::Freehand {
                 points: self.points.clone(),
             },
+            // POSITION CAMERA: the eye and the point it looks at, exactly as
+            // clicked; the handler builds the camera frame.
+            DrawToolKind::PositionCamera => DrawIntent::PositionCamera { eye: a, target: b },
             // WIPEOUT: every captured boundary vertex, in order. The open-ended
             // capture is refused above while below the three-point minimum, so the
             // command layer always receives a real ring; the plane/duplicate/area

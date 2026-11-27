@@ -57,6 +57,13 @@ impl DrawPreview {
                 )
             };
         }
+        if self.kind == DrawToolKind::PositionCamera {
+            return if self.points.is_empty() {
+                "camera: pick the eye position".to_string()
+            } else {
+                "camera: pick the target point".to_string()
+            };
+        }
         if self.kind == DrawToolKind::PressPull {
             return if self.picks.is_empty() {
                 "presspull: pick a face on the selected body".to_string()

@@ -4,10 +4,8 @@
 //! and its [`RenderSessionHandle`]: no CAD authority, no parser; the database
 //! stays in `cad-db` behind the host boundary, the frontend sees derived state.
 //!
-//! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`, so
-//! it is created, driven and dropped on the host main thread only (`!Send`/`!Sync`).
-//! Scope: this module implements the CAD-facing slice only — status, commands,
-//! pointer/wheel input, metrics, completion accounting and resource diagnostics.
+//! Threading: it is created, driven and dropped on the host main thread only.
+//! Scope: status, commands, pointer/wheel input, metrics and diagnostics.
 //! Per-host IPC wiring and the GPU presenter live in each host and call here.
 //! The composed [`HostPlatform`] must report a surface when built; unmapped is `Cancelled`.
 mod action_recorder;
@@ -24,6 +22,7 @@ mod application_domain;
 mod attribute_arguments;
 mod bim;
 mod bytes;
+mod camera_arguments;
 mod command_log;
 mod command_overrides;
 mod commands;

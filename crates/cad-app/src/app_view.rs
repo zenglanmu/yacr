@@ -625,3 +625,102 @@ fn view_outcome(code: &str, message: String) -> CommandOutcome {
         point_report: None,
     }
 }
+
+impl Application {
+    /// `CAMERA`: place a perspective viewpoint from the captured eye and target.
+    ///
+    /// This is SketchUp's Position Camera: the eye is the captured first point,
+    /// the second point is what it looks at. Up is world `+Z` (world `+Y` for a
+    /// vertical look, the same rule VPOINT uses), the field of view is the
+    /// viewport's current perspective lens (or the documented default when the
+    /// view is still orthographic), and the 2D camera is saved so switching back
+    /// to plan restores it.
+    ///
+    /// View-only: no document write, no revision, no undo step (a
+    /// `ZOOM PREVIOUS` snapshot is recorded, exactly like VPOINT/RESETVIEW).
+    /// Refusals: `camera.invalid_point` (non-finite input),
+    /// `camera.eye_target_coincident` (the two points coincide, so there is no
+    /// viewing direction) and `camera.invalid_frame` (the constructed camera is
+    /// degenerate). Two-point perspective and walk mode are refused at the typed
+    /// line (`camera.two_point_not_implemented` / `camera.walk_not_implemented`)
+    /// rather than silently placed here.
+    pub(crate) fn position_camera(
+        &mut self,
+        _session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let CommandPayload::PositionCamera { eye, target } = command.payload else {
+            return Err(CadError::InvalidInput(
+                "camera.payload: CAMERA needs the captured eye and target points".into(),
+            ));
+        };
+        if !crate::camera::is_finite_point(eye) || !crate::camera::is_finite_point(target) {
+            return Err(CadError::InvalidInput(
+                "camera.invalid_point: CAMERA needs two finite points".into(),
+            ));
+        }
+        let direction = Point3 {
+            x: target.x - eye.x,
+            y: target.y - eye.y,
+            z: target.z - eye.z,
+        };
+        let Some(direction) = normalize3(direction) else {
+            return Err(CadError::InvalidInput(
+                "camera.eye_target_coincident: the eye and the target must be different points"
+                    .into(),
+            ));
+        };
+        let up = if dot3(
+            direction,
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        )
+        .abs()
+            > 1.0 - 1e-9
+        {
+            Point3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            }
+        } else {
+            Point3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            }
+        };
+        let viewport = self.viewport_mut(command)?;
+        let projection = if viewport.camera.projection.is_orthographic() {
+            Projection::perspective(camera::DEFAULT_PERSPECTIVE_FOV_RADIANS)?
+        } else {
+            viewport.camera.projection
+        };
+        let camera = Camera {
+            eye,
+            target,
+            up,
+            projection,
+        };
+        camera.validate().map_err(|error| {
+            CadError::InvalidInput(format!(
+                "camera.invalid_frame: the captured points cannot define a camera frame ({error})"
+            ))
+        })?;
+        viewport.push_view_snapshot();
+        viewport.camera = camera;
+        let saved = viewport.view_mode.saved_2d_camera();
+        viewport.view_mode = ViewMode2d3d::ThreeD { saved_2d: saved };
+        Ok(view_outcome(
+            "camera.positioned",
+            format!(
+                "CAMERA: eye ({:.4}, {:.4}, {:.4}) looking at ({:.4}, {:.4}, {:.4}); the model is \
+                 unchanged",
+                eye.x, eye.y, eye.z, target.x, target.y, target.z
+            ),
+        ))
+    }
+}

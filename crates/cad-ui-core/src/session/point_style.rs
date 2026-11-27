@@ -237,6 +237,9 @@ impl CadSession {
             // `PROTRACTOR GUIDE`: the guide mode is a named refusal (the bare
             // selector is a measurement selector and never reaches this arm).
             super::commands::PROTRACTOR_SELECTOR => self.protractor_argument(argument, text),
+            // `CAMERA TWO-POINT|WALK`: named refusals (the bare selector is a
+            // capture and never reaches this arm).
+            super::commands::CAMERA_SELECTOR => self.camera_argument(argument, text),
             // `TEXT3D <x> <y> <z> <height> <extrusion> <text>`: the extruded
             // glyph mesh command.
             super::commands::TEXT3D_SELECTOR => self.text3d_argument(argument, text),

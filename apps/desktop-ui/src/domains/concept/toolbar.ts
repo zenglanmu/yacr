@@ -85,7 +85,7 @@ const CAMERA = group('concept.camera', 'concept.toolbar.camera', [
   { id: 'ZOOMOUT', labelKey: 'toolbar.zoom_out', icon: 'zoomOut', command: 'ZOOMOUT' },
   { id: 'FIT', labelKey: 'toolbar.zoom_extents', icon: 'fit', command: 'FIT' },
   { id: 'VIEWBACK', labelKey: 'toolbar.zoom_previous', icon: 'zoomPrevious', command: 'VIEWBACK' },
-  pending('CAMERA', 'concept.tool.position_camera', 'view'),
+  { id: 'CAMERA', labelKey: 'concept.tool.position_camera', icon: 'view', command: 'CAMERA', hintKey: 'concept.tool.position_camera.hint' },
   pending('WALK', 'concept.tool.walk', 'pan'),
   pending('LOOKAROUND', 'concept.tool.look_around', 'eye'),
 ]);

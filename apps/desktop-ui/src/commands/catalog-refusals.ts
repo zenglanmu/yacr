@@ -38,7 +38,6 @@ export const REFUSAL_COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.fr
   { id: 'BREP', labelKey: 'draw.kind.brep', icon: 'settings', group: 'modify' },
   { id: 'BROWSER', labelKey: 'draw.kind.browser', icon: 'settings', group: 'modify' },
   { id: 'BSEARCH', labelKey: 'draw.kind.bsearch', icon: 'settings', group: 'modify' },
-  { id: 'CAMERA', labelKey: 'draw.kind.camera', icon: 'settings', group: 'modify' },
   { id: 'CENTERDISASSOCIATE', labelKey: 'draw.kind.centerdisassociate', icon: 'settings', group: 'modify' },
   { id: 'CENTERREASSOCIATE', labelKey: 'draw.kind.centerreassociate', icon: 'settings', group: 'modify' },
   { id: 'CENTERRESET', labelKey: 'draw.kind.centerreset', icon: 'settings', group: 'modify' },

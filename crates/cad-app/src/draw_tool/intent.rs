@@ -123,6 +123,10 @@ pub enum DrawIntent {
     /// open polyline through the `SKETCH` command. No smoothing/fitting: the
     /// polyline is exactly the samples the host gesture kept.
     Freehand { points: Vec<Point3> },
+    /// `CAMERA`: the captured eye position and the point it looks at. The
+    /// handler builds a perspective camera; the capture never invents an up
+    /// vector or a field of view.
+    PositionCamera { eye: Point3, target: Point3 },
     /// `WIPEOUT`: insert a closed polygon mask whose **implicit ring** is
     /// `points` (at least three, in capture order).
     ///

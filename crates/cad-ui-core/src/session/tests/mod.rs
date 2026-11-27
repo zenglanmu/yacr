@@ -17,6 +17,7 @@ mod tests_array;
 mod tests_array_arguments;
 mod tests_batch;
 mod tests_bim;
+mod tests_camera;
 mod tests_command_log;
 mod tests_commands;
 mod tests_display;
