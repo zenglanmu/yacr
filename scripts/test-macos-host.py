@@ -86,6 +86,12 @@ MACOS_DEPENDENCIES = frozenset(
         # The carrier's `.ymodel` container linkage (ADR-0037 D1/D11): linked
         # only by an `apps/app-*` carrier, never by a shared `cad-*` layer.
         "cad-store-zip",
+        # ADR-0061 P-MESH-1a/1b: the mesh kernel is carrier-owned composition,
+        # injected by every `native-below` host (Linux, Windows, macOS, Android).
+        # The shared layers see only the `MeshModeler` trait; without the
+        # injection mesh boolean/repair refuses with
+        # `unsupported-runtime: mesh-modeler` instead of approximating.
+        "cad-kernel-manifold",
         "cad-domain",
         "serde_json",
         "objc2",
@@ -439,6 +445,10 @@ def self_test_problems() -> list[str]:
         (
             "binary renamed",
             manifest_problems(manifest.replace(f'name = "{BIN_NAME}"', 'name = "yacr"')),
+        ),
+        (
+            "mesh kernel dependency dropped",
+            manifest_problems(manifest.replace("cad-kernel-manifold.workspace = true\n", "")),
         ),
         (
             "build.rs gate removed",
