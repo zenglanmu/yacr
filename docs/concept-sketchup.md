@@ -54,6 +54,8 @@
   **场景阴影/雾快照**（2026-11-27，ADR-0080）：`SCENE SAVE` 把文档 `tables/display.json`
   记录存进场景行的 `display`（minor 24）；`SCENE RESTORE` 在记录有差异时执行一次与
   `SHADOWS`/`FOG` 相同的显示写入（一步撤销），Viewer 下有差异则在改动前拒绝。
+  **自动参考线点**（2026-11-28，ADR-0087）：`DIST GUIDE` 的两个拾取点重合时写 point 标记
+  （不是退化为错误），测量仍返回 0 距离。
   **参考线点与单条删除**（2026-11-28，ADR-0085）：`GUIDE POINT` 写 point-only 行（minor 27，
   三轴十字渲染），`GUIDE DELETE <n>` 删除一行；两者都是一次整表写入/一步撤销。
   **构造参考线**（2026-11-28，ADR-0084）：`DIST GUIDE` / `PROTRACTOR GUIDE` 在测量完成时写
@@ -170,7 +172,7 @@
 
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
-| Tape Measure | `DIST` | partial | 真实两点距离；`DIST GUIDE` 在两点完成后写一条**持久构造参考线**（`tables/guides.json`；非实体、无图层/导出/拾取，渲染为有界**虚线段**（模型包围盒 10 倍且至少 1000 单位，dash period 取该半长的 1/100、至少 5 单位；不是真无限线））；`GUIDE POINT <x> <y> <z>` 写点标记（minor 27，渲染为三轴十字），`GUIDE DELETE <n>` 单条删除、`GUIDE LIST`/`CLEAR` 管理。无偏移/延伸/多次复制模式 |
+| Tape Measure | `DIST` | partial | 真实两点距离；`DIST GUIDE` 在两点完成后写一条**持久构造参考线**（`tables/guides.json`；两点重合时自动写 point 标记；非实体、无图层/导出/拾取，渲染为有界**虚线段**（模型包围盒 10 倍且至少 1000 单位，dash period 取该半长的 1/100、至少 5 单位；不是真无限线））；`GUIDE POINT <x> <y> <z>` 写点标记（minor 27，渲染为三轴十字）；`DIST GUIDE` 两点重合时也自动写该点标记，`GUIDE DELETE <n>` 单条删除、`GUIDE LIST`/`CLEAR` 管理。无偏移/延伸/多次复制模式 |
 | Dimension | `DIMLINEAR` | full | 是 CAD 标注，不是 SketchUp LayOut 尺寸 |
 | Protractor | `PROTRACTOR` | partial | 真实三点角度量具（`BeginMeasurement(Protractor)`：先点顶点、再各点一条射线，结果按 `Angle3Points` 记录并格式化角度；普通模式只读、不写文档）+ 托盘/工具栏/菜单真实工具；`PROTRACTOR GUIDE` 在三点点完后从顶点沿**第二条射线**写一条持久参考线（同一 `tables/guides.json`）；guide 点/单条删除/清空与 Tape 共用 `GUIDE POINT`/`DELETE`/`LIST`/`CLEAR`。**未建模**：其它 guide 类型/角度圆弧、无限线渲染与虚线 |
 | Text | `TEXT` | full | 二维文字 |

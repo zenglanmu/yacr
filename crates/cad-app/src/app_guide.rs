@@ -17,10 +17,25 @@ impl Application {
         points: &[Point3],
     ) -> CadResult<()> {
         let guide = match mode {
-            crate::GuideMode::DistanceLine => points
-                .first()
-                .zip(points.get(1))
-                .and_then(|(start, end)| GuideLine::through(*start, *end)),
+            crate::GuideMode::DistanceLine => {
+                points.first().zip(points.get(1)).and_then(|(start, end)| {
+                    // SketchUp's Tape Measure leaves a point guide when the two
+                    // picks are the same point; within this tolerance the line
+                    // direction is not meaningful, so mark the point instead of
+                    // refusing the measurement.
+                    let distance = {
+                        let dx = end.x - start.x;
+                        let dy = end.y - start.y;
+                        let dz = end.z - start.z;
+                        dx.hypot(dy).hypot(dz)
+                    };
+                    if distance <= 1e-9 {
+                        GuidePoint::new(*start).map(Guide::Point)
+                    } else {
+                        GuideLine::through(*start, *end).map(Guide::Line)
+                    }
+                })
+            }
             crate::GuideMode::ProtractorLine => {
                 let vertex = *points.first().ok_or_else(|| {
                     CadError::InvalidInput("guide.degenerate: the protractor has no vertex".into())
@@ -38,6 +53,7 @@ impl Application {
                         z: ray.z - vertex.z,
                     },
                 )
+                .map(Guide::Line)
             }
         }
         .ok_or_else(|| {
@@ -46,7 +62,7 @@ impl Application {
             )
         })?;
         let mut next = self.drawing(document)?.guides().clone();
-        next.push_line(guide)
+        next.push(guide)
             .map_err(|error| CadError::InvalidInput(error.to_string()))?;
         self.write_guides(document, next, "GUIDE (measurement)")
     }

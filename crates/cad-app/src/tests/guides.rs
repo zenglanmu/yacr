@@ -177,3 +177,24 @@ fn guide_point_creates_a_point_marker_and_delete_removes_one_row() {
     };
     assert!(text.starts_with("guide.unknown_index:"), "{text}");
 }
+
+#[test]
+fn dist_guide_with_coincident_points_leaves_a_point_marker() {
+    let (mut app, mut session) = application_with_document();
+    session
+        .begin_guide_measurement(crate::GuideMode::DistanceLine)
+        .expect("guide mode");
+    let point = point(3.0, 4.0);
+    let outcome = measure(&mut app, &mut session, vec![point, point])
+        .expect("a zero-distance guide measurement completes");
+    assert!(
+        outcome.measurement.is_some(),
+        "the measurement still reports"
+    );
+    let table = guides(&app);
+    assert_eq!(table.len(), 1);
+    let cad_domain::guide::Guide::Point(mark) = table.guides()[0] else {
+        panic!("coincident points write a point guide");
+    };
+    assert_eq!(mark.point, point);
+}

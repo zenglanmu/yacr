@@ -1,6 +1,7 @@
 # ADR-0085：构造参考线点与单条删除（GUIDE POINT / GUIDE DELETE）
 
 - 状态：**已接受（决策，2026-11-28）**；**已实现（2026-11-28，point 行 + 单条删除；无真实 GUI/GPU 证据）**
+- 后续：ADR-0087 让 `DIST GUIDE` 在两点重合时自动写 point 标记。
 - 关联：ADR-0084（构造参考线）、`tables/guides.json`（minor 26 → 27）
 
 ## 背景
