@@ -64,6 +64,7 @@ fn scene(name: &str) -> Scene {
             space: SpaceId::Model,
         },
         style: SceneVisualStyle::Wireframe,
+        tags: None,
     }
 }
 

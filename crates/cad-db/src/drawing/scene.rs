@@ -1,4 +1,5 @@
-//! Persisted scenes (`tables/scenes.json`, `.ymodel` minor 20).
+//! Persisted scenes (`tables/scenes.json`, `.ymodel` minor 20; a row with the
+//! `tags` visible-layer snapshot makes the writer stamp minor 23).
 //!
 //! Document content like the named-view table: held by [`DrawingDatabase`],
 //! written by `snapshot` when it holds a row, decoded by `from_snapshot`. The

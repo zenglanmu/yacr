@@ -226,3 +226,73 @@ fn a_document_store_round_trip_keeps_the_scene_table() {
     let loaded = cad_db::DrawingDatabase::from_snapshot(&snapshot).expect("reopen");
     assert_eq!(loaded.scenes().resolve("Plan").unwrap().name(), "Plan");
 }
+
+#[test]
+fn a_scene_captures_each_layers_effective_visibility() {
+    let (mut app, mut session) = application_with_document();
+    let (layer, name, database_visible) = {
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        let layer = drawing.layers().next().expect("the default layer");
+        (layer.id, layer.name.clone(), layer.visible)
+    };
+    // A session-only override is part of the effective visibility a scene stores.
+    session.layer_overrides.set(layer, !database_visible);
+    scene(&mut app, &mut session, SceneCommand::Save("Tags".into())).expect("save");
+    let table = scenes(&app);
+    let saved = table.resolve("Tags").expect("the row");
+    let tags = saved.tags.as_ref().expect("tag visibility is captured");
+    let tag = tags
+        .iter()
+        .find(|tag| tag.name == name)
+        .expect("the layer is captured by name");
+    assert_eq!(tag.visible, !database_visible);
+}
+
+#[test]
+fn restoring_a_scene_reapplies_the_saved_tag_visibility_without_writing() {
+    let (mut app, mut session) = application_with_document();
+    let (layer, database_visible) = {
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        let layer = drawing.layers().next().expect("the default layer");
+        (layer.id, layer.visible)
+    };
+    session.layer_overrides.set(layer, !database_visible);
+    scene(&mut app, &mut session, SceneCommand::Save("Tags".into())).expect("save");
+
+    // Change the override after saving.
+    session.layer_overrides.set(layer, database_visible);
+    let before = revision(&app);
+    let depth = app.history[&DocumentId(1)].undo_depth();
+    scene(&mut app, &mut session, SceneCommand::Restore("Tags".into())).expect("restore");
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(
+        session.layer_overrides.is_layer_visible(drawing, layer),
+        !database_visible,
+        "the saved effective visibility is back"
+    );
+    assert_eq!(revision(&app), before, "restore never writes the document");
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), depth);
+}
+
+#[test]
+fn a_scene_saved_without_a_session_override_still_captures_the_database_flag() {
+    let (mut app, mut session) = application_with_document();
+    let (layer, name, database_visible) = {
+        let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+        let layer = drawing.layers().next().expect("the default layer");
+        (layer.id, layer.name.clone(), layer.visible)
+    };
+    scene(&mut app, &mut session, SceneCommand::Save("Plain".into())).expect("save");
+    let table = scenes(&app);
+    let saved = table.resolve("Plain").expect("the row");
+    let tags = saved.tags.as_ref().expect("captured");
+    let tag = tags.iter().find(|tag| tag.name == name).expect("the layer");
+    assert_eq!(tag.visible, database_visible);
+    // Nothing was pinned in the session just by saving.
+    assert!(session.layer_overrides.is_empty());
+    let drawing = &app.workspace.documents[&DocumentId(1)].drawing;
+    assert_eq!(
+        session.layer_overrides.is_layer_visible(drawing, layer),
+        database_visible
+    );
+}

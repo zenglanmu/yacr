@@ -507,6 +507,17 @@ impl DocumentSnapshot {
             .is_some_and(|rows| !rows.is_empty())
     }
 
+    /// Whether any scene row captures visible tags/layers (minor 23).
+    ///
+    /// The writer emits `tags` only for scenes saved by a build that captures
+    /// tag visibility, so a missing key is a minor-20 row and never costs the
+    /// newer tier.
+    pub fn has_scene_tags(&self) -> bool {
+        self.tables
+            .get(TableKind::Scenes)
+            .is_some_and(|rows| rows.iter().any(|row| row.get("tags").is_some()))
+    }
+
     /// Whether any element carries a **Soften Edges** angle (minor 21).
     ///
     /// The writer omits `render_attributes.soften` unless it is set, so a

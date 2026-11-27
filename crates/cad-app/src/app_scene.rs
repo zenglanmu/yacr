@@ -1,11 +1,14 @@
 //! `SCENE SAVE|RESTORE|LIST|DELETE`: persisted scenes (SketchUp pages).
 //!
 //! A scene captures **presentation state**: the camera, 2D/3D mode, saved 2D
-//! camera, work plane and active space (the same payload a named view stores)
-//! plus the visual-style token this build implements (`WIREFRAME`/`SHADED`).
-//! Saving and deleting write `tables/scenes.json` as one revision and one undo
-//! step; restoring is a session apply (camera/space/style), exactly like
-//! `VIEW RESTORE`, and records a `ZOOM PREVIOUS` snapshot so `VIEWBACK` undoes it.
+//! camera, work plane and active space (the same payload a named view stores),
+//! the visual-style token this build implements (`WIREFRAME`/`SHADED`) and the
+//! **visible tags/layers** at save time. Saving and deleting write
+//! `tables/scenes.json` as one revision and one undo step; restoring is a session
+//! apply (camera/space/style/tag visibility), exactly like `VIEW RESTORE`, and
+//! records a `ZOOM PREVIOUS` snapshot so `VIEWBACK` undoes the view part. Tag
+//! visibility lives in the same session-only override set as `LAYEROFF`, so a
+//! restore never rewrites the layer table.
 //!
 //! Refusals: `scene.name_required`, `scene.unknown`, `scene.invalid_view`,
 //! `scene.style_invalid`, plus the database's cap/duplicate markers. `SAVE` and
@@ -13,7 +16,7 @@
 //! Viewer-legal.
 
 use super::*;
-use cad_domain::scene::{Scene, SceneVisualStyle};
+use cad_domain::scene::{Scene, SceneTag, SceneVisualStyle};
 use cad_history::DrawingUndoRecord;
 
 impl Application {
@@ -51,9 +54,12 @@ impl Application {
                 );
                 let style = SceneVisualStyle::from_token(session.view_extras.visual_style.name())
                     .unwrap_or_default();
-                let planned = self
-                    .drawing(command.document)?
-                    .plan_save_scene(Scene { view: named, style })?;
+                let tags = capture_visible_tags(self.drawing(command.document)?, session);
+                let planned = self.drawing(command.document)?.plan_save_scene(Scene {
+                    view: named,
+                    style,
+                    tags: Some(tags),
+                })?;
                 let Some(planned) = planned else {
                     return Ok(scene_outcome(
                         "scene.unchanged",
@@ -70,9 +76,10 @@ impl Application {
                 Ok(scene_outcome(
                     "scene.saved",
                     format!(
-                        "SCENE SAVE: {} scene `{name}` with its camera, mode, work plane, space \
-                         and style ({count} scene(s) in the drawing)",
-                        if replaced { "replaced" } else { "created" }
+                        "SCENE SAVE: {} scene `{name}` with its camera, mode, work plane, space, \
+                         style and {} visible tag(s) ({count} scene(s) in the drawing)",
+                        if replaced { "replaced" } else { "created" },
+                        capture_visible_tags(self.drawing(command.document)?, session).len()
                     ),
                 ))
             }
@@ -139,11 +146,15 @@ impl Application {
         session.active_space = saved.view.space.clone();
         snapshot.restore(self.viewport_mut(command)?);
         session.view_extras.set_visual_style(saved.style.token())?;
+        let tag_count = saved.tags.as_ref().map_or(0, Vec::len);
+        if let Some(tags) = &saved.tags {
+            apply_visible_tags(self.drawing(command.document)?, session, tags);
+        }
         Ok(scene_outcome(
             "scene.restored",
             format!(
-                "SCENE RESTORE: applied scene `{name}` (camera, mode, work plane, space and \
-                 style {})",
+                "SCENE RESTORE: applied scene `{name}` (camera, mode, work plane, space, \
+                 style {} and {tag_count} tag(s))",
                 saved.style.token()
             ),
         ))
@@ -193,6 +204,59 @@ impl Application {
         }
         Ok(())
     }
+}
+
+/// Capture every layer's effective visibility (database flag plus the session
+/// override) as a scene's tag snapshot, in layer-table order.
+fn capture_visible_tags(
+    drawing: &cad_db::DrawingDatabase,
+    session: &SessionState,
+) -> Vec<SceneTag> {
+    drawing
+        .layers()
+        .map(|layer| SceneTag {
+            name: layer.name.clone(),
+            visible: session.layer_overrides.effective(layer.id, layer.visible),
+        })
+        .collect()
+}
+
+/// Apply a saved tag snapshot to the session's layer overrides.
+///
+/// A tag whose name no longer resolves is skipped (renamed/deleted layer), and a
+/// tag matching the database's own flag drops the override instead of pinning a
+/// second copy of the same value. The layer table is never written.
+fn apply_visible_tags(
+    drawing: &cad_db::DrawingDatabase,
+    session: &mut SessionState,
+    tags: &[SceneTag],
+) {
+    for tag in tags {
+        let Some(layer) = resolve_layer_by_name(drawing, &tag.name) else {
+            continue;
+        };
+        if tag.visible == layer.visible {
+            session.layer_overrides.remove(layer.id);
+        } else {
+            session.layer_overrides.set(layer.id, tag.visible);
+        }
+    }
+}
+
+/// Resolve a layer by exact name, then by a unique case-insensitive match.
+fn resolve_layer_by_name<'a>(
+    drawing: &'a cad_db::DrawingDatabase,
+    name: &str,
+) -> Option<&'a cad_db::Layer> {
+    let name = name.trim();
+    if let Some(layer) = drawing.layers().find(|layer| layer.name == name) {
+        return Some(layer);
+    }
+    let mut matches = drawing
+        .layers()
+        .filter(|layer| layer.name.eq_ignore_ascii_case(name));
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 fn checked_scene_name(name: &str) -> CadResult<String> {

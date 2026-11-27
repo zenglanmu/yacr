@@ -51,6 +51,9 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **场景可见标签**（2026-11-27，ADR-0078）：`SCENE SAVE` 把每个图层的有效可见性存进
+  `tables/scenes.json` 行的 `tags` 快照（minor 23），`SCENE RESTORE` 把它作为会话图层覆盖重新应用
+  （不写图层表）；阴影/雾/剖面/软边仍不随场景切换。
   **样式面板**（2026-11-27，ADR-0077）：托盘 Styles 从“只有主题切换”变成两行真实 token——
   `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`，当前 token 从 `cad_status.visualStyle` 高亮；
   其它样式名仍由命令层按 `vscurrent.style_not_implemented` 拒绝，界面主题与 SketchUp Style 分开。
@@ -202,7 +205,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 内置 12 色调色板 + `PAINT <name>`（整实体涂刷、文档表持久化、渲染即生效）；文档材质只在 `MATERIALS` 报告里列出，色块不随文档材质生成 |
-| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20）；不含可见 Tags/图层、阴影、雾、剖面、软边与缩略图 |
+| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），并保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）；恢复把快照作为会话图层覆盖应用（不写图层表，隐藏/显示与库内标志相同则不额外钉覆盖），改名/删除的图层名跳过。**未建模**：阴影、雾、剖面、软边与场景缩略图（这些仍不随场景切换） |
 | Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
 | Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |
 | Match Photo | partial | 真实面板 + host read（`cad_match_photo` / `kind:"matchPhoto"`）：明确报告 `modeled:false` 与稳定原因（照片匹配模型未建模：无照片导入/相机求解/照片背景），动作按钮 dispatch `MATCHPHOTO`，命令以 `matchphoto.not_implemented` 具名拒绝；不伪造照片列表 |

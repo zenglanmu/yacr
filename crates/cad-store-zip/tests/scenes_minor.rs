@@ -93,6 +93,7 @@ fn scene_row() -> Value {
             space: SpaceId::Model,
         },
         style: SceneVisualStyle::Shaded,
+        tags: None,
     }
     .to_json()
 }

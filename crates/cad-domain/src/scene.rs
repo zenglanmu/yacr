@@ -1,4 +1,5 @@
-//! Persisted scenes (`tables/scenes.json`, `.ymodel` minor 20).
+//! Persisted scenes (`tables/scenes.json`, `.ymodel` minor 20; a row with the
+//! `tags` snapshot makes the writer stamp minor 23).
 //!
 //! A scene is SketchUp's page: a named snapshot of **presentation state** that a
 //! click restores. This cut captures exactly the state this build can restore
@@ -7,12 +8,18 @@
 //! * the camera, 2D/3D mode, saved 2D camera, work plane and active space — the
 //!   same payload a named view stores ([`crate::NamedView`]);
 //! * the **visual style** token (`WIREFRAME`/`SHADED`), the one real display
-//!   style this build implements (`VSCURRENT`).
+//!   style this build implements (`VSCURRENT`);
+//! * the **visible tags/layers** at save time (name + effective visibility,
+//!   applied on restore as session overrides; the layer table itself is never
+//!   rewritten by a scene).
 //!
-//! It deliberately does **not** capture visible tags/layers, shadows, fog,
-//! sections or soft edges: those features do not exist here yet, and storing a
-//! flag the renderer ignores would be a lie. The scene row is a named view plus
-//! the style key, so it reuses the view's strict codec and camera validation.
+//! It deliberately does **not** capture shadows, fog, sections or soft edges:
+//! those either have no scene application path or need a document write, and
+//! storing a flag the renderer ignores would be a lie. The scene row is a named
+//! view plus the style key and an optional tag snapshot, so it reuses the view's
+//! strict codec and camera validation. A row whose `tags` key is present makes
+//! the writer stamp the archive at minor 23; a row without it stays a minor-20
+//! row and restores no tag visibility.
 //!
 //! # Bounds and names
 //!
@@ -32,6 +39,12 @@ use crate::view::{NamedView, NamedViewError};
 /// How many scenes one document retains.
 pub const SCENE_CAP: usize = 32;
 
+/// How many tag rows one scene may capture.
+pub const SCENE_TAG_CAP: usize = 1024;
+
+/// The longest captured tag name (layer names are short in practice).
+pub const SCENE_TAG_NAME_MAX_CHARS: usize = 255;
+
 /// How many named views one document retains (re-exported for scene caps/tests).
 pub use crate::view::NAMED_VIEW_CAP;
 
@@ -49,6 +62,8 @@ pub mod markers {
     pub const SCENE_STYLE_INVALID: &str = "scene.style_invalid";
     /// The row's view half is malformed (delegated to the view codec).
     pub const SCENE_INVALID_VIEW: &str = "scene.invalid_view";
+    /// The captured tag snapshot is malformed or over budget.
+    pub const SCENE_TAGS_INVALID: &str = "scene.tags_invalid";
 }
 
 /// The visual style a scene restores.
@@ -115,13 +130,29 @@ impl From<NamedViewError> for SceneError {
     }
 }
 
-/// One persisted scene: a named view plus the style it restores.
+/// One tag/layer visibility captured with a scene.
+///
+/// The name is the layer's own name (the stable user-facing identity); restore
+/// resolves it against the **current** layer table, so a renamed or deleted
+/// layer is simply not matched and nothing is fabricated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneTag {
+    /// Layer name as stored in the layer table.
+    pub name: String,
+    /// Effective visibility at save time (database flag plus the session override).
+    pub visible: bool,
+}
+
+/// One persisted scene: a named view plus the display state it restores.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scene {
     /// The camera/space half (its `name` is the scene name).
     pub view: NamedView,
     /// The display style restored with the view.
     pub style: SceneVisualStyle,
+    /// The visible tags/layers captured at save time, or `None` for a scene
+    /// written by a build without tag capture (minor 20..22).
+    pub tags: Option<Vec<SceneTag>>,
 }
 
 impl Scene {
@@ -133,6 +164,7 @@ impl Scene {
                 ..view
             },
             style: SceneVisualStyle::default(),
+            tags: None,
         }
     }
 
@@ -146,11 +178,56 @@ impl Scene {
         self.view.name.eq_ignore_ascii_case(name.trim())
     }
 
-    /// The row's single validation point (delegates the camera/space half).
+    /// The row's single validation point (delegates the camera/space half and
+    /// checks the tag snapshot).
     pub fn validate(&self) -> Result<(), SceneError> {
         self.view
             .validate()
-            .map_err(|error| SceneError::Invalid(markers::SCENE_INVALID_VIEW, error.to_string()))
+            .map_err(|error| SceneError::Invalid(markers::SCENE_INVALID_VIEW, error.to_string()))?;
+        if let Some(tags) = &self.tags {
+            if tags.len() > SCENE_TAG_CAP {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_TAGS_INVALID,
+                    format!(
+                        "tags: {} rows, over the {SCENE_TAG_CAP}-row budget",
+                        tags.len()
+                    ),
+                ));
+            }
+            let mut seen = Vec::with_capacity(tags.len());
+            for tag in tags {
+                let name = tag.name.trim();
+                if name.is_empty() {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_TAGS_INVALID,
+                        "tags: a captured tag needs a non-empty name".into(),
+                    ));
+                }
+                if name.chars().count() > SCENE_TAG_NAME_MAX_CHARS {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_TAGS_INVALID,
+                        format!(
+                            "tags: `{name}` is longer than {SCENE_TAG_NAME_MAX_CHARS} characters"
+                        ),
+                    ));
+                }
+                if tag.name != name {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_TAGS_INVALID,
+                        format!("tags: `{}` has untrimmed whitespace", tag.name),
+                    ));
+                }
+                let key = name.to_ascii_lowercase();
+                if seen.contains(&key) {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_TAGS_INVALID,
+                        format!("tags: duplicate tag name `{name}`"),
+                    ));
+                }
+                seen.push(key);
+            }
+        }
+        Ok(())
     }
 
     /// Encode one row: the named-view object plus a `style` key.
@@ -169,6 +246,18 @@ impl Scene {
             "style".to_string(),
             Value::String(self.style.token().into()),
         );
+        if let Some(tags) = &self.tags {
+            let rows = tags
+                .iter()
+                .map(|tag| {
+                    let mut row = Map::new();
+                    row.insert("name".to_string(), Value::String(tag.name.clone()));
+                    row.insert("visible".to_string(), Value::Bool(tag.visible));
+                    Value::Object(row)
+                })
+                .collect();
+            row.insert("tags".to_string(), Value::Array(rows));
+        }
         Value::Object(row)
     }
 
@@ -204,8 +293,56 @@ impl Scene {
                 ))
             }
         };
+        let tags = match map.remove("tags") {
+            Some(Value::Array(rows)) => {
+                let mut tags = Vec::with_capacity(rows.len());
+                for (index, row) in rows.iter().enumerate() {
+                    let Value::Object(row) = row else {
+                        return Err(SceneError::Invalid(
+                            markers::SCENE_TAGS_INVALID,
+                            format!("tags[{index}]: expected an object"),
+                        ));
+                    };
+                    let name = match row.get("name") {
+                        Some(Value::String(name)) => name.trim().to_string(),
+                        _ => {
+                            return Err(SceneError::Invalid(
+                                markers::SCENE_TAGS_INVALID,
+                                format!("tags[{index}].name: expected a string"),
+                            ))
+                        }
+                    };
+                    let visible = match row.get("visible") {
+                        Some(Value::Bool(visible)) => *visible,
+                        _ => {
+                            return Err(SceneError::Invalid(
+                                markers::SCENE_TAGS_INVALID,
+                                format!("tags[{index}].visible: expected a boolean"),
+                            ))
+                        }
+                    };
+                    if row.len() != 2 {
+                        return Err(SceneError::Invalid(
+                            markers::SCENE_TAGS_INVALID,
+                            format!("tags[{index}]: unknown key"),
+                        ));
+                    }
+                    tags.push(SceneTag { name, visible });
+                }
+                Some(tags)
+            }
+            Some(_) => {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_TAGS_INVALID,
+                    "tags: expected an array".into(),
+                ))
+            }
+            None => None,
+        };
         let view = NamedView::from_json(&Value::Object(map))?;
-        Ok(Scene { view, style })
+        let scene = Scene { view, style, tags };
+        scene.validate()?;
+        Ok(scene)
     }
 }
 
@@ -261,6 +398,7 @@ impl SceneTable {
             self.scenes.push(Scene {
                 view: NamedView { name, ..scene.view },
                 style: scene.style,
+                tags: scene.tags,
             });
             return Ok(true);
         }
@@ -276,6 +414,7 @@ impl SceneTable {
         self.scenes.push(Scene {
             view: NamedView { name, ..scene.view },
             style: scene.style,
+            tags: scene.tags,
         });
         Ok(false)
     }

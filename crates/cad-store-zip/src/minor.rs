@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | scene tag snapshots (`tags` in `tables/scenes.json`) | `23` | the visible-tags snapshot |
 //! | display settings (`tables/display.json`) | `22` | the Shadows/Fog record |
 //! | a per-entity soften angle (minor 21) | `21` | `render_attributes.soften` |
 //! | scenes (`tables/scenes.json`) | `20` | the scene table |
@@ -110,6 +111,9 @@ pub(crate) const FORMAT_MINOR_SOFTEN: u32 = 21;
 /// A document with persisted display settings (minor 22).
 pub(crate) const FORMAT_MINOR_DISPLAY: u32 = 22;
 
+/// A document whose scenes capture visible tags/layers (minor 23).
+pub(crate) const FORMAT_MINOR_SCENE_TAGS: u32 = 23;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order. `16` (constraints)
 // is reserved by another lane, so the top tiers are checked by explicit offsets.
@@ -120,6 +124,7 @@ const _: () = assert!(FORMAT_MINOR_MATERIALS == FORMAT_MINOR_NAMED_VIEWS + 1);
 const _: () = assert!(FORMAT_MINOR_SCENES == FORMAT_MINOR_MATERIALS + 1);
 const _: () = assert!(FORMAT_MINOR_SOFTEN == FORMAT_MINOR_SCENES + 1);
 const _: () = assert!(FORMAT_MINOR_DISPLAY == FORMAT_MINOR_SOFTEN + 1);
+const _: () = assert!(FORMAT_MINOR_SCENE_TAGS == FORMAT_MINOR_DISPLAY + 1);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -139,7 +144,12 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Display settings are the newest tier.
+    // Scene tag snapshots are the newest tier: a minor-22 reader would refuse
+    // the unknown `tags` row key rather than restore the wrong visibility.
+    if snapshot.has_scene_tags() {
+        return FORMAT_MINOR_SCENE_TAGS;
+    }
+    // Display settings are the next tier.
     if snapshot.has_display_settings() {
         return FORMAT_MINOR_DISPLAY;
     }
@@ -242,7 +252,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_DISPLAY, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_SCENE_TAGS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_DISPLAY, FORMAT_MINOR_SCENE_TAGS - 1);
         assert_eq!(FORMAT_MINOR_DISPLAY, FORMAT_MINOR_SOFTEN + 1);
         assert_eq!(FORMAT_MINOR_SOFTEN, FORMAT_MINOR_SCENES + 1);
         assert_eq!(FORMAT_MINOR_SCENES, FORMAT_MINOR_MATERIALS + 1);
