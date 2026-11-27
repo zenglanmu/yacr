@@ -22,9 +22,10 @@ fn every_wave17_refusal_refuses_with_its_stable_reason() {
     let before = revision(&app);
     assert_eq!(
         RefusalId::ALL.len(),
-        309,
+        308,
         "197 existing + 91 Wave 27 + 39 Wave 28 - 4 in-place refedit - 3 Parameter Manager - \
-         XCLIP - XEDGES - CAMERA - 7 action-recorder - MATERIALS = 309 named refusals"
+         XCLIP - XEDGES - CAMERA - SECTIONPLANE - 7 action-recorder - MATERIALS = 308 named \
+         refusals"
     );
     for &name in RefusalId::ALL {
         let ext = ExtendedCommandId::Refusal(name);

@@ -405,6 +405,9 @@ pub struct DrawingHistoryStep {
     /// Reversible construction-guide writes (`tables/guides.json`, minor 26):
     /// the whole guide table before and after one measurement-guide/`GUIDE` write.
     pub guide_patches: Vec<cad_db::GuidePatch>,
+    /// Reversible section-plane writes (`tables/sections.json`, minor 32): the
+    /// whole optional plane before and after one `SECTIONPLANE` write.
+    pub section_patches: Vec<cad_db::SectionPatch>,
 }
 
 impl DrawingHistoryStep {
@@ -431,6 +434,7 @@ impl DrawingHistoryStep {
         let scene_step = !self.scene_patches.is_empty();
         let display_step = !self.display_patches.is_empty();
         let guide_step = !self.guide_patches.is_empty();
+        let section_step = !self.section_patches.is_empty();
         if self.record.is_empty()
             && self.linetype_patches.is_empty()
             && self.bim_patches.is_empty()
@@ -441,6 +445,7 @@ impl DrawingHistoryStep {
             && !scene_step
             && !display_step
             && !guide_step
+            && !section_step
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo step needs at least one entity, block, layer, layout, style, \
@@ -458,6 +463,7 @@ impl DrawingHistoryStep {
                 || !self.material_patches.is_empty()
                 || !self.scene_patches.is_empty()
                 || !self.guide_patches.is_empty()
+                || section_step
                 || parametric)
         {
             return Err(CadError::InvalidInput(
@@ -495,6 +501,7 @@ impl DrawingHistoryStep {
                 || !self.material_patches.is_empty()
                 || !self.scene_patches.is_empty()
                 || display_step
+                || section_step
                 || parametric)
         {
             return Err(CadError::InvalidInput(
@@ -521,6 +528,42 @@ impl DrawingHistoryStep {
                 ));
             }
         }
+        if section_step
+            && (!self.record.is_empty()
+                || !self.linetype_patches.is_empty()
+                || !self.bim_patches.is_empty()
+                || !self.group_patches.is_empty()
+                || !self.view_patches.is_empty()
+                || !self.material_patches.is_empty()
+                || !self.scene_patches.is_empty()
+                || display_step
+                || guide_step
+                || parametric)
+        {
+            return Err(CadError::InvalidInput(
+                "a section undo step cannot also carry entity, table, linetype, BIM, group, \
+                 view, material, scene or parameter rows"
+                    .into(),
+            ));
+        }
+        if section_step {
+            if self.section_patches.len() != 1 {
+                return Err(CadError::InvalidInput(
+                    "a section undo step carries exactly one whole-slot patch".into(),
+                ));
+            }
+            if self.record.merge_key.is_some() {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record with section patches cannot be merged".into(),
+                ));
+            }
+            let patch = &self.section_patches[0];
+            if patch.before == patch.after {
+                return Err(CadError::InvalidInput(
+                    "a section patch needs two different slots".into(),
+                ));
+            }
+        }
         if scene_step
             && (!self.record.is_empty()
                 || !self.linetype_patches.is_empty()
@@ -530,6 +573,7 @@ impl DrawingHistoryStep {
                 || !self.material_patches.is_empty()
                 || display_step
                 || guide_step
+                || section_step
                 || parametric)
         {
             return Err(CadError::InvalidInput(

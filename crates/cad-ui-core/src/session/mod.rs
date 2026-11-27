@@ -32,6 +32,7 @@ mod flip_arguments;
 mod guide_arguments;
 mod material_arguments;
 mod param;
+mod section_arguments;
 mod walk_arguments;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
 mod dim_arguments;
@@ -309,7 +310,6 @@ pub struct CadSession {
     /// [`api_call::CAD_API_RESULT_CAP`] (oldest dropped).
     api_outcomes: RefCell<Vec<api_call::CadApiOutcome>>,
 }
-
 impl CadSession {
     /// Build the session: create the host core, read startup config, install
     /// fonts/images, then open the configured drawing (or fit the demo).

@@ -35,6 +35,7 @@ pub(crate) mod relations;
 pub(crate) mod relations_in_context;
 pub(crate) mod resources;
 pub(crate) mod scene;
+mod section;
 pub(crate) mod tables;
 pub(crate) mod variables;
 pub(crate) mod views;
@@ -214,6 +215,7 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         TableKind::Scenes => "tables/scenes.json",
         TableKind::Display => "tables/display.json",
         TableKind::Guides => "tables/guides.json",
+        TableKind::Sections => "tables/sections.json",
     }
 }
 
@@ -518,6 +520,23 @@ impl DocumentSnapshot {
                     .is_some_and(|cleared| !cleared.is_empty())
             })
         })
+    }
+
+    /// Whether the document holds a section plane (`tables/sections.json`,
+    /// minor 32).
+    pub fn has_sections(&self) -> bool {
+        self.tables
+            .get(TableKind::Sections)
+            .is_some_and(|rows| !rows.is_empty())
+    }
+
+    /// Whether any scene row captures the section plane (minor 32).
+    ///
+    /// A `null` row is a real "no plane" capture and still needs the tier.
+    pub fn has_scene_section(&self) -> bool {
+        self.tables
+            .get(TableKind::Scenes)
+            .is_some_and(|rows| rows.iter().any(|row| row.get("section").is_some()))
     }
 
     /// Whether any scene row captures hidden top-level entities (minor 31).

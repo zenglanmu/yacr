@@ -38,6 +38,7 @@ mod scale;
 mod scale_edit;
 mod scenes;
 mod scope;
+mod section;
 mod spline_transform;
 mod spline_validation;
 mod style_tables;

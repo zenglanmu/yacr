@@ -30,6 +30,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -47,6 +48,7 @@ impl History {
         self.record_drawing_step(
             record,
             linetype_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -76,6 +78,7 @@ impl History {
             record,
             Vec::new(),
             bim_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -116,6 +119,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -132,6 +136,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             group_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -158,6 +163,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -176,6 +182,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             material_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -200,6 +207,7 @@ impl History {
             scene_patches,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -220,6 +228,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             display_patches,
+            Vec::new(),
             Vec::new(),
         )
     }
@@ -242,6 +251,29 @@ impl History {
             Vec::new(),
             Vec::new(),
             guide_patches,
+            Vec::new(),
+        )
+    }
+
+    /// Record a committed section-plane write (`SECTIONPLANE`).
+    pub fn record_drawing_with_sections(
+        &mut self,
+        record: DrawingUndoRecord,
+        section_patches: Vec<cad_db::SectionPatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            section_patches,
         )
     }
 
@@ -263,6 +295,7 @@ impl History {
         scene_patches: Vec<cad_db::ScenePatch>,
         display_patches: Vec<cad_db::DisplayPatch>,
         guide_patches: Vec<cad_db::GuidePatch>,
+        section_patches: Vec<cad_db::SectionPatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
@@ -277,6 +310,7 @@ impl History {
             scene_patches,
             display_patches,
             guide_patches,
+            section_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {

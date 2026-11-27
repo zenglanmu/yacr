@@ -16,6 +16,9 @@
 //! * the document **Shadows/Fog record** (`tables/display.json`), applied on
 //!   restore as the same one-revision display write the `SHADOWS`/`FOG`
 //!   commands use when the saved record differs from the current one;
+//! * the document **section plane** at save time (`Some(None)` captures "no
+//!   plane"), applied on restore as the same one-revision write `SECTIONPLANE`
+//!   uses;
 //! * the **session-hidden top-level entities** at save time, restored by
 //!   replacing this document's top-level hidden set (nested/sub-element hides
 //!   are not representable in a row and stay untouched).
@@ -26,7 +29,7 @@
 //! the style key and optional tag/display/soften/hidden snapshots, so it reuses
 //! the view's strict codec and camera validation. A row whose `tags` key is
 //! present makes the writer stamp the archive at minor 23, `display` at minor
-//! 24 and `hidden` at minor 31; a row without them stays a minor-20 row and
+//! 24, `hidden` at minor 31 and `section` at minor 32; a row without them stays a minor-20 row and
 //! restores only the view/style.
 //!
 //! # Bounds and names
@@ -43,6 +46,7 @@ use std::fmt;
 use serde_json::{Map, Value};
 
 use crate::display::DisplaySettings;
+use crate::section::SectionPlane;
 use crate::view::{NamedView, NamedViewError};
 use crate::EntityId;
 
@@ -91,6 +95,8 @@ pub mod markers {
     pub const SCENE_SOFTEN_CLEARED_INVALID: &str = "scene.soften_cleared_invalid";
     /// The captured hidden-entity snapshot is malformed, duplicated or over budget.
     pub const SCENE_HIDDEN_INVALID: &str = "scene.hidden_invalid";
+    /// The captured section-plane record is malformed.
+    pub const SCENE_SECTION_INVALID: &str = "scene.section_invalid";
 }
 
 /// The visual style a scene restores.
@@ -206,6 +212,10 @@ pub struct Scene {
     /// softened after the save goes back to "no explicit value". Bounded like
     /// the explicit snapshot; absent for older scenes (nothing is cleared).
     pub soften_cleared: Option<Vec<EntityId>>,
+    /// The document section plane at save time (minor 32): the outer `None`
+    /// is a pre-section scene, `Some(None)` a real "no plane" capture, and
+    /// `Some(Some(plane))` the stored plane.
+    pub section: Option<Option<crate::section::SectionPlane>>,
     /// Session-hidden top-level model-space entities at save time (minor 31).
     ///
     /// `Some([])` is a real capture ("nothing was hidden") and restores by
@@ -230,6 +240,7 @@ impl Scene {
             soften: None,
             soften_cleared: None,
             hidden: None,
+            section: None,
         }
     }
 
@@ -296,6 +307,11 @@ impl Scene {
                 }
                 seen.push(*entity);
             }
+        }
+        if let Some(Some(plane)) = &self.section {
+            plane.validate().map_err(|error| {
+                SceneError::Invalid(markers::SCENE_SECTION_INVALID, error.to_string())
+            })?;
         }
         if let Some(hidden) = &self.hidden {
             if hidden.len() > SCENE_HIDDEN_CAP {
@@ -466,6 +482,15 @@ impl Scene {
                     ),
                 );
             }
+        }
+        if let Some(section) = &self.section {
+            row.insert(
+                "section".to_string(),
+                match section {
+                    Some(plane) => plane.to_json(),
+                    None => Value::Null,
+                },
+            );
         }
         if let Some(hidden) = &self.hidden {
             // `Some([])` is a real capture and stays on the row so a restore
@@ -640,6 +665,13 @@ impl Scene {
             }
             None => None,
         };
+        let section = match map.remove("section") {
+            Some(Value::Null) => Some(None),
+            Some(value) => Some(Some(SectionPlane::from_json(&value).map_err(|error| {
+                SceneError::Invalid(markers::SCENE_SECTION_INVALID, error.to_string())
+            })?)),
+            None => None,
+        };
         let hidden = match map.remove("hidden") {
             Some(Value::Array(rows)) => {
                 let mut hidden = Vec::with_capacity(rows.len());
@@ -671,6 +703,7 @@ impl Scene {
             soften,
             soften_cleared,
             hidden,
+            section,
         };
         scene.validate()?;
         Ok(scene)
@@ -734,6 +767,7 @@ impl SceneTable {
                 soften: scene.soften,
                 soften_cleared: scene.soften_cleared,
                 hidden: scene.hidden,
+                section: scene.section,
             });
             return Ok(true);
         }
@@ -754,6 +788,7 @@ impl SceneTable {
             soften: scene.soften,
             soften_cleared: scene.soften_cleared,
             hidden: scene.hidden,
+            section: scene.section,
         });
         Ok(false)
     }

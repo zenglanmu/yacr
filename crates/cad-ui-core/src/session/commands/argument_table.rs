@@ -197,6 +197,8 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     // `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`: the display record.
     SHADOWS_SELECTOR,
     FOG_SELECTOR,
+    // `SECTIONPLANE ON|OFF|TOGGLE|CLEAR|LIST|SET <...>`: the section plane.
+    SECTIONPLANE_SELECTOR,
     VPOINT_SELECTOR,
     // `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`: the typed
     // form of the extended command; a bare NEWVIEW keeps its report.

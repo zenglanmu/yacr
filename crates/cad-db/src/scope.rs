@@ -209,6 +209,12 @@ pub enum TableKind {
     ///
     /// Contributes the minor-26 tier; a write is one revision and one undo step.
     Guides,
+    /// The optional section plane (`tables/sections.json`): origin, unit normal
+    /// and enabled flag.
+    ///
+    /// Document content like [`TableKind::Display`]; contributes the minor-32
+    /// tier and a write is one revision and one undo step.
+    Sections,
 }
 
 /// The set of persisted rows one commit made stale.

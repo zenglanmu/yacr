@@ -48,6 +48,7 @@ pub(crate) mod param_build;
 mod point_style;
 mod scale_edit;
 mod scene;
+mod section;
 mod style_edit;
 mod transaction;
 mod units_display;
@@ -79,6 +80,7 @@ pub use param::{
 };
 pub use scale_edit::{ScalePatch, ScaleReferenceCounts};
 pub use scene::{ScenePatch, SceneWrite};
+pub use section::SectionPatch;
 pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
 };
@@ -472,6 +474,8 @@ pub struct DrawingDatabase {
     pub(crate) scenes: cad_domain::scene::SceneTable,
     /// Per-document display settings (`tables/display.json`, minor 22).
     pub(crate) display: cad_domain::display::DisplaySettings,
+    /// The optional section plane (`tables/sections.json`, minor 32).
+    pub(crate) section: Option<cad_domain::section::SectionPlane>,
     /// Persisted construction guides (`tables/guides.json`, minor 26). Empty for
     /// a document without guides.
     pub(crate) guides: cad_domain::guide::GuideTable,

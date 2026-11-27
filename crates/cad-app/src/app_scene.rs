@@ -64,6 +64,7 @@ impl Application {
                 let (soften, soften_cleared) =
                     capture_scene_soften(self.drawing(command.document)?);
                 let hidden = capture_scene_hidden(session, command.document);
+                let section = self.drawing(command.document)?.section_plane();
                 let planned = self.drawing(command.document)?.plan_save_scene(Scene {
                     view: named,
                     style,
@@ -72,6 +73,7 @@ impl Application {
                     soften,
                     soften_cleared,
                     hidden: Some(hidden),
+                    section: Some(section),
                 })?;
                 let Some(planned) = planned else {
                     return Ok(scene_outcome(
@@ -150,6 +152,11 @@ impl Application {
         let display_changed = saved
             .display
             .is_some_and(|display| display != current_display);
+        let current_section = self.drawing(command.document)?.section_plane();
+        let section_changed = saved
+            .section
+            .as_ref()
+            .is_some_and(|section| *section != current_section);
         // The display record is document state. Refuse before touching anything
         // when this session may not write it, instead of a half-applied scene.
         let drawing = self.drawing(command.document)?;
@@ -178,7 +185,8 @@ impl Application {
                 .filter(|entity| drawing.entity(*entity).is_some())
                 .collect()
         });
-        if (display_changed || !soften_changes.is_empty()) && session.app_mode() == AppMode::Viewer
+        if (display_changed || section_changed || !soften_changes.is_empty())
+            && session.app_mode() == AppMode::Viewer
         {
             return Err(CadError::PermissionDenied);
         }
@@ -206,6 +214,18 @@ impl Application {
                 &format!("SCENE RESTORE {name}"),
             )?;
         }
+        if section_changed {
+            let after = saved
+                .section
+                .as_ref()
+                .expect("section_changed implies a capture");
+            self.write_section(
+                command.document,
+                current_section,
+                *after,
+                &format!("SCENE RESTORE {name} (section)"),
+            )?;
+        }
         let hidden_count = if let Some(hidden) = &hidden_kept {
             apply_scene_hidden(session, command.document, hidden);
             hidden.len()
@@ -219,10 +239,11 @@ impl Application {
         if let Some(tags) = &saved.tags {
             apply_visible_tags(self.drawing(command.document)?, session, tags);
         }
-        let display_note = if display_changed {
-            " and shadows/fog"
-        } else {
-            ""
+        let display_note = match (display_changed, section_changed) {
+            (true, true) => " and shadows/fog and section",
+            (true, false) => " and shadows/fog",
+            (false, true) => " and section",
+            (false, false) => "",
         };
         let soften_count = soften_changes.len();
         Ok(scene_outcome(

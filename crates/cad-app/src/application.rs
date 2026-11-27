@@ -434,6 +434,7 @@ impl Application {
             CommandId::RegenAll => self.regen(session, &command, true),
             CommandId::View => self.view_command(session, &command),
             CommandId::Scene => self.scene_command(session, &command),
+            CommandId::SectionPlane => self.section_command(session, &command),
             CommandId::Shadows | CommandId::Fog => self.display_command(session, &command),
             CommandId::Text3d => self.text3d(session, &command),
             CommandId::OuterShell => self.outer_shell(session, &command),

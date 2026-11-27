@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | section planes (`tables/sections.json`, scene `section`) | `32` | the cut plane |
 //! | scene hidden-entity snapshots (`hidden` in `tables/scenes.json`) | `31` | the session-hidden ids |
 //! | guide styling (`style` row in `tables/guides.json`) | `30` | the colour/dash style |
 //! | scene soften-clear lists (`soften_cleared` in `tables/scenes.json`) | `29` | the clear-on-restore ids |
@@ -146,6 +147,9 @@ pub(crate) const FORMAT_MINOR_GUIDE_STYLE: u32 = 30;
 /// A document whose scenes capture session-hidden top-level entities (minor 31).
 pub(crate) const FORMAT_MINOR_SCENE_HIDDEN: u32 = 31;
 
+/// A document with a section plane or a scene section capture (minor 32).
+pub(crate) const FORMAT_MINOR_SECTION: u32 = 32;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order. `16` (constraints)
 // is reserved by another lane, so the top tiers are checked by explicit offsets.
@@ -165,6 +169,7 @@ const _: () = assert!(FORMAT_MINOR_SCENE_SOFTEN == FORMAT_MINOR_GUIDE_POINTS + 1
 const _: () = assert!(FORMAT_MINOR_SCENE_SOFTEN_CLEARED == FORMAT_MINOR_SCENE_SOFTEN + 1);
 const _: () = assert!(FORMAT_MINOR_GUIDE_STYLE == FORMAT_MINOR_SCENE_SOFTEN_CLEARED + 1);
 const _: () = assert!(FORMAT_MINOR_SCENE_HIDDEN == FORMAT_MINOR_GUIDE_STYLE + 1);
+const _: () = assert!(FORMAT_MINOR_SECTION == FORMAT_MINOR_SCENE_HIDDEN + 1);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -184,7 +189,11 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Scene hidden snapshots are the newest tier: a minor-30 reader would refuse
+    // A section plane (or a scene's section capture) is the newest tier.
+    if snapshot.has_sections() || snapshot.has_scene_section() {
+        return FORMAT_MINOR_SECTION;
+    }
+    // Scene hidden snapshots are the next tier: a minor-30 reader would refuse
     // the unknown `hidden` key rather than restore the wrong hidden state.
     if snapshot.has_scene_hidden() {
         return FORMAT_MINOR_SCENE_HIDDEN;
@@ -332,8 +341,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_SCENE_HIDDEN, cad_domain::ymodel::FORMAT_MINOR);
-        assert_eq!(FORMAT_MINOR_GUIDE_STYLE, FORMAT_MINOR_SCENE_HIDDEN - 1);
+        assert_eq!(FORMAT_MINOR_SECTION, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_SCENE_HIDDEN, FORMAT_MINOR_SECTION - 1);
         assert_eq!(
             FORMAT_MINOR_SCENE_SOFTEN,
             FORMAT_MINOR_SCENE_SOFTEN_CLEARED - 1

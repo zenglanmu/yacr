@@ -1,9 +1,7 @@
 //! The extended command selector and `ALL` tables.
 //!
 //! Split out of `command_id/extended.rs` for the gate: selector spelling + `ALL`.
-
 use super::ExtendedCommandId;
-
 impl ExtendedCommandId {
     /// The stable uppercase selector (the `COMMAND_TABLE` name).
     pub fn selector(self) -> &'static str {

@@ -69,7 +69,7 @@ const VIEW_INTERFACE = panel('concept.view.interface', 'concept.section.interfac
 const VIEW_STANDARD = panel('concept.view.standard', 'concept.section.standard_views', standardViewItems());
 
 const VIEW_DISPLAY = panel('concept.view.display', 'concept.section.display', [
-  pending('SECTIONPLANES', 'concept.tool.section_plane', 'view'),
+  { id: 'SECTIONPLANES', labelKey: 'concept.tool.section_plane', icon: 'view', command: 'SECTIONPLANE' },
   pending('HIDDENGEOMETRY', 'concept.tool.hidden_geometry', 'eyeOff'),
 ]);
 

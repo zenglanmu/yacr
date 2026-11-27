@@ -29,6 +29,9 @@ pub enum CommandId {
     SoftenEdges,
     /// `SCENE SAVE|RESTORE|LIST|DELETE`: persisted scenes (`tables/scenes.json`).
     Scene,
+    /// `SECTIONPLANE [ON|OFF|TOGGLE|CLEAR|LIST|SET ...]`: the document section
+    /// plane (`tables/sections.json`), clipped by the model-space scene build.
+    SectionPlane,
     /// `SHADOWS [ON|OFF|SUN <azimuth> <elevation>]`: the document sun used for
     /// shading (`tables/display.json`). Cast shadows are NOT IMPLEMENTED.
     Shadows,

@@ -257,7 +257,6 @@ refusal_names! {
     Revsurf => "REVSURF" => "revsurf.unsupported: no 3D surface (NURBS) model",
     Rulesurf => "RULESURF" => "rulesurf.unsupported: no 3D surface (NURBS) model",
     Section => "SECTION" => "section.unsupported: no 3D section-plane model",
-    Sectionplane => "SECTIONPLANE" => "sectionplane.unsupported: no 3D section-plane model",
     Sectionplanejog => "SECTIONPLANEJOG" => "sectionplanejog.unsupported: no 3D section-plane model",
     Sectionplanesettings => "SECTIONPLANESETTINGS" => "sectionplanesettings.unsupported: no 3D section-plane model",
     Sectionplanetoblock => "SECTIONPLANETOBLOCK" => "sectionplanetoblock.unsupported: no 3D section-plane model",

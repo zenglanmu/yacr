@@ -249,6 +249,8 @@ impl CadSession {
             super::commands::MATERIAL_SELECTOR => self.material_argument(argument, text),
             // `DIST GUIDE`: the Tape Measure's guide mode.
             super::commands::DIST_SELECTOR => self.dist_argument(argument, text),
+            // `SECTIONPLANE ...`: the persisted section plane.
+            super::commands::SECTIONPLANE_SELECTOR => self.section_argument(argument, text),
             // `CAMERA TWO-POINT|WALK`: named refusals (the bare selector is a
             // capture and never reaches this arm).
             super::commands::CAMERA_SELECTOR => self.camera_argument(argument, text),

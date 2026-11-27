@@ -546,6 +546,7 @@ export const HOST_NAMES = [
   'SOFTENEDGES',
   'SHADOWS',
   'FOG',
+  'SECTIONPLANE',
   'MATERIALS',
   'PIE',
   'REVOLVE',

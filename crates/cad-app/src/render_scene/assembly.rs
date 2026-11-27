@@ -19,7 +19,9 @@ use cad_representation::{
     ProviderRegistry, RepresentationContext, SpaceSelection, DEFAULT_LINEWEIGHT_MM,
 };
 use cad_resources::DecodedImageCache;
-use cad_scene::{RenderBatch, RenderTopology, SceneBudget, SceneCache, SceneDelta};
+use cad_scene::{
+    clip_delta, ClipPlane, RenderBatch, RenderTopology, SceneBudget, SceneCache, SceneDelta,
+};
 
 pub fn build_scene(database: &DrawingDatabase, stamp: TaskStamp) -> CadResult<SceneDelta> {
     build_scene_with_fonts(database, stamp, None)
@@ -250,6 +252,7 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     };
     let mut stats = SceneAssemblyStats::default();
     let mut entity_batches: BTreeMap<EntityId, Range<usize>> = BTreeMap::new();
+    let section = section_clip(database);
     match space {
         SpaceSelection::Model => {
             for entity in crate::layers::visible_model_entities(database, overrides) {
@@ -263,7 +266,10 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
                     fonts.as_deref(),
                 )?;
                 stats.fragments_in += representation.fragments.len();
-                let delta = cache.build_compact(&representation, stamp.clone())?;
+                let mut delta = cache.build_compact(&representation, stamp.clone())?;
+                if let Some(clip) = section.as_ref() {
+                    clip_delta(&mut delta, clip);
+                }
                 stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
                 let start = combined.added.len();
                 combined.added.extend(delta.added);
@@ -864,4 +870,13 @@ fn tally_adjacent_merge_candidates(batches: &[RenderBatch], stats: &mut SceneAss
 /// Database layouts with drawability verdicts; model space is always available.
 pub fn layout_descriptors(database: &DrawingDatabase) -> Vec<LayoutDescriptor> {
     enumerate_layouts(database)
+}
+
+/// The document's active section plane as a renderer clip, if any.
+///
+/// A stored but paused plane (`active == false`) does not clip. A malformed
+/// plane is impossible here: the database validates on every write/load.
+fn section_clip(database: &DrawingDatabase) -> Option<ClipPlane> {
+    let plane = database.section_plane().filter(|plane| plane.active)?;
+    ClipPlane::new(plane.origin, plane.normal)
 }

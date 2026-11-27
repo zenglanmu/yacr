@@ -179,7 +179,7 @@ pub const FORMAT_WRITE: u32 = 2;
 /// `22` adds the per-document display record (`tables/display.json`): the
 /// Shadows sun and the Fog band. Written only when it differs from the default;
 /// a pre-22 reader refuses the table path instead of dropping the settings.
-pub const FORMAT_MINOR: u32 = 31;
+pub const FORMAT_MINOR: u32 = 32;
 
 /// Stable failure markers.
 ///

@@ -211,7 +211,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("REVSURF", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Revsurf))),
     ("RULESURF", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Rulesurf))),
     ("SECTION", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Section))),
-    ("SECTIONPLANE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Sectionplane))),
     ("SECTIONPLANEJOG", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Sectionplanejog))),
     ("SECTIONPLANESETTINGS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Sectionplanesettings))),
     ("SECTIONPLANETOBLOCK", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Sectionplanetoblock))),

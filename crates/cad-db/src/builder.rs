@@ -1,10 +1,4 @@
 //! The sanctioned construction path for a [`DrawingDatabase`].
-use cad_domain::ymodel::IdCounters;
-use cad_domain::*;
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
 use crate::dim_style::DimStyle;
 use crate::drawing::DrawingDatabase;
 use crate::entity::{DbEntity, EntityRenderAttributes};
@@ -14,6 +8,11 @@ use crate::tables::{
     LayerAttributes, Layout, LineType, PlotSettingsRecord, Scale, Style,
 };
 use crate::xref::ExternalReference;
+use cad_domain::ymodel::IdCounters;
+use cad_domain::*;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Process-global source of [`DrawingDatabase::construction_nonce`].
 ///
@@ -65,6 +64,7 @@ impl DrawingDatabaseBuilder {
                 materials: cad_domain::material::MaterialDocument::new(),
                 scenes: cad_domain::scene::SceneTable::new(),
                 display: cad_domain::display::DisplaySettings::default(),
+                section: None,
                 guides: cad_domain::guide::GuideTable::new(),
                 limits_min: None,
                 limits_max: None,

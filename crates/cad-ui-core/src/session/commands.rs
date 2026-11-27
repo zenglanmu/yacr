@@ -346,7 +346,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("VPCLIP", CommandId::VpClip),
     ("VPSCALE", CommandId::VpScale),
     ("LAYVPI", CommandId::LayVpi),
-
     // The sustained extended-command batch: payload-free session toggles and
     // read-only reports. All ten ride the single `CommandId::Extended` wrapper.
     ("QTEXT", CommandId::Extended(ExtendedCommandId::QText)),
@@ -359,7 +358,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("EDITTIME", CommandId::Extended(ExtendedCommandId::EditTime)),
     ("JULIAN", CommandId::Extended(ExtendedCommandId::JulianDate)),
     ("XLIST", CommandId::Extended(ExtendedCommandId::XList)),
-
     // Wave 2 (2026-11-09): thirty more payload-free names. The first ten are
     // session tokens (each reads or flips one `SessionState::drafting_extras`
     // token; no renderer consumer exists), the next eight are read-only reports,
@@ -756,7 +754,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),
     ("PYRAMID", CommandId::Extended(ExtendedCommandId::Pyramid)), ("POLYSOLID", CommandId::Extended(ExtendedCommandId::PolySolid)),
-    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("SHADOWS", CommandId::Shadows), ("FOG", CommandId::Fog), ("TEXT3D", CommandId::Text3d), ("OUTERSHELL", CommandId::OuterShell), ("TRIMSOLID", CommandId::TrimSolid), ("SPLITSOLID", CommandId::SplitSolid), ("CAMERA", CommandId::PositionCamera), ("WALK", CommandId::Walk), ("LOOKAROUND", CommandId::LookAround), ("MATCHPHOTO", CommandId::MatchPhoto), ("OVERLAYS", CommandId::Overlays), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
+    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("SHADOWS", CommandId::Shadows), ("FOG", CommandId::Fog), ("SECTIONPLANE", CommandId::SectionPlane), ("TEXT3D", CommandId::Text3d), ("OUTERSHELL", CommandId::OuterShell), ("TRIMSOLID", CommandId::TrimSolid), ("SPLITSOLID", CommandId::SplitSolid), ("CAMERA", CommandId::PositionCamera), ("WALK", CommandId::Walk), ("LOOKAROUND", CommandId::LookAround), ("MATCHPHOTO", CommandId::MatchPhoto), ("OVERLAYS", CommandId::Overlays), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
     ("SWEEP", CommandId::Extended(ExtendedCommandId::Sweep)), ("LOFT", CommandId::Extended(ExtendedCommandId::Loft)),
     ("INTERSECT", CommandId::Extended(ExtendedCommandId::Intersect)), ("UNION", CommandId::Extended(ExtendedCommandId::Union)),
     ("SUBTRACT", CommandId::Extended(ExtendedCommandId::Subtract)), ("SLICE", CommandId::Extended(ExtendedCommandId::Slice)),
@@ -896,6 +894,7 @@ mod flip_grammar;
 mod guide_grammar;
 mod material_grammar;
 mod protractor_grammar;
+mod section_grammar;
 mod soften_grammar;
 mod text3d_grammar;
 mod walk_grammar;
@@ -907,6 +906,7 @@ pub use flip_grammar::*;
 pub use guide_grammar::*;
 pub use material_grammar::*;
 pub use protractor_grammar::*;
+pub use section_grammar::*;
 pub use soften_grammar::*;
 pub use text3d_grammar::*;
 pub use walk_grammar::*;

@@ -128,7 +128,7 @@ export const DOCUMENT_SCOPED_COMMANDS: readonly string[] = Object.freeze([
   'HATCHSETBOUNDARY', 'HATCHSETORIGIN', 'XDLIST',
   // The 2026-11-07 extras batch reads or writes the open drawing / its session
   // view tokens. `REGEN3`, `-PAN` and `-LINETYPE` are alias spellings.
-  'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'LINETYPE',
+  'SKETCH', 'TRACE', 'MOCORO', 'MSTRETCH', 'VIEWRES', 'VSCURRENT', 'SECTIONPLANE', 'LINETYPE',
   '-LINETYPE', '-PAN', 'REGEN3',
 
   // The 2026-11-09 pilot batch: the five session-only display tokens

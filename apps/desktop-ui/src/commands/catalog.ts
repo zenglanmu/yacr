@@ -1,5 +1,4 @@
 // The chrome's declarative command catalog, in AutoCAD-style order.
-
 /** One entry of the chrome's display catalog. */
 export interface CommandCatalogEntry {
   readonly id: string;
@@ -913,6 +912,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'SOFTENEDGES', labelKey: 'draw.kind.softenedges', icon: 'dot', group: 'modify' },
   { id: 'SHADOWS', labelKey: 'draw.kind.shadows', icon: 'sun', group: 'view' },
   { id: 'FOG', labelKey: 'draw.kind.fog', icon: 'view', group: 'view' },
+  { id: 'SECTIONPLANE', labelKey: 'concept.tool.section_plane', icon: 'view', group: 'view' },
   { id: 'MATERIALS', labelKey: 'draw.kind.materials', icon: 'palette', group: 'modify' },
   { id: 'REVOLVE', labelKey: 'draw.kind.revolve', icon: 'dot', group: 'modify' },
   { id: 'SWEEP', labelKey: 'draw.kind.sweep', icon: 'dot', group: 'modify' },

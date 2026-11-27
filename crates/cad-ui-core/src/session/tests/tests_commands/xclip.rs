@@ -106,10 +106,10 @@ fn xclip_is_an_argument_selector_of_the_real_extended_command() {
         ExtendedCommandId::Xclip.requires_work_mode(),
         "the clip write is Work-only"
     );
-    // The refusal registry no longer owns the name (XCLIP, XEDGES and CAMERA
-    // graduated to real commands), so the count tracks the living registry.
+    // The refusal registry no longer owns the name (XCLIP, XEDGES, CAMERA and
+    // SECTIONPLANE graduated to real commands), so the count tracks it.
     assert!(!RefusalId::ALL.iter().any(|name| name.selector() == "XCLIP"));
-    assert_eq!(RefusalId::ALL.len(), 309);
+    assert_eq!(RefusalId::ALL.len(), 308);
 }
 
 #[test]

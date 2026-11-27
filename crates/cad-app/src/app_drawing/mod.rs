@@ -115,6 +115,7 @@ mod helpers;
 mod image_edit;
 mod material_replay;
 mod scene_replay;
+mod section_replay;
 mod view_replay;
 // The `FS` contact passes: the `FSMODE=OFF` direct pass and the `FSMODE=ON`
 // tangent chain (`inquiry` keeps the command shell).

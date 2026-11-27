@@ -827,6 +827,7 @@ pub enum CommandPayload {
     View(ViewCommand),
     /// The typed `SCENE <option>` line.
     Scene(SceneCommand),
+    Section(SectionCommand),
     /// The typed `SHADOWS`/`FOG` line.
     Display(DisplayCommand),
     Text3d(Text3dInput),

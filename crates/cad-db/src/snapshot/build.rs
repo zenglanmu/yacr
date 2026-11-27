@@ -29,11 +29,6 @@
 //! [`SnapshotError::invalid`] instead of dropping the row. `finish()` is the last
 //! word on referential integrity; the header variables are applied after it
 //! because they are document scalars, not rows.
-use std::collections::{BTreeMap, BTreeSet};
-
-use cad_domain::ymodel::{shard_of, DocumentHeader, ModelKey, PersistentIdOf, Shard};
-use cad_domain::{CadResult, DocumentIdentity, Revision, SpaceId, UnitContext};
-
 use super::bim;
 use super::configurations;
 use super::elements;
@@ -53,7 +48,9 @@ use super::{
 use crate::drawing::DrawingDatabase;
 use crate::scope::TableKind;
 use crate::DrawingDatabaseBuilder;
-
+use cad_domain::ymodel::{shard_of, DocumentHeader, ModelKey, PersistentIdOf, Shard};
+use cad_domain::{CadResult, DocumentIdentity, Revision, SpaceId, UnitContext};
+use std::collections::{BTreeMap, BTreeSet};
 impl DrawingDatabase {
     /// Encode this database as a [`DocumentSnapshot`].
     ///
@@ -70,7 +67,6 @@ impl DrawingDatabase {
     ) -> Result<DocumentSnapshot, SnapshotError> {
         self.snapshot_at(units, identity, resource_keys, revision, None)
     }
-
     /// Encode the document, stamping the save instants the caller supplies.
     ///
     /// `saved_at` is the one clock read of a durable write: when it is `Some`,
@@ -182,10 +178,13 @@ impl DrawingDatabase {
         if !self.guides.is_empty() {
             tables.set(TableKind::Guides, super::guide::encode_guides(self));
         }
-        // The display record is written only when it differs from the default.
         let display = super::display::encode_display(self);
         if !display.is_empty() {
             tables.set(TableKind::Display, display);
+        }
+        let section = super::section::encode_section(self);
+        if !section.is_empty() {
+            tables.set(TableKind::Sections, section);
         }
         Ok(DocumentSnapshot {
             header,
@@ -201,7 +200,6 @@ impl DrawingDatabase {
             resource_sources: self.resource_sources.clone(),
         })
     }
-
     /// Hydrate a new database from a snapshot.
     ///
     /// The revision is seeded from the snapshot (ADR-0037 D2) and the identifier
@@ -213,7 +211,6 @@ impl DrawingDatabase {
         builder.seed_identifiers(snapshot.header.next);
         builder.set_embed_resources(snapshot.header.embed_resources);
         builder.set_application_domain(snapshot.header.application_domain);
-
         let tables = tables::decode(&snapshot.tables)?;
         let resource_tables = resources::decode(&snapshot.tables)?;
         // The definition table is decoded and installed before the element loop,
@@ -253,6 +250,7 @@ impl DrawingDatabase {
         let materials = super::material::decode_materials(&snapshot.tables)?;
         let scenes = super::scene::decode_scenes(&snapshot.tables)?;
         let display = super::display::decode_display(&snapshot.tables)?;
+        let section = super::section::decode_section(&snapshot.tables)?;
         let guides = super::guide::decode_guides(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
@@ -308,7 +306,12 @@ impl DrawingDatabase {
         if !guides.is_empty() {
             checked(builder.set_guides(guides), table_entry(TableKind::Guides))?;
         }
-
+        if let Some(plane) = section {
+            checked(
+                builder.set_section_plane(Some(plane)),
+                table_entry(TableKind::Sections),
+            )?;
+        }
         for layer in tables.layers.values() {
             checked(
                 builder.insert_layer(layer.clone()),
@@ -321,7 +324,6 @@ impl DrawingDatabase {
                 format!("tables/layers.json layer {}", id.0),
             )?;
         }
-
         for block in tables.blocks.values() {
             checked(
                 builder.insert_block(block.clone()),
@@ -358,7 +360,6 @@ impl DrawingDatabase {
             }
             builder.set_block_source_handle(*id, *handle);
         }
-
         for layout in tables.layouts.values() {
             checked(
                 builder.insert_layout(layout.clone()),
@@ -452,7 +453,6 @@ impl DrawingDatabase {
                 )));
             }
         }
-
         let mut hidden = BTreeSet::new();
         for shard in &snapshot.shards {
             for element in &shard.elements {

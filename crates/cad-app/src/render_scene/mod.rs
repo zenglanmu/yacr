@@ -23,6 +23,8 @@ mod guide_tests;
 mod overlay;
 mod prepared;
 mod release;
+#[cfg(test)]
+mod section_tests;
 pub use prepared::PreparedScene;
 use prepared::{appendable_delta, SceneVersion};
 mod resident;

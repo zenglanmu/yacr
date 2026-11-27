@@ -144,7 +144,6 @@ pub(super) fn straight_line(
         ))),
     }
 }
-
 /// The resolved geometry of a two-line CHAMFER/FILLET edit: the new endpoints of
 /// both picked lines plus the optional new entity.
 ///
@@ -158,7 +157,6 @@ pub(super) struct TwoLineEdit {
     pub second: (Point3, Point3),
     pub inserted: Option<SemanticGeometry>,
 }
-
 /// The corner of the two infinite lines, the pick-side direction on each line,
 /// and the surviving endpoint of each segment.
 struct CornerFrame {
@@ -176,7 +174,6 @@ struct CornerFrame {
     keep2_is_start: bool,
     reach2: f64,
 }
-
 /// The two straight-line picks (endpoints + raw pick point) a CHAMFER/FILLET
 /// plans from, in pick order.
 pub(super) struct TwoLineInput {
@@ -189,7 +186,6 @@ pub(super) struct TwoLineInput {
     /// The second raw pick point (selects the pick side on the second line).
     pub pick_second: Point3,
 }
-
 /// Resolve the corner and the pick side of two straight lines.
 ///
 /// The **pick-side rule** (ADR 0016 decision B/C): each raw pick point is
@@ -267,7 +263,6 @@ fn corner_frame(input: &TwoLineInput, tol: f64, command: &str) -> Result<CornerF
         reach2,
     })
 }
-
 /// A unit XY direction from `from` to `to`, or a degeneracy refusal.
 fn unit_xy(from: Point3, to: Point3, tol: f64, command: &str) -> Result<(f64, f64), String> {
     let dx = to.x - from.x;
@@ -278,7 +273,6 @@ fn unit_xy(from: Point3, to: Point3, tol: f64, command: &str) -> Result<(f64, f6
     }
     Ok((dx / len, dy / len))
 }
-
 /// The point at `dist` from `corner` along the unit XY direction `dir`.
 fn point_from(corner: Point3, dir: (f64, f64), dist: f64) -> Point3 {
     Point3 {
@@ -667,6 +661,12 @@ pub(crate) fn apply_drawing_patches(
     // A construction-guide step takes the whole-table guide path.
     if let Some(result) =
         super::guide_replay::guide_step(drawing, transaction, reason, step, forward)
+    {
+        return result;
+    }
+    // A section-plane step takes the whole-slot section path.
+    if let Some(result) =
+        super::section_replay::section_step(drawing, transaction, reason, step, forward)
     {
         return result;
     }

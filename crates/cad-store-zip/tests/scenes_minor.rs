@@ -98,6 +98,7 @@ fn scene_row() -> Value {
         soften: None,
         soften_cleared: None,
         hidden: None,
+        section: None,
     }
     .to_json()
 }
@@ -244,4 +245,51 @@ fn an_empty_hidden_capture_still_stamps_minor_thirty_one() {
         table.resolve("Overview").expect("scene").hidden.as_deref(),
         Some([].as_slice())
     );
+}
+
+#[test]
+fn a_section_plane_is_written_at_minor_thirty_two() {
+    let mut document = snapshot(false);
+    document.tables.set(
+        TableKind::Sections,
+        vec![serde_json::json!({
+            "origin": [0.0, 0.0, 0.0],
+            "normal": [0.0, 0.0, 1.0],
+            "active": true
+        })],
+    );
+    let bytes = write_bytes(&document);
+    assert_eq!(minor_of(&bytes), 32, "a section plane is minor 32");
+    let loaded = read_bytes(&bytes);
+    assert!(loaded.snapshot.has_sections());
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Sections)
+        .expect("table entry");
+    let plane = cad_domain::section::SectionPlane::from_json(&rows[0]).expect("decode");
+    assert!(plane.active);
+    assert!((plane.normal.z - 1.0).abs() < 1.0e-9);
+}
+
+#[test]
+fn a_scene_section_capture_stamps_minor_thirty_two() {
+    for captured in [
+        serde_json::Value::Null,
+        serde_json::json!({
+            "origin": [0.0, 0.0, 0.0],
+            "normal": [0.0, 0.0, 1.0],
+            "active": false
+        }),
+    ] {
+        let mut row = scene_row();
+        row["section"] = captured;
+        let mut document = snapshot(false);
+        document.tables.set(TableKind::Scenes, vec![row]);
+        let bytes = write_bytes(&document);
+        assert_eq!(minor_of(&bytes), 32, "a scene section capture is minor 32");
+        let loaded = read_bytes(&bytes);
+        assert!(loaded.snapshot.has_scene_section());
+        assert!(!loaded.snapshot.has_sections());
+    }
 }

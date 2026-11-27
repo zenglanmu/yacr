@@ -29,12 +29,14 @@ pub use highlight::{
 mod batch;
 mod budget;
 mod cache;
+mod clip;
 mod transient;
 mod wireframe;
 
 pub use batch::*;
 pub use budget::*;
 pub use cache::*;
+pub use clip::*;
 pub use transient::*;
 
 #[cfg(test)]

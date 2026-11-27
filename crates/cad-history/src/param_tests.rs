@@ -117,6 +117,7 @@ fn step() -> DrawingHistoryStep {
         scene_patches: Vec::new(),
         display_patches: Vec::new(),
         guide_patches: Vec::new(),
+        section_patches: Vec::new(),
     }
 }
 

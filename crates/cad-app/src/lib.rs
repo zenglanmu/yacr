@@ -82,6 +82,7 @@ mod app_materials;
 mod app_panels;
 mod app_press_pull;
 mod app_scene;
+mod app_section;
 mod app_text3d;
 // The extended-command wrapper: dispatch, session toggles and reports.
 mod app_dispatch;
@@ -544,7 +545,7 @@ pub use command_payload::{
     PlanCircle, PlanLength, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
     RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand, RevCloudStyle,
     RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand, SceneCommand,
-    SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
+    SectionCommand, SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
     SelectionProperty, SelectionScope, SelectionToolPayload, SetByLayerSettings, ShapeCommand,
     SolidPrimitiveCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp,
     SysVarAssignment, SysVarDialogCommand, SysVarMonitorAction, TCircleCommand, TCircleSizeMode,

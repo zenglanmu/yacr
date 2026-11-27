@@ -309,6 +309,7 @@ mod revision_cloud;
 mod display;
 mod recovery;
 mod scenes;
+mod section;
 mod select_filter;
 mod select_similar;
 mod show_objects;
