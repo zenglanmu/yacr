@@ -80,12 +80,13 @@
   **自动参考线点**（2026-11-28，ADR-0087）：`DIST GUIDE` 的两个拾取点重合时写 point 标记
   （不是退化为错误），测量仍返回 0 距离。
   **参考线样式**（2026-11-28，ADR-0101）：`GUIDE STYLE COLOR/DASH` 持久化共享颜色与虚线开关
-  （`tables/guides.json` 的 style 行，minor 30），renderer 使用该颜色/开关；无样式编辑 UI。
+  （`tables/guides.json` 的 style 行，minor 30），renderer 使用该颜色/开关；concept 域 Styles
+  托盘提供颜色输入与虚线开关（dispatch 同一 `GUIDE STYLE`），其它域仍是 typed 命令。
   **参考线点与单条删除**（2026-11-28，ADR-0085）：`GUIDE POINT` 写 point-only 行（minor 27，
   三轴十字渲染），`GUIDE DELETE <n>` 删除一行；两者都是一次整表写入/一步撤销。
   **构造参考线**（2026-11-28，ADR-0084）：`DIST GUIDE` / `PROTRACTOR GUIDE` 在测量完成时写
   非实体 `tables/guides.json`（minor 26）；`GUIDE LIST|CLEAR` 管理，渲染器按模型包围盒把每条
-  参考线由**相机 overlay** 画成有界虚线段（6/4 逻辑像素 × `view_scale`，缩放时 dash 周期随之更新），point 为 6px 三轴十字；`GUIDE STYLE COLOR/DASH` 持久化共享颜色/虚线开关；不进实体/导出/拾取。
+  参考线由**相机 overlay** 画成有界虚线段（6/4 逻辑像素 × `view_scale`，缩放时 dash 周期随之更新），point 为 6px 三轴十字；`GUIDE STYLE COLOR/DASH` 持久化共享颜色/虚线开关（concept 域 Styles 托盘有控件）；不进实体/导出/拾取。
   **Flip Along**（2026-11-28，ADR-0083）：`FLIP X|Y|Z` 以选择包围盒中心为平面原地反射
   （源删除 + 镜像副本、一次事务/一步撤销、字形真反射）；新副本是新 entity id，块定义成员/子图元
   仍按名拒绝。
@@ -201,7 +202,7 @@
 
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
-| Tape Measure | `DIST` | partial | 真实两点距离；`DIST GUIDE` 在两点完成后写一条**持久构造参考线**（`tables/guides.json`；两点重合时自动写 point 标记；非实体、无图层/导出/拾取，渲染为有界**虚线段**（transient overlay，dash/gap = 6/4 逻辑像素 × `view_scale`；无 view_scale 时回退模型 period；线长仍是模型包围盒 10 倍、≥1000 单位，不是真无限线））；`GUIDE POINT <x> <y> <z>` 写点标记（minor 27，渲染为 6px 三轴十字）；`GUIDE STYLE COLOR r g b`/`STYLE DASH ON|OFF` 写共享样式行（minor 30）；`DIST GUIDE` 两点重合时也自动写该点标记，`GUIDE DELETE <n>` 单条删除、`GUIDE LIST`/`CLEAR` 管理。无偏移/延伸/多次复制模式 |
+| Tape Measure | `DIST` | partial | 真实两点距离；`DIST GUIDE` 在两点完成后写一条**持久构造参考线**（`tables/guides.json`；两点重合时自动写 point 标记；非实体、无图层/导出/拾取，渲染为有界**虚线段**（transient overlay，dash/gap = 6/4 逻辑像素 × `view_scale`；无 view_scale 时回退模型 period；线长仍是模型包围盒 10 倍、≥1000 单位，不是真无限线））；`GUIDE POINT <x> <y> <z>` 写点标记（minor 27，渲染为 6px 三轴十字）；`GUIDE STYLE COLOR r g b`/`STYLE DASH ON|OFF` 写共享样式行（minor 30；concept 域 Styles 托盘有颜色/虚线控件）；`DIST GUIDE` 两点重合时也自动写该点标记，`GUIDE DELETE <n>` 单条删除、`GUIDE LIST`/`CLEAR` 管理。无偏移/延伸/多次复制模式 |
 | Dimension | `DIMLINEAR` | full | 是 CAD 标注，不是 SketchUp LayOut 尺寸 |
 | Protractor | `PROTRACTOR` | partial | 真实三点角度量具（`BeginMeasurement(Protractor)`：先点顶点、再各点一条射线，结果按 `Angle3Points` 记录并格式化角度；普通模式只读、不写文档）+ 托盘/工具栏/菜单真实工具；`PROTRACTOR GUIDE` 在三点点完后从顶点沿**第二条射线**写一条持久参考线（同一 `tables/guides.json`）；guide 点/单条删除/清空与 Tape 共用 `GUIDE POINT`/`DELETE`/`LIST`/`CLEAR`。**未建模**：其它 guide 类型/角度圆弧、无限线渲染与虚线 |
 | Text | `TEXT` | full | 二维文字 |

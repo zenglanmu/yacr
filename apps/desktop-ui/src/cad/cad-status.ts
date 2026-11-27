@@ -360,6 +360,8 @@ export interface CadStatus {
   readonly applicationDomain?: string | null;
   /** The session's 3D body style token (`WIREFRAME`/`SHADED`), when reported. */
   readonly visualStyle?: string | null;
+  /** Shared construction-guide style (`GUIDE STYLE`); absent without a document. */
+  readonly guideStyle?: { readonly color: readonly [number, number, number]; readonly dashed: boolean } | null;
   readonly entityCount: number | null;
   readonly loading: boolean;
   readonly importProgress: CadImportProgress | null;
@@ -378,10 +380,7 @@ export interface CadStatus {
   readonly backend: string | null;
   readonly adapter: string | null;
   readonly camera: CadCamera | null;
-  /**
-   * The host's persisted UI theme (`"dark"` or `"light"`); optional only for a
-   * pre-theme payload (readers default to `"dark"`). The host stays the authority.
-   */
+  /** Persisted UI theme (`"dark"`/`"light"`); absent pre-theme (readers default `"dark"`). */
   readonly theme?: string;
   /**
    * The real view orientation for the ViewCube, or `null` when the host has no

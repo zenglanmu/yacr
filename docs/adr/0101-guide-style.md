@@ -1,6 +1,6 @@
 # ADR-0101：参考线样式（GUIDE STYLE COLOR/DASH）
 
-- 状态：**已接受（决策，2026-11-28）**；**已实现（2026-11-28，style 行 + overlay 使用；无真实 GUI 证据）**
+- 状态：**已接受（决策，2026-11-28）**；**已实现（2026-11-28，style 行 + overlay + Styles 托盘控件；无真实 GUI 交互证据）**
 - 关联：ADR-0084/0085/0086/0092（guide 表、虚线、相机 overlay）、`tables/guides.json`
 
 ## 背景
@@ -19,13 +19,16 @@ guide 表已有 line/point 行，适合增加一条**文档级共享样式**，�
   Work-only；Guide LIST 报告当前颜色/虚线。无新命令 ID。
 - 相机 overlay 使用 `GuideStyle`：颜色转为 sRGB 浮点；dashed=false 时 line 不切段、pattern
   continuous；point 十字始终实线。
+- `cad_status.guideStyle {color, dashed}` 在**有文档时**投影该表样式（旧宿主缺字段时 UI 用默认）；
+  concept 域 Styles 托盘提供原生颜色输入与虚线开关，分别 dispatch `GUIDE STYLE COLOR` /
+  `GUIDE STYLE DASH`，不新增命令。
 
 ## 不在本 ADR 范围
 
-- 样式编辑面板/取色器、每 guide 独立样式、屏幕空间恒定 dash（已由 ADR-0092 处理）；
-- 真实 GUI/GPU 与其它载体运行时。
+- 每 guide 独立样式、屏幕空间恒定 dash（已由 ADR-0092 处理）；
+- 真实 GUI 交互/GPU/像素与其它载体运行时。
 
 ## 后果
 
-- guide 颜色/虚线可持久化并由 renderer 消费；guide 表档位升到 30。
-- 仍无 guide 样式 UI；用户通过 typed `GUIDE STYLE` 设置。
+- guide 颜色/虚线可持久化并由 renderer 与 Styles 托盘消费；guide 表档位升到 30。
+- 托盘控件只存在于 concept 域；其它域仍通过 typed `GUIDE STYLE` 设置。

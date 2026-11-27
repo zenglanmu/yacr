@@ -359,6 +359,17 @@ impl OpenedSource {
 
 pub use super::status_view::{CadNavigation, CadViewOrientation};
 
+/// The document's shared construction-guide presentation (`GUIDE STYLE`).
+///
+/// The colour is sRGB bytes and `dashed` is the shared line switch; point
+/// markers stay solid regardless. Absent when there is no document.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CadGuideStyle {
+    pub color: [u8; 3],
+    pub dashed: bool,
+}
+
 /// The `cad_status` snapshot consumed by the frontend.
 ///
 /// The field set is the frozen frontend contract: every key is always present,
@@ -428,6 +439,11 @@ pub struct CadStatus {
     /// the value `VSCURRENT` stores and the Styles tray highlights.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visual_style: Option<String>,
+    /// The document's construction-guide style (`tables/guides.json` style
+    /// row), or absent without a document. Additive: an older host omits it and
+    /// the panel falls back to the documented default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guide_style: Option<CadGuideStyle>,
     pub error: Option<String>,
     /// Whether the host can start a **blank** document right now: the host
     /// advertises the NEW capability and no open/import is in flight
@@ -679,6 +695,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         // No session means no document, hence no interface domain or style token.
         application_domain: None,
         visual_style: None,
+        guide_style: None,
         error,
         // No session means no document/command capability at all.
         can_new: false,
@@ -859,6 +876,7 @@ pub(super) fn assemble_status(
         opened_source: None,
         application_domain: None,
         visual_style: None,
+        guide_style: None,
         error,
         can_new: capabilities.can_new,
         can_open,

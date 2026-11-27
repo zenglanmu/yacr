@@ -23,7 +23,17 @@ import { Icon } from '../../icons.tsx';
 import { invoke } from '../../host/invoke.ts';
 import { blocksOf } from '../../cad/cad-status.ts';
 import { componentDefineCommand, componentInsertCommand } from '../concept/components.ts';
-import { STYLE_TOKENS, styleCommand, styleLabelKey } from '../concept/styles.ts';
+import {
+  DEFAULT_GUIDE_COLOR,
+  DEFAULT_GUIDE_DASHED,
+  STYLE_TOKENS,
+  guideStyleColorCommand,
+  guideStyleDashCommand,
+  guideStyleHex,
+  parseGuideStyleHex,
+  styleCommand,
+  styleLabelKey,
+} from '../concept/styles.ts';
 import { toolLabelKey } from '../../commands/commands.ts';
 import { toolStepPromptKey } from '../../cad/cad.ts';
 import { propertyRowLabel } from '../../properties/property-labels.ts';
@@ -160,6 +170,41 @@ function StylesBody() {
           {current === token ? ` · ${t('concept.styles.active')}` : ''}
         </button>
       ))}
+      <p className="concept-panel__name">{t('concept.styles.guides')}</p>
+      {(() => {
+        const style = shell.status?.guideStyle ?? null;
+        const color = style?.color ?? DEFAULT_GUIDE_COLOR;
+        const dashed = style?.dashed ?? DEFAULT_GUIDE_DASHED;
+        const guideAvailable = shell.canCommand('GUIDE') && shell.status?.documentLabel != null;
+        return (
+          <>
+            <div className="concept-panel__guide">
+              <label htmlFor="concept-guide-color">{t('concept.styles.guide_color')}</label>
+              <input
+                id="concept-guide-color"
+                type="color"
+                value={guideStyleHex(color)}
+                disabled={!guideAvailable}
+                aria-label={t('concept.styles.guide_color')}
+                onChange={event => {
+                  const rgb = parseGuideStyleHex(event.currentTarget.value);
+                  if (rgb !== null) shell.runCommand(guideStyleColorCommand(rgb));
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              className="concept-panel__action"
+              aria-pressed={dashed}
+              disabled={!guideAvailable}
+              onClick={() => shell.runCommand(guideStyleDashCommand(!dashed))}
+            >
+              {t('concept.styles.guide_dashed')}
+            </button>
+            <p className="concept-panel__hint">{t('concept.styles.guide_hint')}</p>
+          </>
+        );
+      })()}
       <p className="concept-panel__hint">{t('concept.styles.boundary')}</p>
       <p className="concept-panel__hint">{t('concept.styles.theme')}</p>
       <ThemeToggle />

@@ -504,6 +504,7 @@ mod tests {
             opened_source: None,
             application_domain: Some("cad2d".into()),
             visual_style: Some("SHADED".into()),
+            guide_style: None,
             error: error.map(str::to_string),
             can_new: true,
             can_open: true,

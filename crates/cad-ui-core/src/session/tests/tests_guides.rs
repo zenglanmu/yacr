@@ -89,3 +89,24 @@ fn guide_list_and_clear_are_the_only_management_forms() {
     session.command("GUIDE").expect("bare GUIDE lists");
     assert_eq!(normalize_command("GUIDE"), Some(CommandId::Guide));
 }
+
+#[test]
+fn the_status_projects_the_document_guide_style() {
+    let session = fresh_session();
+    session.command("NEW").expect("NEW is admitted");
+    assert_eq!(
+        session.snapshot(None, None, 0).guide_style.map(|s| s.color),
+        Some([51, 115, 217]),
+        "a new document reports the default style, not an absent field"
+    );
+    session
+        .command("GUIDE STYLE COLOR 10 20 30")
+        .expect("style color");
+    session.command("GUIDE STYLE DASH OFF").expect("dash off");
+    let style = session
+        .snapshot(None, None, 0)
+        .guide_style
+        .expect("the document reports its guide style");
+    assert_eq!(style.color, [10, 20, 30]);
+    assert!(!style.dashed);
+}

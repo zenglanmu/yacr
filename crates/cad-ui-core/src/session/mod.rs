@@ -231,9 +231,9 @@ pub use self::settings::{
 use self::status::{assemble_status, cad_tool, document_capabilities};
 pub use self::status::{
     unsupported_status, CadActiveSpace, CadBlockStatus, CadCamera, CadGroupMember, CadGroupStatus,
-    CadImageClipStatus, CadImageStatus, CadImportProgress, CadLayoutTab, CadNavigation, CadPopup,
-    CadReferenceStatus, CadSelection, CadSelectionRow, CadSpecVisibility, CadStatus, CadTool,
-    CadToolParams, CadUnits, CadViewOrientation, OpenedSource,
+    CadGuideStyle, CadImageClipStatus, CadImageStatus, CadImportProgress, CadLayoutTab,
+    CadNavigation, CadPopup, CadReferenceStatus, CadSelection, CadSelectionRow, CadSpecVisibility,
+    CadStatus, CadTool, CadToolParams, CadUnits, CadViewOrientation, OpenedSource,
 };
 pub use self::text_batch::*;
 pub use self::text_commands::*;

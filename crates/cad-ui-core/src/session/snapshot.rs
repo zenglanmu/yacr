@@ -394,6 +394,15 @@ impl CadSession {
                 .name()
                 .to_string(),
         );
+        // The document's shared guide style (`GUIDE STYLE`); absent without a
+        // document. Read from the guide table itself, never a UI default.
+        status.guide_style = drawing.as_ref().map(|database| {
+            let style = database.guides().style();
+            CadGuideStyle {
+                color: style.color,
+                dashed: style.dashed,
+            }
+        });
         // The document's own UNITS settings, projected once for the readouts.
         // `None` without a document; never a UI-side default.
         status.units = self
