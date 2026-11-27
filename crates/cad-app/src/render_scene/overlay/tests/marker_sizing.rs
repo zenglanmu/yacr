@@ -46,13 +46,12 @@ fn preview_marker_size_is_finite_and_positive_for_a_degenerate_scale() {
 }
 
 #[test]
-fn overlay_fingerprint_ignores_the_view_scale() {
-    // `view_scale` stays an overlay input for the screen-relative snap markers,
-    // but it is camera-derived (the bounds already track it), so it adds no second
-    // camera signal to the fingerprint. The pointer cursor is no longer an overlay
-    // input at all (ADR 0028: renderer transient).
+fn overlay_fingerprint_tracks_the_view_scale_for_guide_dashes() {
+    // Construction guides are screen-space dashed from `view_scale`, so a zoom
+    // must rebuild the overlay even when the 2D viewport rectangle is unchanged.
+    // The pointer cursor is not an overlay input (ADR 0028: renderer transient).
     let baseline = OverlayInputs::default();
-    assert_eq!(
+    assert_ne!(
         overlay_fingerprint(&baseline),
         overlay_fingerprint(&OverlayInputs {
             view_scale: Some(0.5),

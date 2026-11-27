@@ -49,6 +49,10 @@ pub fn overlay_fingerprint(inputs: &OverlayInputs) -> u64 {
             .as_ref()
             .map(|p| (p.points.as_slice(), p.cursor)),
     );
+    // The guide dash period is screen-space: a camera/zoom scale change must
+    // rebuild the overlay even when the 2D viewport rectangle is unchanged.
+    3u8.hash(&mut hasher);
+    inputs.view_scale.map(f64::to_bits).hash(&mut hasher);
     // Snap hints are pure session state; their point/kind changes the marker
     // set and must invalidate the transient overlay.
     2u8.hash(&mut hasher);

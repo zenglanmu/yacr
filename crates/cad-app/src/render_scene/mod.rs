@@ -671,6 +671,9 @@ impl CadSceneController {
                         overlays.point_display_style,
                         document,
                     ));
+                    // Construction guides are rebuilt with this camera-dependent
+                    // overlay so their dash period can follow `view_scale`.
+                    overlay.merge(guide_overlay(db, overlays.view_scale, document));
                     if overlays.visibility.selection_highlight {
                         overlay.merge(selection_highlight(
                             db,

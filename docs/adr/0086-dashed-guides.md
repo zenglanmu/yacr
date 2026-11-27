@@ -1,6 +1,7 @@
 # ADR-0086：参考线虚线段（Dashed guides）
 
 - 状态：**已接受（决策，2026-11-28）**；**已实现（2026-11-28，场景批次分段；无真实 GUI/GPU 证据）**
+- 后续：ADR-0092 把 guide 批次从 base scene 迁到相机 overlay，dash 周期改为屏幕空间（6/4px × view_scale）。
 - 关联：ADR-0084/0085（guide 表、point/line）、`subdivide_dashes`、`LinetypePattern`
 
 ## 背景

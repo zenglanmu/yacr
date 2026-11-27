@@ -275,7 +275,6 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
                     entity_batches.insert(entity.id, start..combined.added.len());
                 }
             }
-            append_guide_batches(&mut cache, database, &stamp, &mut combined, &mut stats)?;
         }
         SpaceSelection::Paper(layout) => {
             let visible = |entity: &cad_db::DbEntity| {
@@ -293,125 +292,6 @@ pub(super) fn build_scene_stats_with_vendor_indexed(
     }
     tally_adjacent_merge_candidates(&combined.added, &mut stats);
     Ok((combined, stats, entity_batches))
-}
-
-/// Append the document's construction guides as solid line segments.
-///
-/// Guides are not entities: they have no layer, draw order or export form. The
-/// scene carries them as ordinary line batches with a synthetic source ref, so
-/// they draw without entering picking or the entity index. The render batch has
-/// no infinite-line primitive, so each guide is clipped to a documented finite
-/// extent derived from the drawing's bounds (ten diagonals, at least 1000 model
-/// units); this is the honest bound, not a claim of infinity.
-fn append_guide_batches(
-    cache: &mut SceneCache,
-    database: &DrawingDatabase,
-    stamp: &TaskStamp,
-    combined: &mut SceneDelta,
-    stats: &mut SceneAssemblyStats,
-) -> CadResult<()> {
-    let guides = database.guides();
-    if guides.is_empty() {
-        return Ok(());
-    }
-    let extent = database
-        .bounds()
-        .map(|(min, max)| {
-            let dx = max.x - min.x;
-            let dy = max.y - min.y;
-            let dz = max.z - min.z;
-            (dx.hypot(dy).hypot(dz) * 10.0).max(1000.0)
-        })
-        .unwrap_or(1000.0);
-    let mut representation =
-        cad_representation::DisplayRepresentation::empty(Completeness::Complete);
-    for (index, guide) in guides.guides().iter().enumerate() {
-        let (points, pattern) = match guide {
-            cad_domain::guide::Guide::Line(line) => {
-                let start = Point3 {
-                    x: line.point.x - line.direction.x * extent,
-                    y: line.point.y - line.direction.y * extent,
-                    z: line.point.z - line.direction.z * extent,
-                };
-                let end = Point3 {
-                    x: line.point.x + line.direction.x * extent,
-                    y: line.point.y + line.direction.y * extent,
-                    z: line.point.z + line.direction.z * extent,
-                };
-                // Dash period follows the bounded guide extent (about 1/100 of
-                // its half-length, at least 5 model units), so a huge model does
-                // not turn one guide into tens of thousands of segments.
-                let period = (extent / 100.0).max(5.0);
-                let pattern = LinetypePattern::from_elements([period * 0.6, -period * 0.4]);
-                let (runs, _fallback) =
-                    cad_representation::subdivide_dashes(&[start, end], &pattern, 1.0, 1.0);
-                let mut points = Vec::new();
-                for run in runs {
-                    for pair in run.windows(2) {
-                        points.push(pair[0]);
-                        points.push(pair[1]);
-                    }
-                }
-                (points, pattern)
-            }
-            cad_domain::guide::Guide::Point(mark) => {
-                // A point guide is a three-axis cross; the render batch has no
-                // point primitive, so the marker is three short line segments.
-                let cross = (extent * 0.005).clamp(1.0, 25.0);
-                let p = mark.point;
-                let mut points = Vec::with_capacity(6);
-                for axis in 0..3 {
-                    let mut a = p;
-                    let mut b = p;
-                    match axis {
-                        0 => {
-                            a.x -= cross;
-                            b.x += cross;
-                        }
-                        1 => {
-                            a.y -= cross;
-                            b.y += cross;
-                        }
-                        _ => {
-                            a.z -= cross;
-                            b.z += cross;
-                        }
-                    }
-                    points.push(a);
-                    points.push(b);
-                }
-                (points, LinetypePattern::continuous())
-            }
-        };
-        representation.fragments.push(DisplayFragment {
-            source: SelectionRef {
-                document: stamp.document,
-                // Guides are not pick targets; 0 is never an allocated entity id.
-                entity: EntityId(0),
-                instance: InstancePath::default(),
-                sub_element: None,
-            },
-            geometry_source: GeometrySource::Analytic,
-            precision: Precision::Analytic,
-            alpha: 1.0,
-            color: [0.20, 0.45, 0.85],
-            color_unresolved: false,
-            lineweight: 0.0,
-            lineweight_unresolved: true,
-            linetype: pattern,
-            linetype_unresolved: false,
-            linetype_scale: 1.0,
-            draw_order: -1 - index as i64,
-            primitive: DisplayPrimitive::LineSegments(Arc::from(points)),
-        });
-    }
-    stats.fragments_in += representation.fragments.len();
-    let delta = cache.build_compact(&representation, stamp.clone())?;
-    stats.batches_out += delta.added.len() + delta.images.len() + delta.masks.len();
-    combined.added.extend(delta.added);
-    combined.images.extend(delta.images);
-    combined.masks.extend(delta.masks);
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
