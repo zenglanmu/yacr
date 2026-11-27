@@ -50,7 +50,7 @@ const GETTING_STARTED = group('concept.getting_started', 'concept.toolbar.gettin
 
 const DRAWING = group('concept.drawing', 'concept.toolbar.drawing', [
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE' },
-  pending('FREEHAND', 'concept.tool.freehand', 'spline'),
+  { id: 'FREEHAND', labelKey: 'concept.tool.freehand', icon: 'spline', command: 'SKETCH', hintKey: 'concept.tool.freehand.hint' },
   { id: 'RECTANG', labelKey: 'draw.kind.rectang', icon: 'rectang', command: 'RECTANG' },
   { id: 'RECTANGROTATED', labelKey: 'concept.tool.rotated_rectangle', icon: 'rectang', command: 'RECTANGROTATED', hintKey: 'draw.kind.rectangrotated.hint' },
   CIRCLE_ITEM,

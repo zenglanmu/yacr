@@ -269,6 +269,13 @@ pub(crate) struct NavInner {
     /// Mutually exclusive with [`Self::box_gesture`]: a lasso press belongs to the
     /// active capture, so it never also starts a selection box.
     pub lasso_gesture: RefCell<Option<LassoGesture>>,
+    /// The live FREEHAND stroke, if the freehand tool owns the contact.
+    ///
+    /// Mutually exclusive with [`Self::box_gesture`] and
+    /// [`Self::lasso_gesture`]: the press claims the contact for the stroke, so
+    /// no selection box, lasso or pan competes for it. The same sampled-path type
+    /// and decimation as the lasso, because both are freehand traces.
+    pub freehand_gesture: RefCell<Option<LassoGesture>>,
     /// The live grip drag, if a press landed on a handle of the selection.
     ///
     /// Armed at press time by the single gesture arbiter (`pointer_down`), so no
@@ -310,6 +317,7 @@ impl Default for NavInner {
             press_modifiers: Cell::new(None),
             box_gesture: RefCell::new(None),
             lasso_gesture: RefCell::new(None),
+            freehand_gesture: RefCell::new(None),
             grip_drag: RefCell::new(None),
             suppress_click: Cell::new(false),
             zoom_window_armed: Cell::new(false),

@@ -132,6 +132,12 @@ impl HostCore {
             // press on a grip must stay a pan.
             if button == Some(PointerButton::Primary) {
                 self.arm_grip_at(point);
+                // The FREEHAND tool's stroke claims the contact here, before any
+                // box/pan decision: the press starts the trace and the release
+                // hands it to the capture.
+                if self.freehand_waiting() {
+                    *self.navigation.freehand_gesture.borrow_mut() = Some(LassoGesture::new(point));
+                }
                 // A STRETCH crossing-window capture in lasso mode is waiting for
                 // its ring: the press starts the freehand trace (the release hands
                 // it over), so no box selection and no pan competes for it. This is
@@ -147,6 +153,7 @@ impl HostCore {
             // rubber band or a geometry edit.
             self.clear_box_gesture();
             self.clear_lasso_gesture();
+            self.clear_freehand_gesture();
             self.cancel_grip_drag();
             self.disarm_zoom_window();
             self.controller.borrow_mut().cancel_tool()?;
@@ -180,6 +187,7 @@ impl HostCore {
         if contacts >= 2 {
             self.clear_box_gesture();
             self.clear_lasso_gesture();
+            self.clear_freehand_gesture();
             self.navigation.navigating.set(true);
             if let Some(last) = self.navigation.nav_last.get() {
                 let delta = [point[0] - last[0], point[1] - last[1]];
@@ -188,6 +196,14 @@ impl HostCore {
                 }
             }
             self.navigation.nav_last.set(Some(point));
+            return Ok(());
+        }
+        // A live FREEHAND stroke owns the single contact for its whole life: it
+        // belongs to the active freehand tool, so it is serviced before the
+        // capture early return. Only the path grows; nothing is committed until
+        // the release.
+        if self.navigation.freehand_gesture.borrow().is_some() {
+            self.track_freehand(point);
             return Ok(());
         }
         // A live lasso owns the single contact for its whole life: it belongs to
@@ -310,9 +326,16 @@ impl HostCore {
         self.navigation.nav_last.set(None);
         let box_gesture = self.navigation.box_gesture.borrow_mut().take();
         let lasso_gesture = self.navigation.lasso_gesture.borrow_mut().take();
+        let freehand_gesture = self.navigation.freehand_gesture.borrow_mut().take();
         self.navigation.button.set(None);
         self.navigation.contact_kind.set(None);
         self.navigation.press_modifiers.set(None);
+        // A release that ends a live FREEHAND stroke hands the sampled path to
+        // the active capture and confirms it as one `SKETCH` write. It is not a
+        // click, so nothing selects and no box is finished.
+        if let Some(stroke) = freehand_gesture {
+            return self.finish_freehand_gesture(stroke);
+        }
         // A release that ends a live lasso hands its traced ring to the active
         // STRETCH capture (which then asks for the base and displacement points).
         // It is not a click, so nothing selects and no box is finished.
@@ -353,8 +376,10 @@ impl HostCore {
         self.clear_hover();
         self.clear_box_gesture();
         // A live lasso is dropped, never handed over: nothing was captured, so the
-        // STRETCH capture keeps waiting for its window (a pure state drop).
+        // STRETCH capture keeps waiting for its window (a pure state drop). The
+        // same rule applies to a live freehand stroke.
         self.clear_lasso_gesture();
+        self.clear_freehand_gesture();
         // An armed grip drag is dropped, not committed: nothing was written
         // before the release, so this is a pure state drop.
         self.cancel_grip_drag();
@@ -595,6 +620,9 @@ impl HostCore {
         // A live STRETCH lasso is the same transient gesture input: its traced path
         // is the CROSSING boundary the user is drawing, so it goes through the one
         // rubber-band overlay rather than a second preview channel.
+        if let Some(preview) = self.freehand_preview() {
+            return Some(preview);
+        }
         if let Some(preview) = self.lasso_preview() {
             return Some(preview);
         }

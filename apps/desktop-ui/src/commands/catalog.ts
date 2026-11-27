@@ -657,10 +657,10 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VPOINT', labelKey: 'draw.kind.vpoint', icon: 'axes', group: 'view' },
 
   // The 2026-11-07 extras batch. `-PAN`, `REGEN3` and `-LINETYPE` are aliases
-  // of PAN/REGEN/LINETYPE (no rows of their own); SKETCH/MSTRETCH take their
-  // complete input from a host/IPC payload, so the command line only advertises
-  // them. TRACE/MOCORO/VIEWRES/VSCURRENT/LINETYPE have typed grammars in
-  // `gating.ts`.
+  // of PAN/REGEN/LINETYPE (no rows of their own). SKETCH is the Freehand tool:
+  // the bare selector starts its drag capture and the release commits the
+  // sampled stroke. MSTRETCH takes its input from an IPC payload, so the command
+  // line only advertises it; TRACE/MOCORO/VIEWRES/VSCURRENT/LINETYPE are typed.
   { id: 'SKETCH', labelKey: 'draw.kind.sketch', icon: 'spline', group: 'draw' },
   { id: 'TRACE', labelKey: 'draw.kind.trace', icon: 'line', group: 'draw' },
   { id: 'MOCORO', labelKey: 'draw.kind.mocoro', icon: 'copy', group: 'modify' },

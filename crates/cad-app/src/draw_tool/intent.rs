@@ -119,6 +119,10 @@ pub enum DrawIntent {
     /// parameter at creation. See [`DrawToolKind::Polyline`] for the honest
     /// subset.
     Polyline { points: Vec<Point3> },
+    /// FREEHAND: the sampled hand path (at least two points), committed as one
+    /// open polyline through the `SKETCH` command. No smoothing/fitting: the
+    /// polyline is exactly the samples the host gesture kept.
+    Freehand { points: Vec<Point3> },
     /// `WIPEOUT`: insert a closed polygon mask whose **implicit ring** is
     /// `points` (at least three, in capture order).
     ///

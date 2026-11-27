@@ -422,6 +422,13 @@ impl DrawTool {
             DrawToolKind::Polyline => DrawIntent::Polyline {
                 points: self.points.clone(),
             },
+            // FREEHAND: the sampled hand path, in order, committed through the
+            // existing `SKETCH` write. The open-ended capture is refused above
+            // while below the two-point minimum, so the command always receives
+            // a real stroke.
+            DrawToolKind::Freehand => DrawIntent::Freehand {
+                points: self.points.clone(),
+            },
             // WIPEOUT: every captured boundary vertex, in order. The open-ended
             // capture is refused above while below the three-point minimum, so the
             // command layer always receives a real ring; the plane/duplicate/area

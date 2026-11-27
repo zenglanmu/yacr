@@ -45,6 +45,18 @@ impl DrawPreview {
             return "followme: press Enter to sweep the selected profile along the selected path"
                 .to_string();
         }
+        // FREEHAND is a drag, not clicks: the line names the gesture and the
+        // sample count, never "press Enter" (the release confirms).
+        if self.kind == DrawToolKind::Freehand {
+            return if self.points.is_empty() {
+                "freehand: drag to trace a stroke; release to finish".to_string()
+            } else {
+                format!(
+                    "freehand: {} sample(s) captured; release to finish",
+                    self.points.len()
+                )
+            };
+        }
         if self.kind == DrawToolKind::PressPull {
             return if self.picks.is_empty() {
                 "presspull: pick a face on the selected body".to_string()

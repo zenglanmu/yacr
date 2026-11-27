@@ -30,6 +30,16 @@ pub enum DrawToolKind {
     ///   subset, so points carry only the `+Z` the picker produced and are never
     ///   silently reprojected onto another plane.
     Polyline,
+    /// FREEHAND: one open polyline traced by a drag (SketchUp's Freehand).
+    ///
+    /// Capture shape: the press starts the stroke, every pointer move appends a
+    /// sampled world point (the host's freehand gesture owns sampling/decimation)
+    /// and the release confirms; the command is the existing `SKETCH` write, so
+    /// one stroke is one `LWPOLYLINE` in one transaction / one undo step. At least
+    /// two samples are required (a click with no drag is refused by name); there
+    /// is no close, no smoothing and no spline fitting — the polyline is exactly
+    /// the sampled hand path.
+    Freehand,
     /// WIPEOUT: a closed polygon **mask**, captured as an open-ended run of
     /// boundary points (at least three, then Enter).
     ///

@@ -981,3 +981,20 @@ fn measuregeom_options_route_to_the_same_tool_as_their_base_selector() {
     assert!(error.contains("measuregeom.needs_option"), "{error}");
     assert_eq!(bare.snapshot(None, None, 0).tool, None);
 }
+
+#[test]
+fn sketch_selector_starts_the_freehand_capture() {
+    // SKETCH is the admitted selector for Freehand: the router starts the drag
+    // capture (no points yet); the release commits one polyline via that command.
+    let session = fresh_session();
+    assert!(admissible_names().contains(&"SKETCH"));
+    assert_eq!(normalize_command("sketch"), Some(CommandId::Sketch));
+    session.command("SKETCH").expect("SKETCH is routed");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("SKETCH starts a tool");
+    assert_eq!(tool.key, "draw.freehand");
+    assert_eq!(tool.points, 0);
+    assert!(!tool.ready);
+}

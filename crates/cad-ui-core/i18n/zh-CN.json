@@ -3440,6 +3440,7 @@
   "concept.tool.select": "选择",
   "concept.tool.select.hint": "空闲指针：点选、窗口选择或交叉选择。空格回到此状态并取消当前工具。",
   "concept.tool.freehand": "自由绘制",
+  "concept.tool.freehand.hint": "按住拖动自由手绘多段线，松开完成（一条开放多段线、一步撤销）",
   "concept.tool.rotated_rectangle": "旋转矩形",
   "concept.tool.pie": "扇形",
   "concept.tool.arc_2point": "两点圆弧",

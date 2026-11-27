@@ -100,11 +100,8 @@ pub fn draw_preview_overlay(
                 (chain.len() >= 2).then_some(chain)
             })
         }
-        // WIPEOUT: the closed boundary ring — the captured vertices plus the live
-        // cursor as the next tentative vertex, closed back to the first. It falls
-        // back to the rubber-band chain until three vertices are known, so a
-        // degenerate ring is never fabricated; the command re-validates the ring
-        // (plane, duplicates, area) at confirm.
+        // WIPEOUT: the closed ring of captured vertices plus the live cursor,
+        // closed to the first; falls back to the chain below three vertices.
         DrawToolKind::Wipeout => {
             wipeout_points(&preview.points, preview.cursor).or_else(|| {
                 let chain = preview_chain(&preview.points, preview.cursor);
@@ -162,6 +159,9 @@ pub fn draw_preview_overlay(
         | DrawToolKind::XLine
         | DrawToolKind::Ray
         | DrawToolKind::Polyline
+        // FREEHAND: the sampled stroke plus the live cursor (the host gesture also
+        // paints its own trail; neither path fabricates a smoothed curve).
+        | DrawToolKind::Freehand
         | DrawToolKind::Move
         | DrawToolKind::Trim
         // BREAK's first click is an entity pick and its second is a free point;

@@ -44,6 +44,9 @@ pub(crate) fn interaction_request_for(
         }
         CommandId::CreateArc => Some(InteractionRequest::BeginDraw(DrawToolKind::Arc)),
         CommandId::CreatePolyline => Some(InteractionRequest::BeginDraw(DrawToolKind::Polyline)),
+        // SKETCH is the freehand capture: the press starts the stroke, the
+        // release commits it through the same command with the sampled points.
+        CommandId::Sketch => Some(InteractionRequest::BeginDraw(DrawToolKind::Freehand)),
         // WIPEOUT starts the open-ended polygon capture (first point, then every
         // further boundary point, Enter finishes); the command stores one mask.
         CommandId::Wipeout => Some(InteractionRequest::BeginDraw(DrawToolKind::Wipeout)),

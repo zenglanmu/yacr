@@ -31,6 +31,9 @@ impl DrawToolKind {
             Self::CircleDiameter => CommandId::CreateCircleDiameter,
             Self::Arc => CommandId::CreateArc,
             Self::Polyline => CommandId::CreatePolyline,
+            // FREEHAND commits through the existing `SKETCH` write: one open
+            // polyline from the sampled hand path.
+            Self::Freehand => CommandId::Sketch,
             // WIPEOUT stores one `Mask` entity (`AcDbWipeout`).
             Self::Wipeout => CommandId::Wipeout,
             Self::Rectang => CommandId::CreateRectangle,

@@ -91,7 +91,7 @@ const CAMERA_MORE = panel('concept.camera.more', 'concept.section.other_cameras'
 
 const DRAW_LINES = panel('concept.draw.lines', 'concept.section.lines', [
   { id: 'LINE', labelKey: 'draw.kind.line', icon: 'line', command: 'LINE' },
-  pending('FREEHAND', 'concept.tool.freehand', 'spline'),
+  { id: 'FREEHAND', labelKey: 'concept.tool.freehand', icon: 'spline', command: 'SKETCH', hintKey: 'concept.tool.freehand.hint' },
 ]);
 
 const DRAW_SHAPES = panel('concept.draw.shapes', 'concept.section.shapes', [

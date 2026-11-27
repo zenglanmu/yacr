@@ -3440,6 +3440,7 @@
   "concept.tool.select": "Select",
   "concept.tool.select.hint": "Idle pointer: select, window-select or crossing-select. Space returns here and cancels the active tool.",
   "concept.tool.freehand": "Freehand",
+  "concept.tool.freehand.hint": "Drag to trace a freehand polyline; release to finish (one open polyline, one undo step)",
   "concept.tool.rotated_rectangle": "Rotated rectangle",
   "concept.tool.pie": "Pie",
   "concept.tool.arc_2point": "2-point arc",

@@ -30,6 +30,7 @@ mod export_formats;
 mod file_open_save;
 mod follow_me;
 mod fonts;
+mod freehand;
 mod gate;
 mod grid_overlay;
 mod grip_drafting;

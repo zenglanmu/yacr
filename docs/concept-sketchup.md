@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 9 | 13.0% |
-| `pending` | 6 | 8.7% |
+| `partial` | 10 | 14.5% |
+| `pending` | 5 | 7.2% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 63/69 = 91.3% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 64/69 = 92.8% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -51,6 +51,10 @@
   **大纲**（2026-11-27，ADR-0066）：`cad_outliner` 投影分组 / INSERT / 模型空间实体 / 块成员
   （前序扁平 + `depth`，≤1024 行，`total`/`truncated` 诚实），托盘 Outliner 面板本地展开折叠、
   点名称用既有 `cad_select_entities` 选中（分组一次选中全部成员，块成员行不可选）；纯只读。
+  **自由手绘**（2026-11-27，ADR-0067）：`SKETCH` 从裸选择器变成真实拖拽工具——host 按 2 px
+  步长采样（≤1024 点）、松开经 `screen_to_world` 投影后喂给捕获并以既有 `SKETCH` 命令写入一条
+  开放 `LWPOLYLINE`（一次事务/一步撤销）；点击未拖动是 `sketch.too_few_points`，3D 视图是
+  `sketch.requires_plan_view`，两者都不写文档。
   **场景**（2026-11-27，ADR-0063）：`tables/scenes.json`（minor 20）存命名相机/空间/样式快照，
   `SCENE SAVE/RESTORE/LIST/DELETE` 各按一条 revision/一步撤销（RESTORE 是会话应用，记
   `ZOOM PREVIOUS`），托盘 Scenes 面板通过 `cad_scenes` host read 列表并 dispatch 恢复/保存/
@@ -96,7 +100,7 @@
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
 | Line | `LINE` | full | 同上 |
-| Freehand | `FREEHAND` | pending | 没有自由手绘命令（`REVCLOUD` 的 Freehand 是另一语义） |
+| Freehand | `SKETCH` | partial | 真实拖拽工具（概念域工具栏/菜单不再 pending）+ `SKETCH` 命令：按下开始采样、移动追加（2 px 步长、1024 上限）、松开提交**一条开放 LWPOLYLINE**（一次事务/一步撤销，不闭合/不拟合）；点击未拖动 `sketch.too_few_points`、3D 视图 `sketch.requires_plan_view`；无压感/曲线拟合/自动切面 |
 | Rectangle | `RECTANG` | full | |
 | Rotated Rectangle | `RECTANGROTATED` | full | 三次点击：角点、第一边端点、宽度点；在三点确定的平面上生成一个闭合四顶点 `LWPOLYLINE`（可直接推拉/跟随） |
 | Circle | `CIRCLE` | full | |

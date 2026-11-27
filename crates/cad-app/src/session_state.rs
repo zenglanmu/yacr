@@ -689,6 +689,24 @@ impl SessionState {
     /// grid or onto an orthographic axis would report a point the user never
     /// picked. This is our declared rule, recorded in
     /// [`crate::point_report`]'s module docs.
+    /// Push one **raw** freehand sample into the active FREEHAND capture.
+    ///
+    /// The stroke is the hand's own path: unlike [`Self::capture_point_with_snap`]
+    /// this applies no snap candidate and no ortho constraint (either would turn a
+    /// freehand stroke into a staircase), and it never resolves a pick. A capture
+    /// of any other kind refuses by name, so a stray sample can never feed an
+    /// unrelated tool.
+    pub fn capture_freehand_point(&mut self, point: Point3) -> CadResult<()> {
+        match &mut self.tool {
+            ToolState::Drawing(capture) if capture.tool.kind() == DrawToolKind::Freehand => {
+                capture.tool.push_point(point)
+            }
+            _ => Err(CadError::InvalidInput(
+                "no freehand capture is active".into(),
+            )),
+        }
+    }
+
     pub fn capture_point_with_snap(
         &mut self,
         point: Point3,

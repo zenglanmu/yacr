@@ -6,6 +6,7 @@
 use super::*;
 
 mod face_tool;
+mod freehand;
 mod grip_drag;
 mod hover;
 mod interaction;

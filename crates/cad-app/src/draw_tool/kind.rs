@@ -88,7 +88,7 @@ impl DrawToolKind {
     /// Every kind, in the order the UI selector presents them. This is the one
     /// authoritative ordering; the UI shell mirrors it instead of keeping a
     /// second hand-written list that can drift.
-    pub const ALL: [DrawToolKind; 64] = [
+    pub const ALL: [DrawToolKind; 65] = [
         DrawToolKind::Line,
         DrawToolKind::Circle,
         DrawToolKind::Arc,
@@ -203,6 +203,9 @@ impl DrawToolKind {
         // index stability.
         DrawToolKind::RectangRotated,
         DrawToolKind::Pie,
+        // FREEHAND is appended for index stability (the shell mirrors `ALL` by
+        // index); its capture is the drag stroke committed through `SKETCH`.
+        DrawToolKind::Freehand,
     ];
 
     /// Stable, locale-independent machine key (never translated).
@@ -212,6 +215,7 @@ impl DrawToolKind {
             Self::Circle => "circle",
             Self::Arc => "arc",
             Self::Polyline => "polyline",
+            Self::Freehand => "freehand",
             Self::Rectang => "rectang",
             Self::Ellipse => "ellipse",
             Self::Polygon => "polygon",
@@ -283,6 +287,7 @@ impl DrawToolKind {
             "circle" => Some(Self::Circle),
             "arc" => Some(Self::Arc),
             "polyline" => Some(Self::Polyline),
+            "freehand" => Some(Self::Freehand),
             "rectang" => Some(Self::Rectang),
             "ellipse" => Some(Self::Ellipse),
             "polygon" => Some(Self::Polygon),
@@ -375,6 +380,8 @@ impl DrawToolKind {
             Self::Circle => "圆",
             Self::Arc => "圆弧",
             Self::Polyline => "多段线",
+            // FREEHAND uses the ASCII fallback like POINT/SPLINE (no new CJK).
+            Self::Freehand => "FREEHAND",
             Self::Rectang => "矩形",
             Self::Ellipse => "椭圆",
             Self::Polygon => "正多边形",
@@ -517,6 +524,7 @@ impl DrawToolKind {
             // finished with Enter. WIPEOUT is the same open-ended shape with the
             // three-vertex minimum a real closed ring needs.
             Self::Polyline => PointArity::AtLeast(2),
+            Self::Freehand => PointArity::AtLeast(2),
             Self::Spline => PointArity::AtLeast(4),
             Self::Wipeout => PointArity::AtLeast(3),
             // DIMBASELINE/DIMCONTINUE: the base **pick** consumes the first

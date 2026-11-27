@@ -151,3 +151,36 @@ fn open_ended_capture_refuses_past_the_hard_cap_explicitly() {
     assert_eq!(tool.points().len(), MAX_OPEN_CAPTURE_POINTS);
     assert!(tool.is_ready());
 }
+
+#[test]
+fn freehand_samplers_accumulate_into_one_open_stroke_intent() {
+    let mut tool = DrawTool::new(DrawToolKind::Freehand, 0);
+    assert_eq!(DrawToolKind::Freehand.arity(), PointArity::AtLeast(2));
+    assert_eq!(DrawToolKind::Freehand.command(), crate::CommandId::Sketch);
+    assert!(!tool.is_ready());
+    assert!(matches!(tool.intent(), Err(CadError::InvalidInput(_))));
+    assert_eq!(
+        tool.preview().status_line(),
+        "freehand: drag to trace a stroke; release to finish"
+    );
+
+    // The host feeds one sample per pointer move; two samples are the minimum.
+    tool.push_point(p(0.0, 0.0)).unwrap();
+    assert!(!tool.is_ready());
+    tool.push_point(p(1.0, 0.5)).unwrap();
+    assert!(tool.is_ready());
+    tool.push_point(p(2.0, 0.25)).unwrap();
+    assert_eq!(
+        tool.preview().status_line(),
+        "freehand: 3 sample(s) captured; release to finish"
+    );
+    assert_eq!(
+        tool.intent().unwrap(),
+        DrawIntent::Freehand {
+            points: vec![p(0.0, 0.0), p(1.0, 0.5), p(2.0, 0.25)]
+        }
+    );
+    // The stroke is open and straight-segment: no close flag and no bulges enter
+    // the intent (the `SKETCH` command derives both).
+    assert!(tool.preview().can_confirm());
+}

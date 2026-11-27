@@ -12,6 +12,15 @@
 use super::*;
 
 impl HostController {
+    /// Capture one **raw** freehand sample into the active FREEHAND capture.
+    ///
+    /// The host's stroke gesture calls this per sampled pointer position; no snap
+    /// or ortho constraint applies (the stroke is the hand's path), and a capture
+    /// of another kind refuses by name.
+    pub fn capture_freehand_point(&mut self, point: Point3) -> CadResult<()> {
+        self.session.capture_freehand_point(point)
+    }
+
     /// Draw a LINE through two world points in one transaction (spec F-EDIT).
     pub fn create_line(&mut self, start: Point3, end: Point3) -> CadResult<CommandOutcome> {
         self.execute(Command {

@@ -419,6 +419,7 @@ impl HostCore {
                 // write.
                 let grip_before = self.grip_drag_active();
                 let lasso_before = self.navigation.lasso_gesture.borrow().is_some();
+                let freehand_before = self.navigation.freehand_gesture.borrow().is_some();
                 if let Err(error) = self.pointer(id, kind, phase, button, position, modifiers) {
                     // A stale/invalid coordinate refuses the request before its
                     // phase runs; a refusal of an `Up`/`Cancel` must still clear
@@ -434,7 +435,11 @@ impl HostCore {
                 // waiting state a cancel restores) and the dispatch keeps its
                 // full rebuild. A grip drag stays overlay-only: the moved marker is
                 // itself the preview and no camera or tool state changed.
-                if lasso_before || self.navigation.lasso_gesture.borrow().is_some() {
+                if freehand_before
+                    || self.navigation.freehand_gesture.borrow().is_some()
+                    || lasso_before
+                    || self.navigation.lasso_gesture.borrow().is_some()
+                {
                     scope = DirtyScope::Full;
                 } else if grip_before || self.grip_drag_active() {
                     scope = DirtyScope::Overlay;
@@ -608,7 +613,7 @@ impl HostCore {
         Ok(true)
     }
 
-    fn confirm_tool(&self) -> CadResult<InteractionOutcome> {
+    pub(super) fn confirm_tool(&self) -> CadResult<InteractionOutcome> {
         // HostController remains the sole transaction/history funnel. Draw
         // capture is cleared only after successful confirmation.
         let measuring = matches!(
