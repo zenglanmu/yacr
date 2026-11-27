@@ -226,8 +226,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   ADR-0053 应用域 `document.json` `application_domain` → 13；ADR-0055 块属性（14）、`Text.mirrored`（15）、ADR-0054 二维约束（16，取 mirrored text 之后的下一档）、GROUP 持久化（17）、VIEW 持久化（18）、文档材质 `tables/materials.json`（19，ADR-0062）、场景 `tables/scenes.json`（20，ADR-0063）、per-entity 柔化角度 `render_attributes.soften`（21，ADR-0064）、文档显示记录 `tables/display.json`（22，ADR-0065：Shadows 太阳 + Fog）、场景可见标签快照
   （`tables/scenes.json` 行的 `tags`，23，ADR-0078）、场景阴影/雾快照（同行 `display`，24，
   ADR-0080）、逐面材质涂刷（`tables/materials.json` 行的 `faces`，25，ADR-0081）、构造参考线
-  `tables/guides.json`（26，ADR-0084）、point 参考线（同行 point-only 行，27，ADR-0085）；写入按文档取
-  **4/5/7/8/9/10/11/12/13/14/15/16/17/18/19/20/21/22/23/24/25/26/27**，未产生的档位不抬高普通文档）。条目压缩自 ADR-0046 起是
+  `tables/guides.json`（26，ADR-0084）、point 参考线（同行 point-only 行，27，ADR-0085）、场景显式柔化快照（`tables/scenes.json`
+  行的 `soften`，28，ADR-0090）；写入按文档取
+  **4/5/7/8/9/10/11/12/13/14/15/16/17/18/19/20/21/22/23/24/25/26/27/28**，未产生的档位不抬高普通文档）。条目压缩自 ADR-0046 起是
   标准 zstd 帧（zip `Stored` + `structured-zstd =0.4.3`，level 6），`FORMAT_READ/WRITE = 2`；
   `read != 2` 的归档以 `unsupported_version` 拒绝，`sha256_c`/`len_c` 已写入并在解压前校验。`PARAM` 的 create/delete/
   rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /

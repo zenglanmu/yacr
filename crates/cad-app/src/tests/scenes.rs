@@ -389,3 +389,86 @@ fn a_viewer_restore_with_a_differing_display_record_changes_nothing() {
     assert_eq!(camera_eye(&app), camera, "the camera is untouched");
     assert_eq!(revision(&app), before, "nothing was written");
 }
+
+fn soften(
+    app: &mut Application,
+    session: &mut SessionState,
+    angle: f64,
+) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(CommandId::SoftenEdges, CommandPayload::SoftenEdges(angle)),
+    )
+}
+
+fn soften_of(app: &Application, id: EntityId) -> Option<f64> {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .entity_render_attributes(id)
+        .soften
+}
+
+#[test]
+fn a_save_captures_explicit_soften_and_restore_reapplies_it() {
+    let (mut app, mut session) = super::soften::app_with(vec![super::soften::body(7)]);
+    super::soften::select(&mut app, &mut session, &[7]);
+    soften(&mut app, &mut session, 30.0).expect("soften 30");
+    scene(&mut app, &mut session, SceneCommand::Save("Soft".into())).expect("save");
+    let table = scenes(&app);
+    let saved = table.resolve("Soft").expect("the row");
+    assert_eq!(
+        saved.soften,
+        Some(vec![cad_domain::scene::SceneSoften {
+            entity: EntityId(7),
+            angle: 30.0
+        }])
+    );
+
+    soften(&mut app, &mut session, 45.0).expect("soften 45");
+    let before = revision(&app);
+    let depth = app.history[&DocumentId(1)].undo_depth();
+    scene(&mut app, &mut session, SceneCommand::Restore("Soft".into())).expect("restore");
+    assert_eq!(soften_of(&app, EntityId(7)), Some(30.0));
+    assert_eq!(revision(&app), Revision(before.0 + 1), "one soften write");
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), depth + 1);
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    assert_eq!(soften_of(&app, EntityId(7)), Some(45.0));
+}
+
+#[test]
+fn a_viewer_restore_with_a_different_soften_value_is_refused() {
+    let (mut app, mut session) = super::soften::app_with(vec![super::soften::body(7)]);
+    super::soften::select(&mut app, &mut session, &[7]);
+    soften(&mut app, &mut session, 30.0).expect("soften 30");
+    scene(&mut app, &mut session, SceneCommand::Save("Soft".into())).expect("save");
+    soften(&mut app, &mut session, 45.0).expect("soften 45");
+    let before = revision(&app);
+    session.switch_mode(AppMode::Viewer).expect("Viewer");
+    assert!(matches!(
+        scene(&mut app, &mut session, SceneCommand::Restore("Soft".into())).unwrap_err(),
+        CadError::PermissionDenied
+    ));
+    assert_eq!(soften_of(&app, EntityId(7)), Some(45.0));
+    assert_eq!(revision(&app), before);
+}
+
+#[test]
+fn a_scene_without_a_soften_snapshot_does_not_touch_soften() {
+    let (mut app, mut session) = super::soften::app_with(vec![super::soften::body(7)]);
+    super::soften::select(&mut app, &mut session, &[7]);
+    scene(&mut app, &mut session, SceneCommand::Save("Plain".into())).expect("save");
+    assert!(scenes(&app).resolve("Plain").expect("row").soften.is_none());
+    soften(&mut app, &mut session, 45.0).expect("soften 45");
+    scene(
+        &mut app,
+        &mut session,
+        SceneCommand::Restore("Plain".into()),
+    )
+    .expect("restore");
+    assert_eq!(
+        soften_of(&app, EntityId(7)),
+        Some(45.0),
+        "an old scene does not clear a later soften"
+    );
+}

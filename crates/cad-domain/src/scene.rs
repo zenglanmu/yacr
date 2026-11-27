@@ -40,12 +40,16 @@ use serde_json::{Map, Value};
 
 use crate::display::DisplaySettings;
 use crate::view::{NamedView, NamedViewError};
+use crate::EntityId;
 
 /// How many scenes one document retains.
 pub const SCENE_CAP: usize = 32;
 
 /// How many tag rows one scene may capture.
 pub const SCENE_TAG_CAP: usize = 1024;
+
+/// How many per-entity soften values one scene may capture.
+pub const SCENE_SOFTEN_CAP: usize = 1024;
 
 /// The longest captured tag name (layer names are short in practice).
 pub const SCENE_TAG_NAME_MAX_CHARS: usize = 255;
@@ -71,6 +75,8 @@ pub mod markers {
     pub const SCENE_TAGS_INVALID: &str = "scene.tags_invalid";
     /// The captured Shadows/Fog record is malformed or out of range.
     pub const SCENE_DISPLAY_INVALID: &str = "scene.display_invalid";
+    /// The captured soften snapshot is malformed, duplicated or over budget.
+    pub const SCENE_SOFTEN_INVALID: &str = "scene.soften_invalid";
 }
 
 /// The visual style a scene restores.
@@ -137,6 +143,19 @@ impl From<NamedViewError> for SceneError {
     }
 }
 
+/// One explicit per-entity soften angle captured with a scene.
+///
+/// Only entities with an **explicit** `render_attributes.soften` override are
+/// captured; an entity without one is left untouched by restore (the bounded
+/// row cannot record every body in a large document).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneSoften {
+    /// The entity whose display attribute was captured.
+    pub entity: EntityId,
+    /// Degrees in `0..=180`.
+    pub angle: f64,
+}
+
 /// One tag/layer visibility captured with a scene.
 ///
 /// The name is the layer's own name (the stable user-facing identity); restore
@@ -163,6 +182,10 @@ pub struct Scene {
     /// The document Shadows/Fog record at save time, or `None` for a scene
     /// written before scene display capture (minor 20..23).
     pub display: Option<DisplaySettings>,
+    /// Explicit per-entity soften angles at save time, or `None` for a scene
+    /// written before soften capture (minor 20..27). An empty capture is stored
+    /// as `None` so a scene with no explicit soften keeps the lower tier.
+    pub soften: Option<Vec<SceneSoften>>,
 }
 
 impl Scene {
@@ -176,6 +199,7 @@ impl Scene {
             style: SceneVisualStyle::default(),
             tags: None,
             display: None,
+            soften: None,
         }
     }
 
@@ -199,6 +223,42 @@ impl Scene {
             display.validate().map_err(|error| {
                 SceneError::Invalid(markers::SCENE_DISPLAY_INVALID, error.to_string())
             })?;
+        }
+        if let Some(soften) = &self.soften {
+            if soften.len() > SCENE_SOFTEN_CAP {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_SOFTEN_INVALID,
+                    format!(
+                        "soften: {} rows, over the {SCENE_SOFTEN_CAP}-row budget",
+                        soften.len()
+                    ),
+                ));
+            }
+            let mut seen = Vec::with_capacity(soften.len());
+            for entry in soften {
+                if entry.entity.0 == 0 || u64::try_from(entry.entity.0).is_err() {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_SOFTEN_INVALID,
+                        format!("soften: entity {} is not a persistable id", entry.entity.0),
+                    ));
+                }
+                if !entry.angle.is_finite() || !(0.0..=180.0).contains(&entry.angle) {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_SOFTEN_INVALID,
+                        format!(
+                            "soften: entity {} angle {} is not in 0..=180",
+                            entry.entity.0, entry.angle
+                        ),
+                    ));
+                }
+                if seen.contains(&entry.entity) {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_SOFTEN_INVALID,
+                        format!("soften: entity {} appears twice", entry.entity.0),
+                    ));
+                }
+                seen.push(entry.entity);
+            }
         }
         if let Some(tags) = &self.tags {
             if tags.len() > SCENE_TAG_CAP {
@@ -276,6 +336,23 @@ impl Scene {
         }
         if let Some(display) = &self.display {
             row.insert("display".to_string(), display.to_json());
+        }
+        if let Some(soften) = &self.soften {
+            if !soften.is_empty() {
+                let rows = soften
+                    .iter()
+                    .map(|entry| {
+                        let mut row = Map::new();
+                        row.insert(
+                            "entity".to_string(),
+                            Value::from(u64::try_from(entry.entity.0).unwrap_or(0)),
+                        );
+                        row.insert("angle".to_string(), Value::from(entry.angle));
+                        Value::Object(row)
+                    })
+                    .collect();
+                row.insert("soften".to_string(), Value::Array(rows));
+            }
         }
         Value::Object(row)
     }
@@ -364,12 +441,64 @@ impl Scene {
             })?),
             None => None,
         };
+        let soften = match map.remove("soften") {
+            Some(Value::Array(rows)) => {
+                let mut soften = Vec::with_capacity(rows.len());
+                for (index, row) in rows.iter().enumerate() {
+                    let Value::Object(row) = row else {
+                        return Err(SceneError::Invalid(
+                            markers::SCENE_SOFTEN_INVALID,
+                            format!("soften[{index}]: expected an object"),
+                        ));
+                    };
+                    if row.len() != 2 {
+                        return Err(SceneError::Invalid(
+                            markers::SCENE_SOFTEN_INVALID,
+                            format!("soften[{index}]: expected exactly `entity` and `angle`"),
+                        ));
+                    }
+                    let entity = row
+                        .get("entity")
+                        .and_then(Value::as_u64)
+                        .filter(|raw| *raw > 0)
+                        .ok_or_else(|| {
+                            SceneError::Invalid(
+                                markers::SCENE_SOFTEN_INVALID,
+                                format!("soften[{index}].entity: expected a positive id"),
+                            )
+                        })?;
+                    let angle = row
+                        .get("angle")
+                        .and_then(Value::as_f64)
+                        .filter(|angle| angle.is_finite())
+                        .ok_or_else(|| {
+                            SceneError::Invalid(
+                                markers::SCENE_SOFTEN_INVALID,
+                                format!("soften[{index}].angle: expected a finite number"),
+                            )
+                        })?;
+                    soften.push(SceneSoften {
+                        entity: EntityId(u128::from(entity)),
+                        angle,
+                    });
+                }
+                Some(soften)
+            }
+            Some(_) => {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_SOFTEN_INVALID,
+                    "soften: expected an array".into(),
+                ))
+            }
+            None => None,
+        };
         let view = NamedView::from_json(&Value::Object(map))?;
         let scene = Scene {
             view,
             style,
             tags,
             display,
+            soften,
         };
         scene.validate()?;
         Ok(scene)
@@ -430,6 +559,7 @@ impl SceneTable {
                 style: scene.style,
                 tags: scene.tags,
                 display: scene.display,
+                soften: scene.soften,
             });
             return Ok(true);
         }
@@ -447,6 +577,7 @@ impl SceneTable {
             style: scene.style,
             tags: scene.tags,
             display: scene.display,
+            soften: scene.soften,
         });
         Ok(false)
     }

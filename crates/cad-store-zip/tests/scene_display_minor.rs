@@ -110,6 +110,7 @@ fn scene_row(display: Option<DisplaySettings>) -> Value {
         style: SceneVisualStyle::Shaded,
         tags: None,
         display,
+        soften: None,
     }
     .to_json()
 }
@@ -192,4 +193,27 @@ fn an_out_of_range_display_record_is_a_named_refusal() {
     let error =
         cad_domain::scene::Scene::from_json(&row).expect_err("fog end before start is refused");
     assert_eq!(error.marker(), "scene.display_invalid");
+}
+
+#[test]
+fn a_scene_soften_snapshot_is_written_at_minor_twenty_eight() {
+    let mut snapshot = snapshot(None);
+    let mut row = scene_row(None);
+    row["soften"] = serde_json::json!([{ "entity": 1025, "angle": 30.0 }]);
+    snapshot.tables.set(TableKind::Scenes, vec![row]);
+    let bytes = write_bytes(&snapshot);
+    assert_eq!(minor_of(&bytes), 28, "soften is the minor-28 tier");
+    let loaded = read_bytes(&bytes);
+    assert!(loaded.snapshot.has_scene_soften());
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Scenes)
+        .expect("the scene table");
+    let table = cad_domain::scene::SceneTable::from_json(rows).expect("decode");
+    let scene = table.scenes().next().expect("one scene");
+    let soften = scene.soften.as_ref().expect("captured");
+    assert_eq!(soften.len(), 1);
+    assert_eq!(soften[0].entity.0, 1025);
+    assert!((soften[0].angle - 30.0).abs() < 1e-12);
 }

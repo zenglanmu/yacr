@@ -3,7 +3,8 @@
 //! A scene captures **presentation state**: the camera, 2D/3D mode, saved 2D
 //! camera, work plane and active space (the same payload a named view stores),
 //! the visual-style token this build implements (`WIREFRAME`/`SHADED`), the
-//! **visible tags/layers** at save time and the document **Shadows/Fog record**.
+//! **visible tags/layers** at save time, the document **Shadows/Fog record** and
+//! the explicit per-entity **soften angles**.
 //! Saving and deleting write `tables/scenes.json` as one revision and one undo
 //! step; restoring is a session apply (camera/space/style/tag visibility), exactly
 //! like `VIEW RESTORE`, and records a `ZOOM PREVIOUS` snapshot so `VIEWBACK`
@@ -19,7 +20,7 @@
 //! Viewer-legal.
 
 use super::*;
-use cad_domain::scene::{Scene, SceneTag, SceneVisualStyle};
+use cad_domain::scene::{Scene, SceneSoften, SceneTag, SceneVisualStyle};
 use cad_history::DrawingUndoRecord;
 
 impl Application {
@@ -59,11 +60,13 @@ impl Application {
                     .unwrap_or_default();
                 let tags = capture_visible_tags(self.drawing(command.document)?, session);
                 let display = self.drawing(command.document)?.display_settings();
+                let soften = capture_scene_soften(self.drawing(command.document)?);
                 let planned = self.drawing(command.document)?.plan_save_scene(Scene {
                     view: named,
                     style,
                     tags: Some(tags),
                     display: Some(display),
+                    soften,
                 })?;
                 let Some(planned) = planned else {
                     return Ok(scene_outcome(
@@ -144,7 +147,20 @@ impl Application {
             .is_some_and(|display| display != current_display);
         // The display record is document state. Refuse before touching anything
         // when this session may not write it, instead of a half-applied scene.
-        if display_changed && session.app_mode() == AppMode::Viewer {
+        let drawing = self.drawing(command.document)?;
+        let soften_changes: Vec<(EntityId, f64)> = saved
+            .soften
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter(|entry| drawing.entity(entry.entity).is_some())
+            .filter(|entry| {
+                drawing.entity_render_attributes(entry.entity).soften != Some(entry.angle)
+            })
+            .map(|entry| (entry.entity, entry.angle))
+            .collect();
+        if (display_changed || !soften_changes.is_empty()) && session.app_mode() == AppMode::Viewer
+        {
             return Err(CadError::PermissionDenied);
         }
         let viewport = self
@@ -156,6 +172,9 @@ impl Application {
             ViewSnapshot::capture(viewport) != snapshot || session.active_space != saved.view.space;
         if changed {
             self.push_view_snapshot(&command.viewport)?;
+        }
+        if !soften_changes.is_empty() {
+            self.apply_scene_soften(command.document, &soften_changes, &name)?;
         }
         if display_changed {
             let after = saved.display.expect("display_changed implies a record");
@@ -180,11 +199,12 @@ impl Application {
         } else {
             ""
         };
+        let soften_count = soften_changes.len();
         Ok(scene_outcome(
             "scene.restored",
             format!(
                 "SCENE RESTORE: applied scene `{name}` (camera, mode, work plane, space, \
-                 style {} and {tag_count} tag(s){display_note})",
+                 style {}, {tag_count} tag(s), {soften_count} soften value(s){display_note})",
                 saved.style.token()
             ),
         ))
@@ -287,6 +307,83 @@ fn resolve_layer_by_name<'a>(
         .filter(|layer| layer.name.eq_ignore_ascii_case(name));
     let first = matches.next()?;
     matches.next().is_none().then_some(first)
+}
+
+/// Capture the explicit per-entity soften angles (bounded by the scene codec).
+fn capture_scene_soften(drawing: &cad_db::DrawingDatabase) -> Option<Vec<SceneSoften>> {
+    let mut values: Vec<SceneSoften> = drawing
+        .entities()
+        .filter_map(|entity| {
+            drawing
+                .entity_render_attributes(entity.id)
+                .soften
+                .map(|angle| SceneSoften {
+                    entity: entity.id,
+                    angle,
+                })
+        })
+        .collect();
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by_key(|entry| entry.entity.0);
+    Some(values)
+}
+
+impl Application {
+    /// Apply one scene's explicit soften snapshot as one transaction/undo step.
+    fn apply_scene_soften(
+        &mut self,
+        document: DocumentId,
+        changes: &[(EntityId, f64)],
+        name: &str,
+    ) -> CadResult<()> {
+        let drawing = self.drawing(document)?.clone();
+        let mut candidate = drawing.clone();
+        let transaction = crate::app_drawing::next_transaction_id();
+        let updates: Vec<(EntityId, cad_db::EntityRenderAttributes)> = changes
+            .iter()
+            .map(|(id, angle)| {
+                let mut attributes = candidate.entity_render_attributes(*id);
+                attributes.soften = Some(*angle);
+                (*id, attributes)
+            })
+            .collect();
+        let change_set = {
+            let mut staged = candidate.begin_drawing_transaction("scene soften", transaction)?;
+            for (id, attributes) in updates {
+                staged.update_entity_display(id, attributes)?;
+            }
+            staged.commit()?
+        };
+        let patches: Vec<cad_history::DrawingPatch> = changes
+            .iter()
+            .map(|(id, _)| cad_history::DrawingPatch {
+                id: *id,
+                before: drawing.entity(*id).cloned(),
+                after: candidate.entity(*id).cloned(),
+                before_state: Some(drawing.entity_display_state(*id)),
+                after_state: Some(candidate.entity_display_state(*id)),
+            })
+            .collect();
+        self.publish_candidate(
+            document,
+            candidate,
+            cad_history::DrawingUndoRecord {
+                transaction: change_set.transaction,
+                label: format!("SCENE RESTORE {name} (soften)"),
+                patches,
+                block_patches: Vec::new(),
+                layer_patches: Vec::new(),
+                style_patches: Vec::new(),
+                dim_style_patches: Vec::new(),
+                mleader_style_patches: Vec::new(),
+                layout_patches: Vec::new(),
+                merge_key: None,
+            },
+        )?;
+        Ok(())
+    }
 }
 
 fn checked_scene_name(name: &str) -> CadResult<String> {

@@ -66,6 +66,7 @@ fn scene(name: &str) -> Scene {
         style: SceneVisualStyle::Wireframe,
         tags: None,
         display: None,
+        soften: None,
     }
 }
 

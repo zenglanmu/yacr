@@ -8,7 +8,7 @@ use super::*;
 use cad_db::{DbEntity, DbObject, DrawingDatabaseBuilder, Layer};
 use cad_domain::{Body3d, BodyDisplay, BodyExact, BodyKind, Completeness, Mesh, Precision};
 
-fn body(id: u128) -> DbEntity {
+pub(super) fn body(id: u128) -> DbEntity {
     let corners = [
         Point3 {
             x: 0.0,
@@ -74,7 +74,7 @@ fn body(id: u128) -> DbEntity {
     }
 }
 
-fn app_with(entities: Vec<DbEntity>) -> (Application, SessionState) {
+pub(super) fn app_with(entities: Vec<DbEntity>) -> (Application, SessionState) {
     let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
     builder
         .insert_layer(Layer {
@@ -90,7 +90,7 @@ fn app_with(entities: Vec<DbEntity>) -> (Application, SessionState) {
     (app, session)
 }
 
-fn select(app: &mut Application, session: &mut SessionState, entities: &[u128]) {
+pub(super) fn select(app: &mut Application, session: &mut SessionState, entities: &[u128]) {
     let refs: Vec<SelectionRef> = entities
         .iter()
         .map(|id| SelectionRef {

@@ -509,6 +509,20 @@ impl DocumentSnapshot {
             .is_some_and(|rows| !rows.is_empty())
     }
 
+    /// Whether any scene row captures explicit soften angles (minor 28).
+    ///
+    /// The writer omits an empty capture, so a scene without explicit soften
+    /// keeps the lower tier.
+    pub fn has_scene_soften(&self) -> bool {
+        self.tables.get(TableKind::Scenes).is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row.get("soften")
+                    .and_then(|soften| soften.as_array())
+                    .is_some_and(|soften| !soften.is_empty())
+            })
+        })
+    }
+
     /// Whether any guide row is a **point** marker (minor 27).
     ///
     /// A line row carries `direction`; a point row is just `{point}`. A line-only

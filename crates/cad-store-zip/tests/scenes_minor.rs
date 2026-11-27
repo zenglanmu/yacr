@@ -95,6 +95,7 @@ fn scene_row() -> Value {
         style: SceneVisualStyle::Shaded,
         tags: None,
         display: None,
+        soften: None,
     }
     .to_json()
 }
