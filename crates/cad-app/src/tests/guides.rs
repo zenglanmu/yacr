@@ -52,7 +52,9 @@ fn dist_guide_writes_a_line_guide_and_the_measurement_in_one_command() {
     );
     let table = guides(&app);
     assert_eq!(table.len(), 1);
-    let guide = table.guides()[0];
+    let cad_domain::guide::Guide::Line(guide) = table.guides()[0] else {
+        panic!("DIST GUIDE writes a line");
+    };
     assert_eq!(guide.point, point(0.0, 0.0));
     assert!((guide.direction.x - 2.0 / 5.0_f64.sqrt()).abs() < 1e-9);
     assert!((guide.direction.y - 1.0 / 5.0_f64.sqrt()).abs() < 1e-9);
@@ -79,7 +81,9 @@ fn protractor_guide_follows_the_second_ray() {
         vec![point(1.0, 1.0), point(3.0, 1.0), point(1.0, 4.0)],
     )
     .expect("the three points complete");
-    let guide = guides(&app).guides()[0];
+    let cad_domain::guide::Guide::Line(guide) = guides(&app).guides()[0] else {
+        panic!("PROTRACTOR GUIDE writes a line");
+    };
     assert_eq!(guide.point, point(1.0, 1.0));
     assert!((guide.direction.x).abs() < 1e-9, "along +Y only");
     assert!((guide.direction.y - 1.0).abs() < 1e-9);
@@ -140,4 +144,36 @@ fn guide_modes_and_clear_are_refused_in_viewer_mode() {
         guide_command(&mut app, &mut session, GuideCommand::Clear).unwrap_err(),
         CadError::PermissionDenied
     ));
+}
+
+#[test]
+fn guide_point_creates_a_point_marker_and_delete_removes_one_row() {
+    let (mut app, mut session) = application_with_document();
+    guide_command(&mut app, &mut session, GuideCommand::Point(point(4.0, 5.0))).expect("point");
+    let table = guides(&app);
+    assert_eq!(table.len(), 1);
+    let cad_domain::guide::Guide::Point(mark) = table.guides()[0] else {
+        panic!("GUIDE POINT writes a point row");
+    };
+    assert_eq!(mark.point, point(4.0, 5.0));
+
+    let before = app.workspace.documents[&DocumentId(1)].drawing.revision();
+    guide_command(&mut app, &mut session, GuideCommand::Delete(1)).expect("delete");
+    assert!(guides(&app).is_empty());
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].drawing.revision(),
+        Revision(before.0 + 1)
+    );
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    assert_eq!(guides(&app).len(), 1, "undo restores the deleted point");
+
+    let text = match guide_command(&mut app, &mut session, GuideCommand::Delete(9)) {
+        Err(error) => match error {
+            CadError::InvalidInput(text) => text,
+            other => panic!("expected a named refusal, got {other:?}"),
+        },
+        Ok(_) => panic!("out-of-range delete must be refused"),
+    };
+    assert!(text.starts_with("guide.unknown_index:"), "{text}");
 }

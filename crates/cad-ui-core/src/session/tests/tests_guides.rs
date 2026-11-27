@@ -43,10 +43,28 @@ fn protractor_guide_starts_the_protractor_capture() {
 fn guide_list_and_clear_are_the_only_management_forms() {
     assert_eq!(parse_guide_argument("list"), Some(GuideArgument::List));
     assert_eq!(parse_guide_argument("CLEAR"), Some(GuideArgument::Clear));
+    assert_eq!(
+        parse_guide_argument("DELETE 2"),
+        Some(GuideArgument::Delete(2))
+    );
+    match parse_guide_argument("POINT 1 2 3") {
+        Some(GuideArgument::Point(point)) => {
+            assert_eq!((point.x, point.y, point.z), (1.0, 2.0, 3.0));
+        }
+        other => panic!("expected a point, got {other:?}"),
+    }
     assert_eq!(parse_guide_argument("DELETE"), None);
+    assert_eq!(parse_guide_argument("DELETE 0"), None);
+    assert_eq!(parse_guide_argument("POINT 1 2"), None);
+    assert_eq!(parse_guide_argument("POINT 1 NaN 3"), None);
 
     let session = fresh_session();
-    for line in ["GUIDE DELETE", "GUIDE CLEAR NOW"] {
+    for line in [
+        "GUIDE DELETE",
+        "GUIDE DELETE 0",
+        "GUIDE CLEAR NOW",
+        "GUIDE POINT 1 2",
+    ] {
         let text = match session.command(line) {
             Err(text) => text,
             Ok(()) => panic!("{line} must be refused"),

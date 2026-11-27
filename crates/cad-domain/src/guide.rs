@@ -93,19 +93,9 @@ impl GuideLine {
 
     /// Encode one row.
     pub fn to_json(&self) -> Value {
-        let point = Map::from_iter([
-            ("x".to_string(), Value::from(self.point.x)),
-            ("y".to_string(), Value::from(self.point.y)),
-            ("z".to_string(), Value::from(self.point.z)),
-        ]);
-        let direction = Map::from_iter([
-            ("x".to_string(), Value::from(self.direction.x)),
-            ("y".to_string(), Value::from(self.direction.y)),
-            ("z".to_string(), Value::from(self.direction.z)),
-        ]);
         let mut row = Map::new();
-        row.insert("point".into(), Value::Object(point));
-        row.insert("direction".into(), Value::Object(direction));
+        row.insert("point".into(), encode_point(self.point));
+        row.insert("direction".into(), encode_point(self.direction));
         Value::Object(row)
     }
 
@@ -130,6 +120,96 @@ impl GuideLine {
         })?;
         guide.validate()?;
         Ok(guide)
+    }
+}
+
+/// One construction **point** guide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuidePoint {
+    /// The marked world point.
+    pub point: Point3,
+}
+
+impl GuidePoint {
+    /// A point guide; `None` for non-finite coordinates.
+    pub fn new(point: Point3) -> Option<Self> {
+        finite(point).then_some(GuidePoint { point })
+    }
+
+    /// The row's validation point.
+    pub fn validate(&self) -> Result<(), GuideError> {
+        if !finite(self.point) {
+            return Err(GuideError::Invalid(
+                markers::GUIDE_INVALID,
+                "a guide point needs finite coordinates".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Encode one row (a point row has no `direction`).
+    pub fn to_json(&self) -> Value {
+        let mut row = Map::new();
+        row.insert("point".into(), encode_point(self.point));
+        Value::Object(row)
+    }
+}
+
+/// One guide-table row: an infinite line or a point marker.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Guide {
+    /// An infinite construction line.
+    Line(GuideLine),
+    /// A point marker.
+    Point(GuidePoint),
+}
+
+impl Guide {
+    /// The guide's anchor point.
+    pub fn point(&self) -> Point3 {
+        match self {
+            Guide::Line(line) => line.point,
+            Guide::Point(point) => point.point,
+        }
+    }
+
+    /// Validate this row.
+    pub fn validate(&self) -> Result<(), GuideError> {
+        match self {
+            Guide::Line(line) => line.validate(),
+            Guide::Point(point) => point.validate(),
+        }
+    }
+
+    /// Encode this row.
+    pub fn to_json(&self) -> Value {
+        match self {
+            Guide::Line(line) => line.to_json(),
+            Guide::Point(point) => point.to_json(),
+        }
+    }
+
+    /// Decode one row: `direction` present = line, absent = point.
+    pub fn from_json(value: &Value) -> Result<Self, GuideError> {
+        let row = value.as_object().ok_or_else(|| {
+            GuideError::Invalid(markers::GUIDE_INVALID, "row: expected a JSON object".into())
+        })?;
+        if row.contains_key("direction") {
+            GuideLine::from_json(value).map(Guide::Line)
+        } else if row.len() == 1 && row.contains_key("point") {
+            let point = decode_point(row.get("point"), "point")?;
+            GuidePoint::new(point).map(Guide::Point).ok_or_else(|| {
+                GuideError::Invalid(
+                    markers::GUIDE_INVALID,
+                    "point: expected finite coordinates".into(),
+                )
+            })
+        } else {
+            Err(GuideError::Invalid(
+                markers::GUIDE_INVALID,
+                "row: expected `point` plus optional `direction`".into(),
+            ))
+        }
     }
 }
 
@@ -162,7 +242,7 @@ impl std::error::Error for GuideError {}
 /// A bounded guide table, oldest first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GuideTable {
-    guides: Vec<GuideLine>,
+    guides: Vec<Guide>,
 }
 
 impl GuideTable {
@@ -172,14 +252,14 @@ impl GuideTable {
     }
 
     /// Build from decoded rows after validation.
-    pub fn from_parts(guides: Vec<GuideLine>) -> Result<Self, GuideError> {
+    pub fn from_parts(guides: Vec<Guide>) -> Result<Self, GuideError> {
         let table = GuideTable { guides };
         table.validate()?;
         Ok(table)
     }
 
     /// The retained guides, oldest first.
-    pub fn guides(&self) -> &[GuideLine] {
+    pub fn guides(&self) -> &[Guide] {
         &self.guides
     }
 
@@ -193,8 +273,18 @@ impl GuideTable {
         self.guides.is_empty()
     }
 
-    /// Append one guide; a new row at [`GUIDE_CAP`] is refused by name.
-    pub fn push(&mut self, guide: GuideLine) -> Result<(), GuideError> {
+    /// Append one line guide; a new row at [`GUIDE_CAP`] is refused by name.
+    pub fn push_line(&mut self, guide: GuideLine) -> Result<(), GuideError> {
+        self.push(Guide::Line(guide))
+    }
+
+    /// Append one point guide.
+    pub fn push_point(&mut self, guide: GuidePoint) -> Result<(), GuideError> {
+        self.push(Guide::Point(guide))
+    }
+
+    /// Append one row.
+    pub fn push(&mut self, guide: Guide) -> Result<(), GuideError> {
         guide.validate()?;
         if self.guides.len() >= GUIDE_CAP {
             return Err(GuideError::Invalid(
@@ -204,6 +294,11 @@ impl GuideTable {
         }
         self.guides.push(guide);
         Ok(())
+    }
+
+    /// Remove one row by 0-based position (the command layer exposes 1-based).
+    pub fn remove(&mut self, index: usize) -> Option<Guide> {
+        (index < self.guides.len()).then(|| self.guides.remove(index))
     }
 
     /// Remove every guide (one table write at the command layer).
@@ -230,7 +325,7 @@ impl GuideTable {
 
     /// Encode every row.
     pub fn to_json(&self) -> Vec<Value> {
-        self.guides.iter().map(GuideLine::to_json).collect()
+        self.guides.iter().map(Guide::to_json).collect()
     }
 
     /// Decode a row list.
@@ -246,13 +341,21 @@ impl GuideTable {
         }
         let mut guides = Vec::with_capacity(rows.len());
         for (index, row) in rows.iter().enumerate() {
-            let guide = GuideLine::from_json(row).map_err(|error| {
+            let guide = Guide::from_json(row).map_err(|error| {
                 GuideError::Invalid(error.marker(), format!("row {index}: {error}"))
             })?;
             guides.push(guide);
         }
         Ok(GuideTable { guides })
     }
+}
+
+fn encode_point(point: Point3) -> Value {
+    Value::Object(Map::from_iter([
+        ("x".to_string(), Value::from(point.x)),
+        ("y".to_string(), Value::from(point.y)),
+        ("z".to_string(), Value::from(point.z)),
+    ]))
 }
 
 fn finite(point: Point3) -> bool {

@@ -42,6 +42,10 @@ fn header() -> DocumentHeader {
 }
 
 fn snapshot(with_guides: bool) -> DocumentSnapshot {
+    points_snapshot(with_guides, false)
+}
+
+fn points_snapshot(with_guides: bool, points: bool) -> DocumentSnapshot {
     let mut document = DocumentSnapshot {
         header: header(),
         revision: Revision(1),
@@ -54,13 +58,17 @@ fn snapshot(with_guides: bool) -> DocumentSnapshot {
         resource_sources: Default::default(),
     };
     if with_guides {
-        document.tables.set(
-            TableKind::Guides,
-            vec![serde_json::json!({
+        let row = if points {
+            serde_json::json!({
+                "point": { "x": 0.0, "y": 0.0, "z": 0.0 }
+            })
+        } else {
+            serde_json::json!({
                 "point": { "x": 0.0, "y": 0.0, "z": 0.0 },
                 "direction": { "x": 1.0, "y": 0.0, "z": 0.0 }
-            })],
-        );
+            })
+        };
+        document.tables.set(TableKind::Guides, vec![row]);
     }
     document
 }
@@ -95,6 +103,21 @@ fn a_guide_table_is_written_at_minor_twenty_six_and_reads_back() {
         .get(TableKind::Guides)
         .expect("the guide table");
     assert_eq!(rows[0]["direction"]["x"], Value::from(1.0));
+}
+
+#[test]
+fn a_guide_point_is_written_at_minor_twenty_seven() {
+    let bytes = write_bytes(&points_snapshot(true, true));
+    assert_eq!(minor_of(&bytes), 27, "a point row is the minor-27 tier");
+    let mut source = MemorySource::new(bytes);
+    let loaded = ZipDocumentStore::new().read(&mut source).expect("read");
+    assert!(loaded.snapshot.has_guide_points());
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Guides)
+        .expect("the guide table");
+    assert!(rows[0].get("direction").is_none());
 }
 
 #[test]

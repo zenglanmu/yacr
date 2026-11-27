@@ -533,10 +533,14 @@ impl FlipAxis {
 }
 
 /// The typed `GUIDE` management forms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GuideCommand {
     /// Bare `GUIDE` / `GUIDE LIST`: report the table (read-only).
     List,
     /// `GUIDE CLEAR`: remove every guide in one table write.
     Clear,
+    /// `GUIDE DELETE <n>`: remove the 1-based row.
+    Delete(usize),
+    /// `GUIDE POINT <x> <y> <z>`: append one point marker.
+    Point(cad_domain::Point3),
 }

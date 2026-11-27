@@ -509,6 +509,19 @@ impl DocumentSnapshot {
             .is_some_and(|rows| !rows.is_empty())
     }
 
+    /// Whether any guide row is a **point** marker (minor 27).
+    ///
+    /// A line row carries `direction`; a point row is just `{point}`. A line-only
+    /// table keeps the minor-26 tier.
+    pub fn has_guide_points(&self) -> bool {
+        self.tables.get(TableKind::Guides).is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row.as_object()
+                    .is_some_and(|row| !row.contains_key("direction"))
+            })
+        })
+    }
+
     /// Whether this document carries construction guides (`tables/guides.json`,
     /// minor 26).
     pub fn has_guides(&self) -> bool {

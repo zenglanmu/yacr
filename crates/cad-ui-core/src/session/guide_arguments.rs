@@ -15,6 +15,8 @@ impl super::CadSession {
         let option = match option {
             GuideArgument::List => GuideCommand::List,
             GuideArgument::Clear => GuideCommand::Clear,
+            GuideArgument::Delete(index) => GuideCommand::Delete(index),
+            GuideArgument::Point(point) => GuideCommand::Point(point),
         };
         self.dispatch_typed_argument(
             GUIDE_SELECTOR,

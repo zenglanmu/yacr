@@ -516,12 +516,12 @@ fn the_manifest_pins_the_document_and_the_import_baseline() {
     );
     assert_eq!(
         cad_domain::ymodel::FORMAT_MINOR,
-        26,
+        27,
         "ADR-0043: P1 expressions/configurations moved the tier to 9, P2 features to 10 and \
          P3 relations to 11; ADR-0030 D7 vendor semantics moved it to 12; ADR-0053 D2 \
          application_domain moved it to 13; ADR-0055 block attributes moved it to 14; \
          Text.mirrored (15), 2D constraints (16) and GROUP (17) are reserved; persisted \
-         named views moved the top tier to 18; document materials to 19; scenes to 20; soften to 21; display settings to 22; scene visible-tag snapshots to 23; scene Shadows/Fog snapshots to 24; per-face material paints to 25; construction guides to 26"
+         named views moved the top tier to 18; document materials to 19; scenes to 20; soften to 21; display settings to 22; scene visible-tag snapshots to 23; scene Shadows/Fog snapshots to 24; per-face material paints to 25; construction guides to 26; guide point markers to 27"
     );
 
     let loaded = read_archive(&bytes).expect("read");

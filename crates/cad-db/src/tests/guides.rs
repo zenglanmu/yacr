@@ -35,7 +35,7 @@ fn a_guide_write_is_one_revision_and_reads_back() {
         .expect("empty database");
     let before = db.revision();
     let mut next = GuideTable::new();
-    next.push(guide(0.0)).unwrap();
+    next.push_line(guide(0.0)).unwrap();
     let changes = db
         .apply_guides(next.clone(), TransactionId(1), "GUIDE")
         .expect("write");
@@ -55,9 +55,9 @@ fn a_guide_write_is_one_revision_and_reads_back() {
 fn the_cap_and_clear_are_named() {
     let mut table = GuideTable::new();
     for index in 0..GUIDE_CAP {
-        table.push(guide(index as f64)).unwrap();
+        table.push_line(guide(index as f64)).unwrap();
     }
-    let error = table.push(guide(999.0)).unwrap_err();
+    let error = table.push_line(guide(999.0)).unwrap_err();
     assert_eq!(error.marker(), "guide.cap_exceeded");
     table.clear();
     assert!(table.is_empty());

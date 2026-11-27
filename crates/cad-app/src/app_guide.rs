@@ -6,7 +6,7 @@
 //! enter the entity store, exports or picking.
 
 use super::*;
-use cad_domain::guide::GuideLine;
+use cad_domain::guide::{Guide, GuideLine, GuidePoint};
 
 impl Application {
     /// Write the guide a guide-mode measurement asked for.
@@ -46,7 +46,7 @@ impl Application {
             )
         })?;
         let mut next = self.drawing(document)?.guides().clone();
-        next.push(guide)
+        next.push_line(guide)
             .map_err(|error| CadError::InvalidInput(error.to_string()))?;
         self.write_guides(document, next, "GUIDE (measurement)")
     }
@@ -72,16 +72,25 @@ impl Application {
                         .guides()
                         .iter()
                         .take(8)
-                        .map(|guide| {
-                            format!(
-                                "({:.4}, {:.4}, {:.4}) dir ({:.4}, {:.4}, {:.4})",
-                                guide.point.x,
-                                guide.point.y,
-                                guide.point.z,
-                                guide.direction.x,
-                                guide.direction.y,
-                                guide.direction.z
-                            )
+                        .enumerate()
+                        .map(|(index, guide)| match guide {
+                            Guide::Line(line) => format!(
+                                "{}. line ({:.4}, {:.4}, {:.4}) dir ({:.4}, {:.4}, {:.4})",
+                                index + 1,
+                                line.point.x,
+                                line.point.y,
+                                line.point.z,
+                                line.direction.x,
+                                line.direction.y,
+                                line.direction.z
+                            ),
+                            Guide::Point(point) => format!(
+                                "{}. point ({:.4}, {:.4}, {:.4})",
+                                index + 1,
+                                point.point.x,
+                                point.point.y,
+                                point.point.z
+                            ),
                         })
                         .collect::<Vec<_>>()
                         .join("; ");
@@ -111,6 +120,45 @@ impl Application {
                 Ok(guide_outcome(
                     "guide.cleared",
                     "GUIDE CLEAR: removed every construction guide".into(),
+                ))
+            }
+            GuideCommand::Delete(index) => {
+                if session.app_mode() == AppMode::Viewer {
+                    return Err(CadError::PermissionDenied);
+                }
+                let mut next = self.drawing(command.document)?.guides().clone();
+                if next.remove(index.saturating_sub(1)).is_none() {
+                    return Err(CadError::InvalidInput(format!(
+                        "guide.unknown_index: there is no guide at row {index} (the document has \
+                         {} guide(s))",
+                        next.len()
+                    )));
+                }
+                self.write_guides(command.document, next, &format!("GUIDE DELETE {index}"))?;
+                Ok(guide_outcome(
+                    "guide.deleted",
+                    format!("GUIDE DELETE: removed guide {index}"),
+                ))
+            }
+            GuideCommand::Point(point) => {
+                if session.app_mode() == AppMode::Viewer {
+                    return Err(CadError::PermissionDenied);
+                }
+                let guide = GuidePoint::new(point).ok_or_else(|| {
+                    CadError::InvalidInput(
+                        "guide.invalid: a guide point needs finite coordinates".into(),
+                    )
+                })?;
+                let mut next = self.drawing(command.document)?.guides().clone();
+                next.push_point(guide)
+                    .map_err(|error| CadError::InvalidInput(error.to_string()))?;
+                self.write_guides(command.document, next, "GUIDE POINT")?;
+                Ok(guide_outcome(
+                    "guide.point",
+                    format!(
+                        "GUIDE POINT: marked ({:.4}, {:.4}, {:.4})",
+                        point.x, point.y, point.z
+                    ),
                 ))
             }
         }

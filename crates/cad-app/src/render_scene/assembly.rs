@@ -326,15 +326,47 @@ fn append_guide_batches(
     let mut representation =
         cad_representation::DisplayRepresentation::empty(Completeness::Complete);
     for (index, guide) in guides.guides().iter().enumerate() {
-        let a = Point3 {
-            x: guide.point.x - guide.direction.x * extent,
-            y: guide.point.y - guide.direction.y * extent,
-            z: guide.point.z - guide.direction.z * extent,
-        };
-        let b = Point3 {
-            x: guide.point.x + guide.direction.x * extent,
-            y: guide.point.y + guide.direction.y * extent,
-            z: guide.point.z + guide.direction.z * extent,
+        let points = match guide {
+            cad_domain::guide::Guide::Line(line) => vec![
+                Point3 {
+                    x: line.point.x - line.direction.x * extent,
+                    y: line.point.y - line.direction.y * extent,
+                    z: line.point.z - line.direction.z * extent,
+                },
+                Point3 {
+                    x: line.point.x + line.direction.x * extent,
+                    y: line.point.y + line.direction.y * extent,
+                    z: line.point.z + line.direction.z * extent,
+                },
+            ],
+            cad_domain::guide::Guide::Point(mark) => {
+                // A point guide is a three-axis cross; the render batch has no
+                // point primitive, so the marker is three short line segments.
+                let cross = (extent * 0.005).clamp(1.0, 25.0);
+                let p = mark.point;
+                let mut points = Vec::with_capacity(6);
+                for axis in 0..3 {
+                    let mut a = p;
+                    let mut b = p;
+                    match axis {
+                        0 => {
+                            a.x -= cross;
+                            b.x += cross;
+                        }
+                        1 => {
+                            a.y -= cross;
+                            b.y += cross;
+                        }
+                        _ => {
+                            a.z -= cross;
+                            b.z += cross;
+                        }
+                    }
+                    points.push(a);
+                    points.push(b);
+                }
+                points
+            }
         };
         representation.fragments.push(DisplayFragment {
             source: SelectionRef {
@@ -355,7 +387,7 @@ fn append_guide_batches(
             linetype_unresolved: true,
             linetype_scale: 1.0,
             draw_order: -1 - index as i64,
-            primitive: DisplayPrimitive::LineSegments(Arc::from(vec![a, b])),
+            primitive: DisplayPrimitive::LineSegments(Arc::from(points)),
         });
     }
     stats.fragments_in += representation.fragments.len();

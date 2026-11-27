@@ -54,6 +54,8 @@
   **场景阴影/雾快照**（2026-11-27，ADR-0080）：`SCENE SAVE` 把文档 `tables/display.json`
   记录存进场景行的 `display`（minor 24）；`SCENE RESTORE` 在记录有差异时执行一次与
   `SHADOWS`/`FOG` 相同的显示写入（一步撤销），Viewer 下有差异则在改动前拒绝。
+  **参考线点与单条删除**（2026-11-28，ADR-0085）：`GUIDE POINT` 写 point-only 行（minor 27，
+  三轴十字渲染），`GUIDE DELETE <n>` 删除一行；两者都是一次整表写入/一步撤销。
   **构造参考线**（2026-11-28，ADR-0084）：`DIST GUIDE` / `PROTRACTOR GUIDE` 在测量完成时写
   非实体 `tables/guides.json`（minor 26）；`GUIDE LIST|CLEAR` 管理，渲染器按模型包围盒把每条
   参考线画成有界实线段（≥1000 单位），不进实体/导出/拾取。
@@ -133,7 +135,7 @@
 | Rotate | `ROTATE` | full | |
 | Scale | `SCALE` | full | |
 | Mirror | `MIRROR` | partial | 是 CAD 镜像，不是 SketchUp 的 Flip 语义 |
-| Tape Measure | `DIST` | partial | 距离 + `DIST GUIDE`（完成两点后写一条持久构造参考线，`tables/guides.json` minor 26）；无 guide 点/偏移/延伸模式 |
+| Tape Measure | `DIST` | partial | 距离 + `DIST GUIDE`（完成两点后写一条持久构造参考线，`tables/guides.json`）；`GUIDE POINT <x> <y> <z>` 创建点标记，`GUIDE DELETE <n>` 单条删除，`GUIDE LIST`/`CLEAR` 管理；无偏移/延伸/多次复制模式 |
 | Paint Bucket | `MATERIALS` | partial | `MATERIALS` 是只读材质报告（文档材质 + 内置调色板），托盘的 Materials 面板是真实色块调色板，点击 dispatch `PAINT <名称>` 涂**当前选择**；没有“点一个面涂一个面”的拾取、没有纹理材质、没有 INSERT 级联（ADR-0062） |
 | Orbit | `ORBIT` | full | |
 | Pan | `PAN` | full | |
@@ -168,9 +170,9 @@
 
 | 工具 | token | 状态 | 边界 |
 |---|---|---|---|
-| Tape Measure | `DIST` | partial | 真实两点距离；`DIST GUIDE` 在两点完成后写一条**持久构造参考线**（`tables/guides.json`，minor 26；非实体、无图层/导出/拾取，渲染为有界实线段——模型包围盒 10 倍且至少 1000 单位，不是真无限线）。无 guide 点、无偏移/延伸/多次复制模式 |
+| Tape Measure | `DIST` | partial | 真实两点距离；`DIST GUIDE` 在两点完成后写一条**持久构造参考线**（`tables/guides.json`；非实体、无图层/导出/拾取，渲染为有界实线段——模型包围盒 10 倍且至少 1000 单位，不是真无限线）；`GUIDE POINT <x> <y> <z>` 写点标记（minor 27，渲染为三轴十字），`GUIDE DELETE <n>` 单条删除、`GUIDE LIST`/`CLEAR` 管理。无偏移/延伸/多次复制模式 |
 | Dimension | `DIMLINEAR` | full | 是 CAD 标注，不是 SketchUp LayOut 尺寸 |
-| Protractor | `PROTRACTOR` | partial | 真实三点角度量具（`BeginMeasurement(Protractor)`：先点顶点、再各点一条射线，结果按 `Angle3Points` 记录并格式化角度；普通模式只读、不写文档）+ 托盘/工具栏/菜单真实工具；`PROTRACTOR GUIDE` 在三点点完后从顶点沿**第二条射线**写一条持久参考线（同一 `tables/guides.json`）。**未建模**：guide 点、其它 guide 类型/角度圆弧、无限线渲染与虚线 |
+| Protractor | `PROTRACTOR` | partial | 真实三点角度量具（`BeginMeasurement(Protractor)`：先点顶点、再各点一条射线，结果按 `Angle3Points` 记录并格式化角度；普通模式只读、不写文档）+ 托盘/工具栏/菜单真实工具；`PROTRACTOR GUIDE` 在三点点完后从顶点沿**第二条射线**写一条持久参考线（同一 `tables/guides.json`）；guide 点/单条删除/清空与 Tape 共用 `GUIDE POINT`/`DELETE`/`LIST`/`CLEAR`。**未建模**：其它 guide 类型/角度圆弧、无限线渲染与虚线 |
 | Text | `TEXT` | full | 二维文字 |
 | Axes | `UCS` | full | 会话坐标轴 |
 | 3D Text | `TEXT3D` | partial | `TEXT3D <x> <y> <z> <height> <extrusion> <font\|-> <text>`：用宿主已安装的 outline 字体引擎取**已填充字形面**（与显示/TXTEXP 同一份），挤成 `AcDbSubDMesh`（上下盖 + 每个边界边侧墙），一次事务/一步撤销；SHX 描边字体按 `text3d.not_solid` 拒绝、超出预算按 `text3d.budget` 拒绝；无字体选择对话框、旋转/对齐/斜体/描边、截面或圆角 |
