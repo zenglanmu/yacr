@@ -433,6 +433,7 @@ impl Application {
             CommandId::Regen => self.regen(session, &command, false),
             CommandId::RegenAll => self.regen(session, &command, true),
             CommandId::View => self.view_command(session, &command),
+            CommandId::Scene => self.scene_command(session, &command),
             CommandId::ViewGo => self.view_go(session, &command),
             CommandId::ViewBack => self.view_back(session, &command),
             CommandId::ViewForward => self.view_forward(session, &command),

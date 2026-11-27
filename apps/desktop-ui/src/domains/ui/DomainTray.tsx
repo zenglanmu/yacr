@@ -33,6 +33,8 @@ import { bodyKindKey, featureOperationKey, mechanicalStatusKey, readMechanicalTr
 import type { MechanicalTreeAnswer } from '../mechanical/tree.ts';
 import type { TrayPanel } from './slots.ts';
 import { BUILTIN_MATERIALS, paintCommand } from '../concept/materials.ts';
+import { readScenes } from '../concept/scenes.ts';
+import type { ScenesAnswer } from '../concept/scenes.ts';
 
 function EntityInfoBody() {
   const { t } = useI18n();
@@ -277,6 +279,132 @@ function MaterialsBody() {
   );
 }
 
+/** One scenes read's state; the last good answer survives a failed refresh. */
+type ScenesState =
+  | { readonly phase: 'ready'; readonly answer: ScenesAnswer | null; readonly reason: '' }
+  | { readonly phase: 'loading'; readonly answer: ScenesAnswer | null; readonly reason: '' }
+  | { readonly phase: 'error'; readonly answer: ScenesAnswer | null; readonly reason: string };
+
+/**
+ * The Scenes panel (SketchUp pages).
+ *
+ * Rows come from the host's `cad_scenes` read of `tables/scenes.json`; a row
+ * click dispatches `SCENE RESTORE <name>` and the delete button
+ * `SCENE DELETE <name>`, so every write goes through the ordinary command path
+ * and the panel never mutates the document itself. Saving captures the current
+ * camera/mode/space/style with `SCENE SAVE <name>`.
+ */
+function ScenesBody() {
+  const { t } = useI18n();
+  const shell = useShell();
+  const documentLabel = shell.status?.documentLabel ?? null;
+  const entityCount = shell.status?.entityCount ?? null;
+  const commandCount = shell.status?.commandLog?.length ?? 0;
+  const [name, setName] = useState('');
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState<ScenesState>({ phase: 'ready', answer: null, reason: '' });
+  useEffect(() => {
+    if (documentLabel === null) {
+      setState({ phase: 'ready', answer: null, reason: '' });
+      return undefined;
+    }
+    let live = true;
+    setState(previous => ({ phase: 'loading', answer: previous.answer, reason: '' }));
+    readScenes(invoke)
+      .then(answer => {
+        if (live) setState({ phase: 'ready', answer, reason: '' });
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        const reason = error instanceof Error ? error.message : String(error);
+        setState(previous => ({ phase: 'error', answer: previous.answer, reason }));
+      });
+    return () => { live = false; };
+  }, [documentLabel, entityCount, commandCount, nonce]);
+
+  if (documentLabel === null) {
+    return <p className="concept-panel__hint">{t('concept.scenes.no_document')}</p>;
+  }
+  const scenes = state.answer?.scenes ?? [];
+  const trimmed = name.trim();
+  const canSave = trimmed !== '' && shell.canCommand('SCENE');
+  return (
+    <>
+      <p className="concept-panel__hint">{t('concept.scenes.hint')}</p>
+      <div className="concept-scenes__save">
+        <input
+          type="text"
+          className="concept-scenes__name"
+          value={name}
+          placeholder={t('concept.scenes.name')}
+          aria-label={t('concept.scenes.name')}
+          onChange={event => setName(event.currentTarget.value)}
+        />
+        <button
+          type="button"
+          className="concept-panel__action"
+          disabled={!canSave}
+          onClick={() => {
+            shell.runCommand(`SCENE SAVE ${trimmed}`);
+            setName('');
+            setNonce(value => value + 1);
+          }}
+        >
+          {t('concept.scenes.save')}
+        </button>
+      </div>
+      {state.phase === 'error' ? (
+        <p className="concept-panel__hint" role="alert">
+          {t('concept.scenes.error', { reason: state.reason })}
+        </p>
+      ) : null}
+      {scenes.length === 0 ? (
+        <p className="concept-panel__hint">
+          {state.phase === 'loading' ? t('concept.scenes.loading') : t('concept.scenes.empty')}
+        </p>
+      ) : (
+        <ul className="concept-rows">
+          {scenes.map(scene => (
+            <li key={scene.name}>
+              <button
+                type="button"
+                className="concept-rows__label concept-scenes__restore"
+                title={t('concept.scenes.restore')}
+                onClick={() => shell.runCommand(`SCENE RESTORE ${scene.name}`)}
+              >
+                {scene.name}
+              </button>
+              <span className="concept-rows__value">
+                {scene.space} · {scene.style}
+                {scene.is3d ? ' · 3D' : ''}
+              </span>
+              <button
+                type="button"
+                className="concept-panel__action"
+                title={t('concept.scenes.delete')}
+                onClick={() => {
+                  shell.runCommand(`SCENE DELETE ${scene.name}`);
+                  setNonce(value => value + 1);
+                }}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {state.answer !== null && state.answer.truncated ? (
+        <p className="concept-panel__hint">
+          {t('concept.scenes.truncated', {
+            shown: scenes.length,
+            total: state.answer.total,
+          })}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function PendingBody({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
   return <p className="concept-panel__hint">{panel.pendingText ?? t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
@@ -292,7 +420,7 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'bimQuery': return <BimQueryBody />;
     case 'mechanicalTree': return <MechanicalTreeBody />;
     case 'materials': return <MaterialsBody />;
-    case 'scenes':
+    case 'scenes': return <ScenesBody />;
     case 'pending':
     default: return <PendingBody panel={panel} />;
   }
@@ -300,7 +428,7 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
 
 function Section({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
-  const pending = panel.kind === 'pending' || panel.kind === 'scenes';
+  const pending = panel.kind === 'pending';
   // `open` is controlled by the section's own state so a tap/click toggles it:
   // React's DOM types do not expose `defaultOpen`, and a permanently open body
   // would ignore the user.

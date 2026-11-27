@@ -45,6 +45,7 @@ pub(crate) mod param;
 pub(crate) mod param_build;
 mod point_style;
 mod scale_edit;
+mod scene;
 mod style_edit;
 mod transaction;
 mod units_display;
@@ -73,6 +74,7 @@ pub use param::{
     PARAM_MAX_CONFIG_BYTES, PARAM_MAX_TABLE_BYTES,
 };
 pub use scale_edit::{ScalePatch, ScaleReferenceCounts};
+pub use scene::{ScenePatch, SceneWrite};
 pub use style_edit::{
     DimStylePatch, MLeaderStylePatch, StylePatch, StyleTableChanges, DEFAULT_DIM_STYLE_NAME,
 };
@@ -461,6 +463,9 @@ pub struct DrawingDatabase {
     /// Document materials (`tables/materials.json`, minor 19). Empty for a
     /// document nobody painted.
     pub(crate) materials: cad_domain::material::MaterialDocument,
+    /// Persisted scenes (`tables/scenes.json`, minor 20). Empty for a document
+    /// without scenes.
+    pub(crate) scenes: cad_domain::scene::SceneTable,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

@@ -58,6 +58,7 @@ use crate::mechanical::{
     MechanicalTreeResponse, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
 };
 use crate::param::{ParamListResponse, PARAM_LIST_KIND, PARAM_LIST_UNSUPPORTED};
+use crate::scene::{ScenesResponse, SCENES_KIND, SCENES_UNSUPPORTED};
 
 /// The wire spelling of the BIM request kind.
 ///
@@ -102,6 +103,9 @@ pub enum HostReadRequest {
     /// `kind: "actionRecorder"` — the session's recorder state and its visible
     /// macros (ADR-0056). No fields.
     ActionRecorder,
+    /// `kind: "scenes"` — the open document's persisted scenes (SketchUp pages).
+    /// No fields.
+    Scenes,
 }
 
 impl HostReadRequest {
@@ -112,6 +116,7 @@ impl HostReadRequest {
             Self::ParamList => PARAM_LIST_KIND,
             Self::MechanicalTree => MECHANICAL_TREE_KIND,
             Self::ActionRecorder => ACTION_RECORDER_KIND,
+            Self::Scenes => SCENES_KIND,
         }
     }
 }
@@ -133,6 +138,8 @@ pub enum HostReadAnswer {
     MechanicalTree(MechanicalTreeResponse),
     /// `kind: "actionRecorder"` — the recorder state and visible macros.
     ActionRecorder(ActionRecorderSnapshot),
+    /// `kind: "scenes"` — the scene list.
+    Scenes(ScenesResponse),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -167,6 +174,11 @@ impl Serialize for HostReadRequest {
             Self::ActionRecorder => {
                 let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
                 state.serialize_field("kind", ACTION_RECORDER_KIND)?;
+                state.end()
+            }
+            Self::Scenes => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", SCENES_KIND)?;
                 state.end()
             }
         }
@@ -207,9 +219,11 @@ impl<'de> Deserialize<'de> for HostReadRequest {
             PARAM_LIST_KIND => Ok(Self::ParamList),
             MECHANICAL_TREE_KIND => Ok(Self::MechanicalTree),
             ACTION_RECORDER_KIND => Ok(Self::ActionRecorder),
+            SCENES_KIND => Ok(Self::Scenes),
             other => Err(serde::de::Error::custom(format!(
                 "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
-                 {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}]"
+                 {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}, \
+                 {SCENES_KIND:?}]"
             ))),
         }
     }
@@ -278,6 +292,7 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
         HostReadRequest::ParamList => PARAM_LIST_UNSUPPORTED.to_string(),
         HostReadRequest::MechanicalTree => MECHANICAL_TREE_UNSUPPORTED.to_string(),
         HostReadRequest::ActionRecorder => ACTION_RECORDER_UNSUPPORTED.to_string(),
+        HostReadRequest::Scenes => SCENES_UNSUPPORTED.to_string(),
     }
 }
 

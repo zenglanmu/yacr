@@ -19,7 +19,7 @@ export const CONCEPT_TRAY: readonly TrayPanel[] = Object.freeze<TrayPanel[]>([
   { id: 'concept.components', titleKey: 'concept.panel.components', kind: 'components' },
   { id: 'concept.styles', titleKey: 'concept.panel.styles', kind: 'styles' },
   { id: 'concept.tags', titleKey: 'concept.panel.tags', kind: 'tags' },
-  { id: 'concept.scenes', titleKey: 'concept.panel.scenes', kind: 'pending', pendingKey: 'concept.pending.scenes' },
+  { id: 'concept.scenes', titleKey: 'concept.panel.scenes', kind: 'scenes' },
   pending('concept.shadows', 'concept.panel.shadows'),
   pending('concept.fog', 'concept.panel.fog'),
   pending('concept.match_photo', 'concept.panel.match_photo'),

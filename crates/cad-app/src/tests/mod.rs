@@ -302,6 +302,7 @@ mod refedit;
 mod revision_cloud;
 // The Wave 27 read-only recovery/AEC/URL report contracts.
 mod recovery;
+mod scenes;
 mod select_filter;
 mod select_similar;
 // SSX Express-Tool selection-filter contracts.

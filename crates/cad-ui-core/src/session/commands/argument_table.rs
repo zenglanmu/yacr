@@ -167,6 +167,8 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     VIEWGO_SELECTOR,
     // `PAINT <name>`: the SketchUp paint bucket over the current selection.
     PAINT_SELECTOR,
+    // `SCENE SAVE/RESTORE/DELETE/LIST`: persisted SketchUp pages.
+    SCENE_SELECTOR,
     VPOINT_SELECTOR,
     // `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`: the typed
     // form of the extended command; a bare NEWVIEW keeps its report.

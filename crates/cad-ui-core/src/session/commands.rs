@@ -763,7 +763,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),
     ("PYRAMID", CommandId::Extended(ExtendedCommandId::Pyramid)), ("POLYSOLID", CommandId::Extended(ExtendedCommandId::PolySolid)),
-    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
+    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
     ("SWEEP", CommandId::Extended(ExtendedCommandId::Sweep)), ("LOFT", CommandId::Extended(ExtendedCommandId::Loft)),
     ("INTERSECT", CommandId::Extended(ExtendedCommandId::Intersect)), ("UNION", CommandId::Extended(ExtendedCommandId::Union)),
     ("SUBTRACT", CommandId::Extended(ExtendedCommandId::Subtract)), ("SLICE", CommandId::Extended(ExtendedCommandId::Slice)),
@@ -899,6 +899,8 @@ mod arguments;
 pub use arguments::*;
 mod paint_grammar;
 pub use paint_grammar::*;
+mod scene_grammar;
+pub use scene_grammar::*;
 
 // The typed `PYRAMID` regular n-gon base line (the one typed 3D primitive).
 mod solid_arguments;
@@ -939,11 +941,9 @@ pub use filters::*;
 // The 2026-11-07 draw/modify batch grammars (`DONUT` … `DRAWORDER`).
 mod draw2;
 pub use draw2::*;
-
 // The 2026-11-12 SHAPE/MINSERT/ADDSELECTED grammars.
 mod shape_block;
 pub use shape_block::*;
-
 // The raster-image grammars (`IMAGEATTACH`, `IMAGECLIP`).
 mod image;
 pub use image::*;

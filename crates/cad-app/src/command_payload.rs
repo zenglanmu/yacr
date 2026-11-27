@@ -1,8 +1,6 @@
 //! The typed input payloads of the command funnel.
-//!
 //! Split out of the crate root for the code-size limit; every item is re-exported
 //! by [`crate`] under its original name, so public paths are unchanged.
-//!
 //! A payload describes the **input** of exactly one [`crate::CommandId`] and never carries behaviour: the command layer validates it, then writes or refuses.
 
 use cad_domain::{
@@ -843,6 +841,8 @@ pub enum CommandPayload {
     Draw2(Box<crate::Draw2Payload>),
     /// `VIEW`/`VIEWGO`/`VPOINT`; contracts in [`crate::app_view`].
     View(ViewCommand),
+    /// The typed `SCENE <option>` line (SketchUp pages).
+    Scene(SceneCommand),
     ViewGo(String),
     VPoint(VPointInput),
     /// The 2026-11-07 layout/viewport batch; contract:
@@ -977,7 +977,7 @@ pub enum CommandPayload {
     /// `cad-ui-core` (`session::scale_arguments`), so a typed line and a direct
     /// IPC caller reach the same handler. Contract: [`crate::app_extended_scale_list`].
     ScaleList(crate::app_extended_scale_list::ScaleListCommand),
-    /// `REFCLOSE SAVE|DISCARD` (Work-only; bare is refused). See `app_refedit`.
+    /// `REFCLOSE SAVE|DISCARD` (Work-only; bare refused). See `app_refedit`.
     RefClose(RefCloseOption),
     /// Solid-edit payloads (exact body + pick seed).
     ChamferSolidEdge {

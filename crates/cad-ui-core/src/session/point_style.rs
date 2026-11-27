@@ -230,6 +230,8 @@ impl CadSession {
             super::commands::VIEWGO_SELECTOR => self.view_go_argument(argument, text),
             // `PAINT <material>`: the SketchUp paint bucket over the selection.
             super::commands::PAINT_SELECTOR => self.paint_argument(argument, text),
+            // `SCENE <option>`: persisted scenes (SketchUp pages).
+            super::commands::SCENE_SELECTOR => self.scene_argument(argument, text),
             super::commands::NEWVIEW_SELECTOR => self.newview_argument(argument, text),
             super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
             // The 2026-11-07 layout/viewport batch typed forms, including the

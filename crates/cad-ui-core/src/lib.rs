@@ -22,6 +22,7 @@ pub mod mechanical;
 pub mod param;
 pub mod popup;
 pub mod protocol;
+pub mod scene;
 pub mod session;
 pub mod shell;
 

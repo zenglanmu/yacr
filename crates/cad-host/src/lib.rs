@@ -72,6 +72,7 @@ pub mod policy;
 mod recent;
 mod recovery;
 pub mod save;
+mod scene;
 mod selection;
 mod settings;
 mod settings_export;
@@ -92,6 +93,7 @@ pub use param::{ParamList, ParamListRow};
 pub use recent::{
     recent_files_from_preference, RecentEntry, RECENT_FILES_CAP, RECENT_FILES_PREFERENCE_KEY,
 };
+pub use scene::{SceneList, SceneListRow, SCENE_LIST_MAX_ROWS};
 pub use settings::{
     normalize_wgpu_backend, CadSettingKey, CadSettingValue, HostSettings,
     DEFAULT_ORBIT_SENSITIVITY_PERCENT, SETTINGS_INVALID_PLOT_FORMAT, SETTINGS_INVALID_VALUE,

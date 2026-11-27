@@ -167,7 +167,11 @@ pub const FORMAT_WRITE: u32 = 2;
 /// Bucket): named flat materials plus one assignment per painted entity, inline
 /// in the row. A document nobody painted keeps the lower tier; a pre-19 reader
 /// refuses the table path instead of dropping the paint.
-pub const FORMAT_MINOR: u32 = 19;
+///
+/// `20` adds scenes (`tables/scenes.json`, SketchUp pages): a named camera/space
+/// snapshot plus the visual-style token. A document without scenes keeps the
+/// lower tier; a pre-20 reader refuses the table path instead of dropping them.
+pub const FORMAT_MINOR: u32 = 20;
 
 /// Stable failure markers.
 ///

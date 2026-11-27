@@ -173,6 +173,11 @@ macro_rules! cad_wire_registry {
             // with no lane answers its own `unsupported-runtime: mechanicalTree`
             // refusal. Not a drawing command: absent from `cad_commands`.
             @row(shared, reads, NoArgs, cad_mechanical_tree, { }, $crate::mechanical::MechanicalTreeResponse, { $crate::session::host_read::mechanical_tree(reads) })
+            // The Scenes tray (SketchUp pages): one request-carrying read
+            // (`kind: "scenes"`, no fields) over the same seam. The panel applies
+            // a scene by dispatching `SCENE RESTORE <name>`, never through this
+            // read. A carrier with no lane answers `unsupported-runtime: scenes`.
+            @row(shared, reads, NoArgs, cad_scenes, { }, $crate::scene::ScenesResponse, { $crate::session::host_read::scenes(reads) })
             // The action-recorder state (ADR-0056): one request-carrying read
             // (`kind: "actionRecorder"`, no fields) over the same seam. A
             // carrier with no named-file bridge answers its own

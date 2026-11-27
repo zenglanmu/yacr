@@ -3936,6 +3936,9 @@ button, input, select { font: inherit; color: inherit; }
 .concept-panel__action:hover:not(:disabled) { background: var(--hover); }
 .concept-panel__action:disabled { color: var(--text-disabled); cursor: default; }
 .concept-panel__styles { display: flex; flex-direction: column; gap: 6px; }
+.concept-scenes__save { display: flex; gap: 6px; margin-bottom: 6px; }
+.concept-scenes__name { flex: 1; min-width: 0; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font: inherit; font-size: 11px; }
+.concept-scenes__restore { background: none; border: 0; padding: 0; cursor: pointer; text-align: left; font: inherit; }
 .concept-materials { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0; padding: 0; list-style: none; }
 .concept-materials__swatch { width: 100%; min-height: 34px; border: 1px solid var(--border); border-radius: 4px; color: #1b1b1b; font-size: 10px; cursor: pointer; }
 .concept-materials__swatch:disabled { cursor: default; filter: grayscale(0.6); }

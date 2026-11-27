@@ -193,6 +193,12 @@ pub enum TableKind {
     /// contributing the minor-19 tier. A `PAINT` is one revision and one undo
     /// step.
     Materials,
+    /// Persisted scenes (`tables/scenes.json`, SketchUp pages): a named camera/
+    /// space/style snapshot.
+    ///
+    /// Document content like [`TableKind::Views`]; contributes the minor-20
+    /// tier. A `SCENE SAVE`/`DELETE` is one revision and one undo step.
+    Scenes,
 }
 
 /// The set of persisted rows one commit made stale.

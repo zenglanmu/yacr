@@ -41,6 +41,10 @@
   轮廓/路径都保持原位、一次事务/一步撤销，拐角在角平分面上剪切，结果是单壳、外向、每面有
   `face_sources` 的 `AcDbSubDMesh`。轮廓可以是闭合直线 `LWPOLYLINE`、`LINE` 闭环或 `CIRCLE`
   （圆按 48 边形采样，SketchUp 的圆也是多边形）；弧线/bulge 轮廓、闭合路径与反向路径按名拒绝。
+  **场景**（2026-11-27，ADR-0063）：`tables/scenes.json`（minor 20）存命名相机/空间/样式快照，
+  `SCENE SAVE/RESTORE/LIST/DELETE` 各按一条 revision/一步撤销（RESTORE 是会话应用，记
+  `ZOOM PREVIOUS`），托盘 Scenes 面板通过 `cad_scenes` host read 列表并 dispatch 恢复/保存/
+  删除；没有可见 Tags/阴影/雾/剖面/软边。
   **材质**（2026-11-27，ADR-0062）：`tables/materials.json` 存命名扁平材质（颜色 + 透明度）与
   每个实体一个赋值，`PAINT <名称>` 涂当前选择（内置 12 色首次涂刷落成文档行），渲染在展开时
   用材质色覆盖实体颜色/透明度；一次表写入 = 一次 revision = 一步撤销，删除实体清掉赋值。
@@ -158,7 +162,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 内置 12 色调色板 + `PAINT <name>`（整实体涂刷、文档表持久化、渲染即生效）；文档材质只在 `MATERIALS` 报告里列出，色块不随文档材质生成 |
-| Scenes | pending | 没有场景/页面持久化 |
+| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20）；不含可见 Tags/图层、阴影、雾、剖面、软边与缩略图 |
 | Shadows | pending | 无阴影设置 |
 | Fog | pending | 无雾 |
 | Match Photo | pending | 无照片匹配 |
@@ -189,5 +193,6 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
 - 其余 `pending` 工具（Freehand/Protractor/3D Text/Outer Shell/Trim/Split/Camera/Walk/
-  Look Around/Scenes/...）保持显式 pending；
+  Look Around/...）保持显式 pending；Shadows/Fog/Soften Edges/Overlays/Outliner 托盘面板仍是
+  pending，Scenes 已是有真实命令与面板的 `partial`。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

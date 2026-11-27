@@ -660,9 +660,14 @@ pub(crate) fn apply_drawing_patches(
     step: &cad_history::DrawingHistoryStep,
     forward: bool,
 ) -> CadResult<ChangeSet> {
-    // A material step takes the material-table write path.
     if let Some(result) =
         super::material_replay::material_step(drawing, transaction, reason, step, forward)
+    {
+        return result;
+    }
+    // A scene step takes the scene-table path.
+    if let Some(result) =
+        super::scene_replay::scene_step(drawing, transaction, reason, step, forward)
     {
         return result;
     }

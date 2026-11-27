@@ -25,6 +25,7 @@ pub mod param;
 mod pbr;
 pub mod relation;
 pub mod resource;
+pub mod scene;
 pub mod table_entity;
 mod texture;
 pub mod view;

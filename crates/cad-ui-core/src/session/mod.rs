@@ -71,6 +71,7 @@ mod select_filter;
 mod settings;
 // SHAPE/MINSERT/ADDSELECTED typed dispatch (grammar in `commands::shape_block`).
 mod paint_arguments;
+mod scene_arguments;
 mod set_view;
 mod shape_block_arguments;
 mod shell_settings;
@@ -724,7 +725,7 @@ impl CadSession {
         )
     }
 
-    /// Dispatch one non-interactive command through the host funnel.
+    /// Dispatch a non-interactive command through the host funnel.
     fn dispatch_command(&self, id: CommandId) -> Result<(), String> {
         self.dispatch_payload(id, CommandPayload::None)
     }
@@ -813,7 +814,6 @@ impl CadSession {
         pump?;
         completed
     }
-
     /// Record the actual number of CAD frames the presenter has presented.
     ///
     /// The GPU lane reports its real present count here; the status never

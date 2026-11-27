@@ -32,6 +32,7 @@ pub(crate) mod parameters;
 pub(crate) mod relations;
 pub(crate) mod relations_in_context;
 pub(crate) mod resources;
+pub(crate) mod scene;
 pub(crate) mod tables;
 pub(crate) mod variables;
 pub(crate) mod views;
@@ -208,6 +209,7 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // Document materials (SketchUp Paint Bucket). Written only when the
         // document holds a row; minor-19 tier.
         TableKind::Materials => "tables/materials.json",
+        TableKind::Scenes => "tables/scenes.json",
     }
 }
 
@@ -485,6 +487,13 @@ impl DocumentSnapshot {
     pub fn has_materials(&self) -> bool {
         self.tables
             .get(TableKind::Materials)
+            .is_some_and(|rows| !rows.is_empty())
+    }
+
+    /// Whether this document carries scenes (`tables/scenes.json`, minor 20).
+    pub fn has_scenes(&self) -> bool {
+        self.tables
+            .get(TableKind::Scenes)
             .is_some_and(|rows| !rows.is_empty())
     }
 }

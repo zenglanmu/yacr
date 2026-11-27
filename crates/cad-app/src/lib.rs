@@ -76,6 +76,7 @@ mod app_extrude;
 mod app_follow_me;
 mod app_materials;
 mod app_press_pull;
+mod app_scene;
 // The extended-command wrapper: dispatch, session toggles and reports.
 mod app_dispatch;
 mod app_drafting;
@@ -536,7 +537,7 @@ pub use command_payload::{
     PeditVertexCommand, PlanCircle, PlanLength, PurgeTarget, QDimCommand, QDimMode, QDimSnap,
     QSelectRequest, RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand,
     RevCloudStyle, RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand,
-    SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
+    SceneCommand, SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
     SelectionProperty, SelectionScope, SelectionToolPayload, SetByLayerSettings, ShapeCommand,
     SolidPrimitiveCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp,
     SysVarAssignment, SysVarDialogCommand, SysVarMonitorAction, TCircleCommand, TCircleSizeMode,

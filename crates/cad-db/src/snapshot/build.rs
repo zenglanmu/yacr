@@ -175,6 +175,10 @@ impl DrawingDatabase {
                 super::material::encode_materials(self)?,
             );
         }
+        // Scenes follow the same "no rows, no table" rule.
+        if !self.scenes.is_empty() {
+            tables.set(TableKind::Scenes, super::scene::encode_scenes(self));
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -239,6 +243,7 @@ impl DrawingDatabase {
         let group_rows = groups::decode_groups(&snapshot.tables)?;
         let named_views = views::decode_views(&snapshot.tables)?;
         let materials = super::material::decode_materials(&snapshot.tables)?;
+        let scenes = super::scene::decode_scenes(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
                 builder.set_parameters(parameters),
@@ -280,6 +285,9 @@ impl DrawingDatabase {
                 builder.set_materials(materials),
                 table_entry(TableKind::Materials),
             )?;
+        }
+        if !scenes.is_empty() {
+            checked(builder.set_scenes(scenes), table_entry(TableKind::Scenes))?;
         }
 
         for layer in tables.layers.values() {

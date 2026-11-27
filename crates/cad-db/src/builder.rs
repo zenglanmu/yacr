@@ -28,7 +28,7 @@ fn next_construction_nonce() -> u64 {
     NEXT_CONSTRUCTION_NONCE.fetch_add(1, Ordering::Relaxed)
 }
 
-/// The only sanctioned way to construct a [`DrawingDatabase`].
+/// The sanctioned way to construct a [`DrawingDatabase`].
 ///
 /// [`Self::finish`] rejects dangling layer/block/layout references.
 pub struct DrawingDatabaseBuilder {
@@ -65,6 +65,7 @@ impl DrawingDatabaseBuilder {
                 scales: BTreeMap::new(),
                 insertion_base: None,
                 materials: cad_domain::material::MaterialDocument::new(),
+                scenes: cad_domain::scene::SceneTable::new(),
                 limits_min: None,
                 limits_max: None,
                 dim_styles: BTreeMap::new(),
@@ -716,7 +717,6 @@ impl DrawingDatabaseBuilder {
             .insert(settings.layout, settings);
         Ok(())
     }
-
     /// Validate references and produce the immutable database.
     pub fn finish(mut self) -> CadResult<DrawingDatabase> {
         // A DIMSTYLE table always carries a `Standard` (ADR 0017 B.1). A

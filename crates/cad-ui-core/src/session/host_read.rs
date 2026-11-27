@@ -29,6 +29,7 @@ use crate::host_read::{
 };
 use crate::mechanical::MechanicalTreeResponse;
 use crate::param::ParamListResponse;
+use crate::scene::ScenesResponse;
 
 use super::wire::QueueReads;
 use super::CadSession;
@@ -54,7 +55,19 @@ impl CadSession {
             HostReadRequest::ActionRecorder => {
                 Ok(HostReadAnswer::ActionRecorder(self.action_recorder()?))
             }
+            HostReadRequest::Scenes => Ok(HostReadAnswer::Scenes(self.scenes())),
         }
+    }
+}
+
+impl CadSession {
+    /// The open document's persisted scenes, in save order.
+    ///
+    /// Host content only: no document is an empty list (the panel's empty state),
+    /// never an error; the host read seam's own refusal is what a carrier with no
+    /// lane reports.
+    pub fn scenes(&self) -> ScenesResponse {
+        ScenesResponse::from_host(self.core.scenes())
     }
 }
 
@@ -97,7 +110,8 @@ pub fn bim_query(
         HostReadAnswer::BimQuery(response) => Ok(response),
         HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
-        | HostReadAnswer::ActionRecorder(_) => Err(format!(
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Scenes(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a BIM query"
         )),
     }
@@ -114,7 +128,8 @@ pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
         HostReadAnswer::ParamList(response) => Ok(response),
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::MechanicalTree(_)
-        | HostReadAnswer::ActionRecorder(_) => Err(format!(
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Scenes(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a parameter list"
         )),
     }
@@ -131,7 +146,8 @@ pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, 
         HostReadAnswer::ActionRecorder(response) => Ok(response),
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::ParamList(_)
-        | HostReadAnswer::MechanicalTree(_) => Err(format!(
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::Scenes(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an action-recorder read"
         )),
     }
@@ -144,12 +160,25 @@ pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, 
 /// `unsupported-runtime: mechanicalTree` refusal, never an empty tree. A host
 /// that answers a different kind is a transport fault and is refused by the same
 /// marker as an unknown request kind.
+pub fn scenes(reads: &dyn HostReads) -> Result<ScenesResponse, String> {
+    match reads.host_read(&HostReadRequest::Scenes)? {
+        HostReadAnswer::Scenes(response) => Ok(response),
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::ParamList(_)
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::ActionRecorder(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a scenes read"
+        )),
+    }
+}
+
 pub fn mechanical_tree(reads: &dyn HostReads) -> Result<MechanicalTreeResponse, String> {
     match reads.host_read(&HostReadRequest::MechanicalTree)? {
         HostReadAnswer::MechanicalTree(response) => Ok(response),
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::ParamList(_)
-        | HostReadAnswer::ActionRecorder(_) => Err(format!(
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Scenes(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a mechanical tree"
         )),
     }

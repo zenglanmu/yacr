@@ -25,6 +25,8 @@ pub enum CommandId {
     Zoom,
     FitDrawing,
     ResetView,
+    /// `SCENE SAVE|RESTORE|LIST|DELETE`: persisted scenes (`tables/scenes.json`).
+    Scene,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,
