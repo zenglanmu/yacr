@@ -17,6 +17,8 @@ impl super::CadSession {
             GuideArgument::Clear => GuideCommand::Clear,
             GuideArgument::Delete(index) => GuideCommand::Delete(index),
             GuideArgument::Point(point) => GuideCommand::Point(point),
+            GuideArgument::StyleColor(color) => GuideCommand::StyleColor(color),
+            GuideArgument::StyleDash(dashed) => GuideCommand::StyleDash(dashed),
         };
         self.dispatch_typed_argument(
             GUIDE_SELECTOR,

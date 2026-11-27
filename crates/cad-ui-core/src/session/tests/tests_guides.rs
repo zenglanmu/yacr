@@ -53,6 +53,20 @@ fn guide_list_and_clear_are_the_only_management_forms() {
         }
         other => panic!("expected a point, got {other:?}"),
     }
+    assert_eq!(
+        parse_guide_argument("STYLE COLOR 10 20 30"),
+        Some(GuideArgument::StyleColor([10, 20, 30]))
+    );
+    assert_eq!(
+        parse_guide_argument("style dash off"),
+        Some(GuideArgument::StyleDash(false))
+    );
+    assert_eq!(
+        parse_guide_argument("STYLE DASH ON"),
+        Some(GuideArgument::StyleDash(true))
+    );
+    assert_eq!(parse_guide_argument("STYLE COLOR 1 2 999"), None);
+    assert_eq!(parse_guide_argument("STYLE DASH MAYBE"), None);
     assert_eq!(parse_guide_argument("DELETE"), None);
     assert_eq!(parse_guide_argument("DELETE 0"), None);
     assert_eq!(parse_guide_argument("POINT 1 2"), None);

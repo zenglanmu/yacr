@@ -20,8 +20,6 @@ use super::*;
 pub const GUIDE_DRAW_ORDER: i64 = 840_000;
 
 /// The guide line/point colour.
-const GUIDE_COLOR: [f32; 3] = [0.20, 0.45, 0.85];
-
 pub(crate) fn guide_overlay(
     database: &DrawingDatabase,
     view_scale: Option<f64>,
@@ -41,13 +39,21 @@ pub(crate) fn guide_overlay(
         })
         .unwrap_or(1000.0);
     let screen = view_scale.filter(|scale| scale.is_finite() && *scale > 0.0);
+    let style = guides.style();
+    let color = [
+        style.color[0] as f32 / 255.0,
+        style.color[1] as f32 / 255.0,
+        style.color[2] as f32 / 255.0,
+    ];
     let period = match screen {
         Some(scale) => (6.0 + 4.0) * scale,
         None => (extent / 100.0).max(5.0),
     };
-    let dash = period * 0.6;
-    let gap = period * 0.4;
-    let pattern = LinetypePattern::from_elements([dash, -gap]);
+    let pattern = if style.dashed {
+        LinetypePattern::from_elements([period * 0.6, -period * 0.4])
+    } else {
+        LinetypePattern::continuous()
+    };
     let mut overlay = VisualOverlay::default();
     for (index, guide) in guides.guides().iter().enumerate() {
         let origin = guide.point();
@@ -64,12 +70,17 @@ pub(crate) fn guide_overlay(
                     y: line.point.y + line.direction.y * extent,
                     z: line.point.z + line.direction.z * extent,
                 };
-                let (runs, _fallback) = subdivide_dashes(&[start, end], &pattern, 1.0, 1.0);
-                for run in runs {
-                    for pair in run.windows(2) {
-                        push_relative(&mut vertices, origin, pair[0]);
-                        push_relative(&mut vertices, origin, pair[1]);
+                if style.dashed {
+                    let (runs, _fallback) = subdivide_dashes(&[start, end], &pattern, 1.0, 1.0);
+                    for run in runs {
+                        for pair in run.windows(2) {
+                            push_relative(&mut vertices, origin, pair[0]);
+                            push_relative(&mut vertices, origin, pair[1]);
+                        }
                     }
+                } else {
+                    push_relative(&mut vertices, origin, start);
+                    push_relative(&mut vertices, origin, end);
                 }
             }
             cad_domain::guide::Guide::Point(mark) => {
@@ -120,7 +131,7 @@ pub(crate) fn guide_overlay(
             conics: Vec::new(),
             mirrored: false,
             alpha: 1.0,
-            color: cad_scene::sanitize_color(GUIDE_COLOR),
+            color: cad_scene::sanitize_color(color),
             color_unresolved: false,
             lineweight: 0.0,
             lineweight_unresolved: false,

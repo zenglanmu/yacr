@@ -198,3 +198,44 @@ fn dist_guide_with_coincident_points_leaves_a_point_marker() {
     };
     assert_eq!(mark.point, point);
 }
+
+#[test]
+fn guide_style_color_and_dash_are_one_reversible_table_write() {
+    let (mut app, mut session) = application_with_document();
+    let before = app.workspace.documents[&DocumentId(1)].drawing.revision();
+    guide_command(
+        &mut app,
+        &mut session,
+        GuideCommand::StyleColor([10, 20, 30]),
+    )
+    .expect("style color");
+    assert_eq!(guides(&app).style().color, [10, 20, 30]);
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].drawing.revision(),
+        Revision(before.0 + 1)
+    );
+    guide_command(&mut app, &mut session, GuideCommand::StyleDash(false)).expect("dash off");
+    assert!(!guides(&app).style().dashed);
+    let listed = guide_command(&mut app, &mut session, GuideCommand::List).expect("list");
+    assert!(listed
+        .diagnostics
+        .iter()
+        .any(|row| row.message.contains("style #0a141e") && row.message.contains("dash off")));
+
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo dash");
+    assert!(guides(&app).style().dashed);
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo color");
+    assert_eq!(guides(&app).style().color, [51, 115, 217]);
+}
+
+#[test]
+fn guide_style_is_refused_in_viewer_mode() {
+    let (mut app, mut session) = application_with_document();
+    session.switch_mode(AppMode::Viewer).expect("Viewer");
+    assert!(matches!(
+        guide_command(&mut app, &mut session, GuideCommand::StyleColor([1, 2, 3]),).unwrap_err(),
+        CadError::PermissionDenied
+    ));
+}

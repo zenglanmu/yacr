@@ -27,6 +27,8 @@ pub mod markers {
     pub const GUIDE_CAP_EXCEEDED: &str = "guide.cap_exceeded";
     /// A point/direction is not finite or the direction is zero.
     pub const GUIDE_INVALID: &str = "guide.invalid";
+    /// The optional style row/colour is malformed.
+    pub const GUIDE_STYLE_INVALID: &str = "guide.style_invalid";
 }
 
 /// One infinite construction line.
@@ -239,10 +241,30 @@ impl fmt::Display for GuideError {
 
 impl std::error::Error for GuideError {}
 
+/// The presentation style shared by every guide in a document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuideStyle {
+    /// sRGB colour used for lines and point crosses.
+    pub color: [u8; 3],
+    /// Whether line guides are dashed (points stay crosses).
+    pub dashed: bool,
+}
+
+impl Default for GuideStyle {
+    fn default() -> Self {
+        GuideStyle {
+            // The overlay default before this row existed.
+            color: [51, 115, 217],
+            dashed: true,
+        }
+    }
+}
+
 /// A bounded guide table, oldest first.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GuideTable {
     guides: Vec<Guide>,
+    style: GuideStyle,
 }
 
 impl GuideTable {
@@ -253,7 +275,10 @@ impl GuideTable {
 
     /// Build from decoded rows after validation.
     pub fn from_parts(guides: Vec<Guide>) -> Result<Self, GuideError> {
-        let table = GuideTable { guides };
+        let table = GuideTable {
+            guides,
+            style: GuideStyle::default(),
+        };
         table.validate()?;
         Ok(table)
     }
@@ -263,14 +288,24 @@ impl GuideTable {
         &self.guides
     }
 
+    /// The document's guide style.
+    pub fn style(&self) -> GuideStyle {
+        self.style
+    }
+
+    /// Replace the style (no guide row changes).
+    pub fn set_style(&mut self, style: GuideStyle) {
+        self.style = style;
+    }
+
     /// How many guides are retained.
     pub fn len(&self) -> usize {
         self.guides.len()
     }
 
-    /// Whether the table is empty.
+    /// Whether the table is empty (no guides and the default style).
     pub fn is_empty(&self) -> bool {
-        self.guides.is_empty()
+        self.guides.is_empty() && self.style == GuideStyle::default()
     }
 
     /// Append one line guide; a new row at [`GUIDE_CAP`] is refused by name.
@@ -323,9 +358,22 @@ impl GuideTable {
         Ok(())
     }
 
-    /// Encode every row.
+    /// Encode every row; a non-default style is one leading `{"style": ...}` row.
     pub fn to_json(&self) -> Vec<Value> {
-        self.guides.iter().map(Guide::to_json).collect()
+        let mut rows = Vec::with_capacity(self.guides.len() + 1);
+        if self.style != GuideStyle::default() {
+            let mut style = Map::new();
+            style.insert(
+                "color".into(),
+                Value::Array(self.style.color.iter().map(|c| Value::from(*c)).collect()),
+            );
+            style.insert("dashed".into(), Value::Bool(self.style.dashed));
+            let mut row = Map::new();
+            row.insert("style".into(), Value::Object(style));
+            rows.push(Value::Object(row));
+        }
+        rows.extend(self.guides.iter().map(Guide::to_json));
+        rows
     }
 
     /// Decode a row list.
@@ -340,14 +388,79 @@ impl GuideTable {
             ));
         }
         let mut guides = Vec::with_capacity(rows.len());
+        let mut style: Option<GuideStyle> = None;
         for (index, row) in rows.iter().enumerate() {
+            if let Some(raw) = row.as_object().and_then(|row| row.get("style")) {
+                if style.is_some() || row.as_object().is_some_and(|row| row.len() != 1) {
+                    return Err(GuideError::Invalid(
+                        markers::GUIDE_STYLE_INVALID,
+                        format!("row {index}: duplicate or malformed style row"),
+                    ));
+                }
+                style = Some(decode_style(raw)?);
+                continue;
+            }
             let guide = Guide::from_json(row).map_err(|error| {
                 GuideError::Invalid(error.marker(), format!("row {index}: {error}"))
             })?;
             guides.push(guide);
         }
-        Ok(GuideTable { guides })
+        if guides.len() > GUIDE_CAP {
+            return Err(GuideError::Invalid(
+                markers::GUIDE_TABLE_TOO_LARGE,
+                format!(
+                    "tables/guides.json holds {} guides, over the {GUIDE_CAP}-row budget",
+                    guides.len()
+                ),
+            ));
+        }
+        Ok(GuideTable {
+            guides,
+            style: style.unwrap_or_default(),
+        })
     }
+}
+
+fn decode_style(value: &Value) -> Result<GuideStyle, GuideError> {
+    let style = value.as_object().ok_or_else(|| {
+        GuideError::Invalid(
+            markers::GUIDE_STYLE_INVALID,
+            "style: expected an object".into(),
+        )
+    })?;
+    if style.len() != 2 || !style.contains_key("color") || !style.contains_key("dashed") {
+        return Err(GuideError::Invalid(
+            markers::GUIDE_STYLE_INVALID,
+            "style: expected exactly `color` and `dashed`".into(),
+        ));
+    }
+    let color = style
+        .get("color")
+        .and_then(Value::as_array)
+        .filter(|channels| channels.len() == 3)
+        .and_then(|channels| {
+            let mut bytes = [0_u8; 3];
+            for (index, channel) in channels.iter().enumerate() {
+                bytes[index] = u8::try_from(channel.as_u64()?).ok()?;
+            }
+            Some(bytes)
+        })
+        .ok_or_else(|| {
+            GuideError::Invalid(
+                markers::GUIDE_STYLE_INVALID,
+                "style.color: expected three 0..=255 channels".into(),
+            )
+        })?;
+    let dashed = style
+        .get("dashed")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            GuideError::Invalid(
+                markers::GUIDE_STYLE_INVALID,
+                "style.dashed: expected a boolean".into(),
+            )
+        })?;
+    Ok(GuideStyle { color, dashed })
 }
 
 fn encode_point(point: Point3) -> Value {

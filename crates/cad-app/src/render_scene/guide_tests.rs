@@ -130,3 +130,26 @@ fn the_base_scene_no_longer_owns_guides() {
         "guides are transient overlay batches, not base geometry"
     );
 }
+
+#[test]
+fn a_document_guide_style_changes_colour_and_turns_dashes_off() {
+    let db = guide_db(false);
+    let mut table = db.guides().clone();
+    table.set_style(cad_domain::guide::GuideStyle {
+        color: [255, 0, 0],
+        dashed: false,
+    });
+    let mut builder = DrawingDatabaseBuilder::new(DatabaseId(1));
+    builder.set_guides(table).unwrap();
+    let db = builder.finish().unwrap();
+    let overlay = guide_overlay(&db, Some(0.5), DocumentId(1));
+    let line = overlay
+        .batches
+        .iter()
+        .find(|batch| batch.topology == RenderTopology::Lines)
+        .expect("the guide line batch");
+    assert_eq!(line.vertices.len(), 2, "a solid style is not split");
+    assert!(line.linetype.is_continuous());
+    assert!((line.color[0] - 1.0).abs() < 1e-6);
+    assert!(line.color[1].abs() < 1e-6 && line.color[2].abs() < 1e-6);
+}

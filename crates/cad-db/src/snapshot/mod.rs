@@ -534,6 +534,13 @@ impl DocumentSnapshot {
         })
     }
 
+    /// Whether the guide table carries a non-default style row (minor 30).
+    pub fn has_guide_style(&self) -> bool {
+        self.tables
+            .get(TableKind::Guides)
+            .is_some_and(|rows| rows.iter().any(|row| row.get("style").is_some()))
+    }
+
     /// Whether any guide row is a **point** marker (minor 27).
     ///
     /// A line row carries `direction`; a point row is just `{point}`. A line-only

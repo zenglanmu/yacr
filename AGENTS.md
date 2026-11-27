@@ -227,8 +227,9 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   （`tables/scenes.json` 行的 `tags`，23，ADR-0078）、场景阴影/雾快照（同行 `display`，24，
   ADR-0080）、逐面材质涂刷（`tables/materials.json` 行的 `faces`，25，ADR-0081）、构造参考线
   `tables/guides.json`（26，ADR-0084）、point 参考线（同行 point-only 行，27，ADR-0085）、场景显式柔化快照（`tables/scenes.json`
-  行的 `soften`，28，ADR-0090）、场景柔化清除表（`soften_cleared`，29，ADR-0094）；写入按文档取
-  **4/5/7/8/9/10/11/12/13/14/15/16/17/18/19/20/21/22/23/24/25/26/27/28/29**，未产生的档位不抬高普通文档）。条目压缩自 ADR-0046 起是
+  行的 `soften`，28，ADR-0090）、场景柔化清除表（`soften_cleared`，29，ADR-0094）、guide 样式行（`tables/guides.json` 的
+  `style`，30，ADR-0101）；写入按文档取
+  **4/5/7/8/9/10/11/12/13/14/15/16/17/18/19/20/21/22/23/24/25/26/27/28/29/30**，未产生的档位不抬高普通文档）。条目压缩自 ADR-0046 起是
   标准 zstd 帧（zip `Stored` + `structured-zstd =0.4.3`，level 6），`FORMAT_READ/WRITE = 2`；
   `read != 2` 的归档以 `unsupported_version` 拒绝，`sha256_c`/`len_c` 已写入并在解压前校验。`PARAM` 的 create/delete/
   rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /

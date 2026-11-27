@@ -543,6 +543,10 @@ pub enum GuideCommand {
     Delete(usize),
     /// `GUIDE POINT <x> <y> <z>`: append one point marker.
     Point(cad_domain::Point3),
+    /// `GUIDE STYLE COLOR <r> <g> <b>`: shared guide colour.
+    StyleColor([u8; 3]),
+    /// `GUIDE STYLE DASH ON|OFF`: shared line dash switch.
+    StyleDash(bool),
 }
 
 /// One typed `MATERIAL` edit over the document material table.

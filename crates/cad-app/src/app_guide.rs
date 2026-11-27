@@ -6,7 +6,7 @@
 //! enter the entity store, exports or picking.
 
 use super::*;
-use cad_domain::guide::{Guide, GuideLine, GuidePoint};
+use cad_domain::guide::{Guide, GuideLine, GuidePoint, GuideStyle};
 
 impl Application {
     /// Write the guide a guide-mode measurement asked for.
@@ -76,7 +76,11 @@ impl Application {
         let option = match &command.payload {
             CommandPayload::Guide(option) => *option,
             CommandPayload::None => GuideCommand::List,
-            _ => return Err(CadError::InvalidInput("GUIDE takes LIST or CLEAR".into())),
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "GUIDE takes LIST, CLEAR, DELETE, POINT or STYLE".into(),
+                ))
+            }
         };
         match option {
             GuideCommand::List => {
@@ -110,10 +114,15 @@ impl Application {
                         })
                         .collect::<Vec<_>>()
                         .join("; ");
+                    let style = table.style();
                     format!(
-                        "GUIDE LIST: {} guide(s): {rows}{}",
+                        "GUIDE LIST: {} guide(s): {rows} (style #{:02x}{:02x}{:02x}, dash {}{})",
                         table.len(),
-                        if table.len() > 8 { " …" } else { "" }
+                        style.color[0],
+                        style.color[1],
+                        style.color[2],
+                        if style.dashed { "on" } else { "off" },
+                        if table.len() > 8 { ", …" } else { "" }
                     )
                 };
                 Ok(guide_outcome("guide.list", message))
@@ -154,6 +163,39 @@ impl Application {
                 Ok(guide_outcome(
                     "guide.deleted",
                     format!("GUIDE DELETE: removed guide {index}"),
+                ))
+            }
+            GuideCommand::StyleColor(color) => {
+                if session.app_mode() == AppMode::Viewer {
+                    return Err(CadError::PermissionDenied);
+                }
+                let mut next = self.drawing(command.document)?.guides().clone();
+                next.set_style(GuideStyle {
+                    color,
+                    ..next.style()
+                });
+                self.write_guides(command.document, next, "GUIDE STYLE COLOR")?;
+                Ok(guide_outcome(
+                    "guide.style",
+                    format!(
+                        "GUIDE STYLE COLOR: set #{:02x}{:02x}{:02x}",
+                        color[0], color[1], color[2]
+                    ),
+                ))
+            }
+            GuideCommand::StyleDash(dashed) => {
+                if session.app_mode() == AppMode::Viewer {
+                    return Err(CadError::PermissionDenied);
+                }
+                let mut next = self.drawing(command.document)?.guides().clone();
+                next.set_style(GuideStyle {
+                    dashed,
+                    ..next.style()
+                });
+                self.write_guides(command.document, next, "GUIDE STYLE DASH")?;
+                Ok(guide_outcome(
+                    "guide.style",
+                    format!("GUIDE STYLE DASH: {}", if dashed { "on" } else { "off" }),
                 ))
             }
             GuideCommand::Point(point) => {

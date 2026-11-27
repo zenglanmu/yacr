@@ -125,3 +125,34 @@ fn a_document_without_guides_keeps_its_lower_minor() {
     let bytes = write_bytes(&snapshot(false));
     assert_eq!(minor_of(&bytes), 4);
 }
+
+#[test]
+fn a_guide_style_row_is_written_at_minor_thirty() {
+    let mut document = snapshot(true);
+    document.tables.set(
+        TableKind::Guides,
+        vec![
+            serde_json::json!({
+                "style": { "color": [255, 0, 0], "dashed": false }
+            }),
+            serde_json::json!({
+                "point": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                "direction": { "x": 1.0, "y": 0.0, "z": 0.0 }
+            }),
+        ],
+    );
+    let bytes = write_bytes(&document);
+    assert_eq!(minor_of(&bytes), 30, "a guide style row is minor 30");
+    let mut source = MemorySource::new(bytes);
+    let loaded = ZipDocumentStore::new().read(&mut source).expect("read");
+    assert!(loaded.snapshot.has_guide_style());
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Guides)
+        .expect("table");
+    let table = cad_domain::guide::GuideTable::from_json(rows).expect("decode");
+    assert_eq!(table.style().color, [255, 0, 0]);
+    assert!(!table.style().dashed);
+    assert_eq!(table.len(), 1);
+}
