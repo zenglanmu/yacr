@@ -1,9 +1,8 @@
 //! Owner-thread CAD session (`CadSession`) shared by the UI hosts.
 //!
 //! `CadSession` is a thin, deliberately `!Send` owner-thread wrapper over the
-//! UI-free [`cad_host::HostCore`] and its [`RenderSessionHandle`]. It adds **no**
-//! CAD authority and **no** parser of its own: the authoritative database stays
-//! in `cad-db` behind the host controller, every mutation goes through the host
+//! UI-free [`cad_host::HostCore`] and its [`RenderSessionHandle`]: it adds no CAD
+//! authority and no parser; the database stays in `cad-db` behind the host
 //! command/engine boundary, and the frontend sees only the derived state.
 //!
 //! Threading: the session owns `Rc`/`RefCell` state and a `RenderSessionHandle`, so
@@ -34,6 +33,7 @@ mod param;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
 mod dim_arguments;
 mod directory_pick;
+mod display_arguments;
 mod document_archive;
 mod draw2_arguments;
 pub mod events;

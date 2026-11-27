@@ -114,15 +114,16 @@ fn mesh_pbr_shader_is_valid_wgsl() {
         })
         .expect("mesh_pbr.wgsl must declare the `Camera` uniform struct");
     assert_eq!(
-        span, 160,
-        "the `Camera` uniform must stay 160 bytes (mat4x4 + 6 vec4)"
+        span, 192,
+        "the `Camera` uniform must stay 192 bytes (mat4x4 + 8 vec4: the PBR \
+         payload plus the fog colour/range words)"
     );
     let offsets: Vec<u32> = members.iter().map(|member| member.offset).collect();
     assert_eq!(
         offsets,
-        vec![0, 64, 80, 96, 112, 128, 144],
+        vec![0, 64, 80, 96, 112, 128, 144, 160, 176],
         "the `Camera` members must keep their offsets \
-         (transform/tint/key_flags/light/pbr_factors/pbr_emissive/pbr_eye)"
+         (transform/tint/key_flags/light/pbr_factors/pbr_emissive/pbr_eye/fog_color/fog_range)"
     );
 }
 
@@ -205,9 +206,12 @@ fn only_the_eight_colour_shaders_carry_the_light_background_ink_flip() {
             source.contains("min(rgb.r, min(rgb.g, rgb.b)) >= 0.75"),
             "{name}: only near-white ink (min channel >= 0.75) may flip"
         );
-        // The transform is applied to the final colour, alpha preserved.
+        // The transform is applied to the final colour, alpha preserved. The
+        // universal tier also wraps it in the fog pass (`fog_mix(ink_for_background(..))`);
+        // the vertex-pulling tier's `PullCamera` has no fog words yet.
         assert!(
-            source.contains("vec4<f32>(ink_for_background("),
+            source.contains("fog_mix(ink_for_background(")
+                || source.contains("vec4<f32>(ink_for_background("),
             "{name}: the transform must wrap the final RGB, keeping alpha"
         );
     }

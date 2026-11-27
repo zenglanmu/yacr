@@ -8,6 +8,7 @@ use crate::grips::GripId;
 
 mod dash_layer;
 mod dimension_batch;
+mod display_payload;
 mod hatch_edit_payload;
 mod image;
 mod leader;
@@ -20,6 +21,7 @@ mod xclip;
 
 pub use dash_layer::*;
 pub use dimension_batch::*;
+pub use display_payload::*;
 pub use hatch_edit_payload::*;
 pub use image::*;
 pub use leader::*;

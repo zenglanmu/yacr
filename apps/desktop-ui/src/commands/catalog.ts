@@ -1,5 +1,4 @@
-// The chrome's declarative command catalog, in AutoCAD-style order (readers in
-// `commands.ts`).
+// The chrome's declarative command catalog, in AutoCAD-style order.
 
 /** One entry of the chrome's display catalog. */
 export interface CommandCatalogEntry {
@@ -25,8 +24,7 @@ import { TABLE_COMMAND_CATALOG } from './catalog-tables.ts';
  * still be typed and admitted when the router knows it.
  */
 export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
-  // The file group lives in `catalog-file.ts` (size gate): OPEN, NEW, SAVE,
-  // EXPORT, PLOT, CLOSE in listing order.
+  // The file group lives in `catalog-file.ts` (size gate).
   ...FILE_COMMAND_CATALOG,
   { id: 'FIT', labelKey: 'toolbar.fit', icon: 'fit', group: 'view' },
   { id: 'UNDO', labelKey: 'toolbar.undo', icon: 'undo', group: 'modify' },
@@ -917,6 +915,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'FOLLOWME', labelKey: 'draw.kind.followme', icon: 'spline', group: 'modify' },
   { id: 'PAINT', labelKey: 'draw.kind.paint', icon: 'palette', group: 'modify' },
   { id: 'SOFTENEDGES', labelKey: 'draw.kind.softenedges', icon: 'dot', group: 'modify' },
+  { id: 'SHADOWS', labelKey: 'draw.kind.shadows', icon: 'sun', group: 'view' },
+  { id: 'FOG', labelKey: 'draw.kind.fog', icon: 'view', group: 'view' },
   { id: 'MATERIALS', labelKey: 'draw.kind.materials', icon: 'palette', group: 'modify' },
   { id: 'REVOLVE', labelKey: 'draw.kind.revolve', icon: 'dot', group: 'modify' },
   { id: 'SWEEP', labelKey: 'draw.kind.sweep', icon: 'dot', group: 'modify' },

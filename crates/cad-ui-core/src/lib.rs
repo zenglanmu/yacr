@@ -14,6 +14,7 @@
 
 pub mod action_recorder;
 pub mod bim;
+pub mod display;
 pub mod host_read;
 pub mod i18n;
 pub mod launch;

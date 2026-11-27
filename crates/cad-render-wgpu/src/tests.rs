@@ -586,8 +586,9 @@ fn the_id_target_probe_prefers_r32uint_when_the_spec_guarantees_it_renderable() 
 #[test]
 fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
     // `mat4x4` (64) + tint `vec4<f32>` (16) + key_flags `vec4<u32>` (16) +
-    // light `vec4<f32>` (16) + the ADR-0039 PBR words (3 × 16) = 160.
-    assert_eq!(UNIFORM_STRUCT_BYTES, 160);
+    // light `vec4<f32>` (16) + the ADR-0039 PBR words (3 × 16) + the fog words
+    // (2 × 16) = 192.
+    assert_eq!(UNIFORM_STRUCT_BYTES, 192);
     // The dynamic-offset slot stride stays at the 256-byte alignment, so the
     // per-page slot count is unchanged by the extra field.
     let (slot_size, slots) = uniform_layout_params(&wgpu::Limits::default());
@@ -636,6 +637,7 @@ fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
         [0.0, 0.0, 1.0, 0.0],
         PbrUniforms::default(),
         [0.0; 3],
+        [0.0; 8],
     );
     assert_eq!(
         &pbr_default[..112],
@@ -656,6 +658,7 @@ fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
             ibl: false,
         },
         [10.0, 20.0, 30.0],
+        [0.0; 8],
     );
     // Word 28..32 = factors + channel bits, 32..36 = emissive, 36..40 = eye.
     assert_eq!(f32::from_le_bytes(pbr[112..116].try_into().unwrap()), 0.25);
@@ -707,6 +710,7 @@ fn the_uniform_struct_carries_the_light_without_moving_the_slot_stride() {
         [0.0, 0.0, 1.0, 0.0],
         ibl_payload,
         [10.0, 20.0, 30.0],
+        [0.0; 8],
     );
     assert_eq!(ibl.len(), UNIFORM_STRUCT_BYTES as usize);
     assert_eq!(ibl.len(), pbr.len());
@@ -886,4 +890,47 @@ fn sdf_conic_field_is_unit_gradient_and_triangle_ink_is_one_pixel() {
             "triangle-filter ink is {ink_px} px, expected exactly 1.0"
         );
     }
+}
+
+#[test]
+fn the_fog_words_ride_after_the_pbr_payload_and_sanitise_bad_values() {
+    // `fog_words` is `[r, g, b, enabled, start, end, 0, 0]` at words 40..47.
+    let fog = FrameFog {
+        color: [0.25, 0.5, 1.0],
+        start: 10.0,
+        end: 40.0,
+    };
+    let uniform = uniform_bytes_fog(
+        &[1.0; 16],
+        [1.0; 4],
+        [0, 0, 0, 0],
+        [0.0, 0.0, 1.0, 0.0],
+        fog.words(),
+        [1.0, 2.0, 3.0],
+    );
+    assert_eq!(uniform.len(), UNIFORM_STRUCT_BYTES as usize);
+    let word =
+        |index: usize| f32::from_le_bytes(uniform[index * 4..index * 4 + 4].try_into().unwrap());
+    assert_eq!(
+        (word(40), word(41), word(42), word(43)),
+        (0.25, 0.5, 1.0, 1.0)
+    );
+    assert_eq!((word(44), word(45)), (10.0, 40.0));
+    // The eye words the PBR path already uses stay where they were.
+    assert_eq!(word(36), 1.0);
+    // An unfogged frame writes zeros: the shaders' `enabled == 0` fast path.
+    assert_eq!(
+        uniform_bytes(&[1.0; 16], [1.0; 4], [0; 4], [0.0, 0.0, 1.0, 0.0])[160..],
+        [0; 32]
+    );
+    // A reversed or non-finite band is sanitised, never encoded as NaN.
+    let bad = FrameFog {
+        color: [f32::NAN, 2.0, 0.5],
+        start: 40.0,
+        end: 10.0,
+    }
+    .words();
+    assert!(bad.iter().all(|value| value.is_finite()));
+    assert_eq!(bad[0], 1.0, "a non-finite channel falls back to 1.0");
+    assert!(bad[5] > bad[4], "the end stays after the start");
 }

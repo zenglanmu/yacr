@@ -544,6 +544,8 @@ export const HOST_NAMES = [
   'RECTANGROTATED',
   'PAINT',
   'SOFTENEDGES',
+  'SHADOWS',
+  'FOG',
   'MATERIALS',
   'PIE',
   'REVOLVE',

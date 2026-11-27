@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 6 | 8.7% |
-| `pending` | 9 | 13.0% |
+| `partial` | 8 | 11.6% |
+| `pending` | 7 | 10.1% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 60/69 = 87.0% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 62/69 = 89.9% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -44,10 +44,14 @@
   **柔化边线**（2026-11-27，ADR-0064）：`SOFTENEDGES [<angle>]` 把所选三维体的
   `render_attributes.soften` 写成角度（默认 20°），渲染隐藏相邻面夹角 ≤ 阈值的边；无法与显示
   三角形匹配的边保持可见；一次写入一步撤销，元素行只在设置时写键（minor 21）。
+  **阴影与雾**（2026-11-27，ADR-0065）：`tables/display.json`（minor 22）存文档太阳
+  （方位角/高度角 + 开关）与雾区间/颜色；`SHADOWS`/`FOG` 各一次 revision/一步撤销，渲染器把太阳
+  当方向光替换相机 key light、可见 shader 按视距向雾色混合；**投射阴影仍未实现**。
+  托盘 Shadows/Fog 面板通过 `cad_display` host read 显示当前值并 dispatch 上述命令。
   **场景**（2026-11-27，ADR-0063）：`tables/scenes.json`（minor 20）存命名相机/空间/样式快照，
   `SCENE SAVE/RESTORE/LIST/DELETE` 各按一条 revision/一步撤销（RESTORE 是会话应用，记
   `ZOOM PREVIOUS`），托盘 Scenes 面板通过 `cad_scenes` host read 列表并 dispatch 恢复/保存/
-  删除；没有可见 Tags/阴影/雾/剖面/软边。
+  删除；没有可见 Tags/剖面/软边（阴影与雾见 ADR-0065）。
   **材质**（2026-11-27，ADR-0062）：`tables/materials.json` 存命名扁平材质（颜色 + 透明度）与
   每个实体一个赋值，`PAINT <名称>` 涂当前选择（内置 12 色首次涂刷落成文档行），渲染在展开时
   用材质色覆盖实体颜色/透明度；一次表写入 = 一次 revision = 一步撤销，删除实体清掉赋值。
@@ -166,8 +170,8 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 内置 12 色调色板 + `PAINT <name>`（整实体涂刷、文档表持久化、渲染即生效）；文档材质只在 `MATERIALS` 报告里列出，色块不随文档材质生成 |
 | Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20）；不含可见 Tags/图层、阴影、雾、剖面、软边与缩略图 |
-| Shadows | pending | 无阴影设置 |
-| Fog | pending | 无雾 |
+| Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
+| Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |
 | Match Photo | pending | 无照片匹配 |
 | Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化/场景快照 |
 | Overlays | pending | 无 overlay 系统 |

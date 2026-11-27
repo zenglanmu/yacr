@@ -347,17 +347,15 @@ pub(super) fn plan_chamfer(
 ///
 /// `R = 0` trims/extends both lines to their corner and inserts **no** new entity
 /// — the exact result of CHAMFER `0/0` (the ADR names the parity test). `R > 0`
-/// inserts a tangent ARC: the centre is at distance `R` from both lines on the
-/// pick side, the tangent distance from the corner is `R / tan(θ/2)` (θ the angle
-/// between the two pick-side rays), and both lines are trimmed to the tangent
-/// points.
+/// inserts a tangent ARC: the centre is `R` from both lines on the pick side, the
+/// tangent distance from the corner is `R / tan(θ/2)`, and both lines are trimmed
+/// to the tangent points.
 ///
 /// **The centre construction is UNVERIFIED (geometric inference)**: Autodesk
-/// publishes no formula for the FILLET centre, so the ADR requires this label and
-/// a test pinning the pick-side inference. Explicit refusals: a non-finite or
-/// negative radius; every [`corner_frame`] refusal (including **parallel** lines —
-/// AutoCAD auto-adjusts the radius, we refuse); and a radius too large for either
-/// line.
+/// publishes no formula, so the ADR requires this label and a pick-side test.
+/// Refusals: a non-finite/negative radius; every [`corner_frame`] refusal
+/// (including **parallel** lines — AutoCAD auto-adjusts, we refuse); a radius too
+/// large for either line.
 pub(super) fn plan_fillet(
     input: &TwoLineInput,
     radius: f64,
@@ -536,16 +534,12 @@ pub(super) fn offset_circle(
 
 /// Offset an ARC so its new radius is `|side_point − centre|`.
 ///
-/// Exactly the CIRCLE distance model ([`offset_circle`]) — the same 3D distance
-/// from the centre decides the new radius, so an arc and a circle sharing a
-/// centre/radius can never disagree about what the pick means. The arc keeps its
-/// `center`, `normal`, `start` and `sweep` byte-identical and only its `radius`
-/// changes, so the offset covers the same angular span on a concentric circle
-/// (a negative sweep stays negative).
-///
-/// A degenerate stored radius, a pick at the centre and a pick on the arc's own
-/// circle (a zero offset) are explicit, named refusals rather than a silent
-/// no-op.
+/// Exactly the CIRCLE distance model ([`offset_circle`]): the same 3D distance
+/// decides the radius, so an arc and a circle sharing a centre/radius agree about
+/// what the pick means. The arc keeps `center`, `normal`, `start` and `sweep`
+/// byte-identical and only its `radius` changes (a negative sweep stays
+/// negative). A degenerate radius, a pick at the centre and a zero offset are
+/// named refusals, never a silent no-op.
 pub(super) fn offset_arc(
     center: Point3,
     normal: Point3,
@@ -662,6 +656,12 @@ pub(crate) fn apply_drawing_patches(
 ) -> CadResult<ChangeSet> {
     if let Some(result) =
         super::material_replay::material_step(drawing, transaction, reason, step, forward)
+    {
+        return result;
+    }
+    // A display-settings step takes the whole-record display path.
+    if let Some(result) =
+        super::display_replay::display_step(drawing, transaction, reason, step, forward)
     {
         return result;
     }

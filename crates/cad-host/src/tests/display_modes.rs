@@ -184,3 +184,71 @@ fn the_published_view_snapshot_carries_the_session_ibl_switch() {
         "IBL records no undo entry"
     );
 }
+
+/// `SHADOWS`/`FOG` reach the published view snapshot from the document record.
+///
+/// The document's `tables/display.json` record is the single source: the host
+/// resolves the sun to a unit vector and the fog band into the frame input, and
+/// a write repaints through the ordinary snapshot path (no scene rebuild). This
+/// is a CPU/session contract: no GPU or pixel claim, and cast shadows remain
+/// unimplemented.
+#[test]
+fn the_published_view_snapshot_carries_the_document_sun_and_fog() {
+    use cad_app::DisplayCommand;
+    let core = core();
+    core.sync_render().expect("the baseline sync publishes");
+    assert_eq!(core.render.view_snapshot().sun, None);
+    assert_eq!(core.render.view_snapshot().fog, None);
+
+    core.command(
+        CommandId::Shadows,
+        CommandPayload::Display(DisplayCommand::Shadows(true)),
+    )
+    .expect("shadows on");
+    core.command(
+        CommandId::Shadows,
+        CommandPayload::Display(DisplayCommand::Sun {
+            azimuth: 0.0,
+            elevation: 90.0,
+        }),
+    )
+    .expect("sun");
+    core.command(
+        CommandId::Fog,
+        CommandPayload::Display(DisplayCommand::FogRange {
+            start: 2.0,
+            end: 20.0,
+        }),
+    )
+    .expect("fog range");
+    core.command(
+        CommandId::Fog,
+        CommandPayload::Display(DisplayCommand::Fog(true)),
+    )
+    .expect("fog on");
+    core.sync_render()
+        .expect("the display write sync publishes");
+
+    let view = core.render.view_snapshot();
+    let sun = view.sun.expect("an enabled sun is a published direction");
+    assert!((sun[2] - 1.0).abs() < 1e-9, "zenith points up: {sun:?}");
+    assert!(sun[0].abs() < 1e-9 && sun[1].abs() < 1e-9, "{sun:?}");
+    let fog = view.fog.expect("an enabled fog is a published band");
+    assert_eq!((fog.start, fog.end), (2.0, 20.0));
+
+    // Turning shadows/fog off clears the frame inputs again.
+    core.command(
+        CommandId::Shadows,
+        CommandPayload::Display(DisplayCommand::Shadows(false)),
+    )
+    .expect("shadows off");
+    core.command(
+        CommandId::Fog,
+        CommandPayload::Display(DisplayCommand::Fog(false)),
+    )
+    .expect("fog off");
+    core.sync_render().expect("the off sync publishes");
+    let view = core.render.view_snapshot();
+    assert_eq!(view.sun, None);
+    assert_eq!(view.fog, None);
+}

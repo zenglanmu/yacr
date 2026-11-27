@@ -234,6 +234,9 @@ impl CadSession {
             super::commands::SCENE_SELECTOR => self.scene_argument(argument, text),
             // `SOFTENEDGES [<angle>]`: the SketchUp soften-edges display write.
             super::commands::SOFTENEDGES_SELECTOR => self.softenedges_argument(argument, text),
+            // `SHADOWS`/`FOG`: the per-document display record.
+            super::commands::SHADOWS_SELECTOR => self.shadows_argument(argument, text),
+            super::commands::FOG_SELECTOR => self.fog_argument(argument, text),
             super::commands::NEWVIEW_SELECTOR => self.newview_argument(argument, text),
             super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
             // The 2026-11-07 layout/viewport batch typed forms, including the

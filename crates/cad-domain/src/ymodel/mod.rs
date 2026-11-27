@@ -175,7 +175,11 @@ pub const FORMAT_WRITE: u32 = 2;
 /// `21` adds the per-entity `render_attributes.soften` angle (SketchUp's Soften
 /// Edges). The key is omitted unless set, so an unsoftened document keeps the
 /// lower tier; a pre-21 reader refuses the key instead of drawing hard edges.
-pub const FORMAT_MINOR: u32 = 21;
+///
+/// `22` adds the per-document display record (`tables/display.json`): the
+/// Shadows sun and the Fog band. Written only when it differs from the default;
+/// a pre-22 reader refuses the table path instead of dropping the settings.
+pub const FORMAT_MINOR: u32 = 22;
 
 /// Stable failure markers.
 ///

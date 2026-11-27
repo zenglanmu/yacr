@@ -148,6 +148,9 @@ impl CommandId {
                 | Self::ScaleText
                 // SOFTENEDGES writes per-entity display state (`render_attributes.soften`).
                 | Self::SoftenEdges
+                // SHADOWS/FOG write the per-document display record.
+                | Self::Shadows
+                | Self::Fog
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock

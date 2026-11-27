@@ -178,6 +178,10 @@ macro_rules! cad_wire_registry {
             // a scene by dispatching `SCENE RESTORE <name>`, never through this
             // read. A carrier with no lane answers `unsupported-runtime: scenes`.
             @row(shared, reads, NoArgs, cad_scenes, { }, $crate::scene::ScenesResponse, { $crate::session::host_read::scenes(reads) })
+            // The Shadows/Fog panels: one request-carrying read
+            // (`kind: "display"`, no fields) over the same seam. Writes go
+            // through the ordinary `SHADOWS`/`FOG` command path, never here.
+            @row(shared, reads, NoArgs, cad_display, { }, $crate::display::DisplayResponse, { $crate::session::host_read::display(reads) })
             // The action-recorder state (ADR-0056): one request-carrying read
             // (`kind: "actionRecorder"`, no fields) over the same seam. A
             // carrier with no named-file bridge answers its own

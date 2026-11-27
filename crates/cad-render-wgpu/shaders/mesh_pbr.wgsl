@@ -114,6 +114,10 @@ struct Camera {
     // Camera position in the batch's vertex space (xyz), w = the frame's
     // procedural-IBL flag (`1.0` = enabled, ADR-0044).
     pbr_eye: vec4<f32>,
+    // rgb = fog colour, a = 1 when fog is enabled for this frame.
+    fog_color: vec4<f32>,
+    // x = start distance, y = end distance (model units), z/w unused.
+    fog_range: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 
@@ -355,6 +359,19 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
     return f0 + (vec3<f32>(1.0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }
 
+
+// Distance fog (SketchUp's Fog): blend toward `camera.fog_color.rgb` as the
+// fragment's distance from the eye goes from `start` to `end`.
+fn fog_mix(color: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    if (camera.fog_color.a < 0.5) {
+        return color;
+    }
+    let start = camera.fog_range.x;
+    let end = max(camera.fog_range.y, start + 1e-3);
+    let t = clamp((distance(world, camera.pbr_eye.xyz) - start) / (end - start), 0.0, 1.0);
+    return mix(color, camera.fog_color.rgb, t);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let key = camera.key_flags.x;
@@ -471,7 +488,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // background must not invert it to black. The legacy branch keeps the
     // `mesh.wgsl` display convention exactly.
     if (ibl_on) {
-        return vec4<f32>(shaded.rgb, shaded.a);
+        return vec4<f32>(fog_mix(shaded.rgb, in.world_position), shaded.a);
     }
-    return vec4<f32>(ink_for_background(shaded.rgb), shaded.a);
+    return vec4<f32>(fog_mix(ink_for_background(shaded.rgb), in.world_position), shaded.a);
 }

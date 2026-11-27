@@ -310,8 +310,7 @@ pub enum CommandPayload {
     /// in-command Hatch Edit dialog. Full contract:
     /// [`crate::command_id::hatchedit`].
     HatchEdit(HatchEditOption),
-    /// `BLOCK` (Work-only): define a named block from `refs` at the picked
-    /// `base` point.
+    /// `BLOCK` (Work-only): define a named block from `refs` at the picked `base`.
     ///
     /// `refs` is the selection snapshot taken when
     /// [`crate::draw_tool::DrawToolKind::BlockDefine`] started. Every ref must be
@@ -543,8 +542,8 @@ pub enum CommandPayload {
     /// BOUNDARY from one internal point plus the `-BOUNDARY` options; see
     /// [`crate::command_id::boundary`].
     BoundaryPoint(crate::command_id::boundary::BoundaryInput),
-    /// `COPYBASE`: capture the refs into the in-process clipboard together with
-    /// the picked base point (a read-only capture: no transaction, no history).
+    /// `COPYBASE`: capture the refs plus the picked base into the in-process
+    /// clipboard (read-only: no transaction, no history).
     ///
     /// `refs` is the selection snapshot taken when the tool started (the
     /// [`crate::draw_tool::DrawToolKind::CopyBase`] capture is the one-point
@@ -743,8 +742,8 @@ pub enum CommandPayload {
     /// `PARAM {op: ...}`: structural parameter edit (ADR-0043 D9); see [`ParamOp`].
     Param(ParamOp),
     Attribute(AttributeCommand),
-    /// `GRIPSTRETCH`: move **one** handle of **one** entity to a world point (the
-    /// payload of a pointer gesture; the gesture itself lives in `cad-host`).
+    /// `GRIPSTRETCH`: move one handle of one entity to a world point (the
+    /// payload of a pointer gesture; the gesture lives in `cad-host`).
     /// The host resolves `to` in the plan view and runs it through the same
     /// drafting constraint the capture path uses, so the previewed marker and the
     /// committed point are one coordinate. The handler re-reads `id.entity`,
@@ -832,9 +831,8 @@ pub enum CommandPayload {
     MRedo(u32),
     /// `MULTIPLE [command]`: the session repeat arm. `None` (bare `MULTIPLE`)
     /// repeats the next interactive draw/edit capture command; `Some(target)`
-    /// names one admitted capture command resolved by the command vocabulary
-    /// ([`crate::MultipleTarget`]). A target that does not start such a capture
-    /// is refused by name when dispatched.
+    /// names one admitted capture command ([`crate::MultipleTarget`]); anything
+    /// else is refused by name when dispatched.
     Multiple(Option<crate::MultipleTarget>),
     /// The 2026-11-07 draw/modify batch; contracts in `command_id::draw2`.
     Draw2(Box<crate::Draw2Payload>),
@@ -842,7 +840,9 @@ pub enum CommandPayload {
     View(ViewCommand),
     /// The typed `SCENE <option>` line (SketchUp pages).
     Scene(SceneCommand),
-    /// `SOFTENEDGES <angle>`: the soften angle in degrees (bare uses the default).
+    /// The typed `SHADOWS`/`FOG` line (display settings).
+    Display(DisplayCommand),
+    /// `SOFTENEDGES <angle>` in degrees (bare uses the default).
     SoftenEdges(f64),
     ViewGo(String),
     VPoint(VPointInput),

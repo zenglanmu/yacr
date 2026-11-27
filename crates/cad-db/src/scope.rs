@@ -199,6 +199,11 @@ pub enum TableKind {
     /// Document content like [`TableKind::Views`]; contributes the minor-20
     /// tier. A `SCENE SAVE`/`DELETE` is one revision and one undo step.
     Scenes,
+    /// Per-document display settings (`tables/display.json`): the Shadows sun
+    /// and the Fog band.
+    ///
+    /// Contributes the minor-22 tier; a write is one revision and one undo step.
+    Display,
 }
 
 /// The set of persisted rows one commit made stale.

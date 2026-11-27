@@ -19,6 +19,7 @@ mod tests_batch;
 mod tests_bim;
 mod tests_command_log;
 mod tests_commands;
+mod tests_display;
 mod tests_explode;
 mod tests_fonts;
 mod tests_hatch;

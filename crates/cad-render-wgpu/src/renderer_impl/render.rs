@@ -17,7 +17,11 @@ impl Renderer {
                     .unwrap_or_else(|| "device lost; rebuild required".into()),
             ));
         }
+        // SketchUp "Shadows": the document sun replaces the camera key light.
         // `light.a` = light-background ink flag; `rgb` stays the light direction.
+        let light = self
+            .sun
+            .map_or(light, |sun| [sun[0], sun[1], sun[2], light[3]]);
         let light = light_with_background_flag(light, target.clear_color());
         // Remember the view this frame used: `pick_at` re-runs the same
         // projection for the id pass, so a pick always matches the frame the user
@@ -236,26 +240,14 @@ impl Renderer {
         };
         let pacing_cost_ema_ms = self.pacing.cost_ema_ms;
 
-        // Images are drawn only on the page that clears the target (the first
-        // page of a progressive frame, or every frame when not progressive).
-        // Continuation pages load the existing colour, so re-drawing an
-        // `alpha < 1` image every page would accumulate its opacity and charge it
-        // repeatedly; a continuation page must not composite images again.
-        //
-        // The full image charge is reserved **before** geometry, so geometry
-        // cannot saturate the cleared page and leave the images undeclared on the
-        // continuation pages (which never composite images again). It is charged
-        // against the active page budget, with a fallback to the un-paced ceiling
-        // when a paced page cannot hold every image: an image draws exactly once,
-        // so a page split must never drop it. Geometry then fills what is left of
-        // the active page budget. Visual order is unchanged (images still draw
-        // last, in ascending `draw_order` among themselves).
-        // The first page of a cycle normally clears the colour target. A
-        // flag/tint restart reuses the retained colour (the geometry and camera
-        // are unchanged), so it clears only depth and loads colour; already-drawn
-        // pages survive the restart. Images are composited only on a cycle that
-        // actually clears colour, so a preserve-colour cycle never recomposites
-        // them (that would accumulate a transparent image's opacity).
+        // Images composite only on the page that clears colour (a continuation
+        // page loads existing colour, so re-drawing an `alpha < 1` image would
+        // accumulate opacity and charge it repeatedly). Their full charge is
+        // reserved **before** geometry (falling back to the un-paced ceiling when
+        // a paced page cannot hold every image: an image draws exactly once, so a
+        // split must never drop it); geometry fills the remainder, and images
+        // keep their visual order (last, ascending `draw_order`). A flag/tint
+        // restart preserves colour, so images are not recomposited there.
         let cycle_start = self
             .progressive_frame
             .as_ref()
@@ -527,22 +519,15 @@ impl Renderer {
         self.uniforms
             .ensure_slots(max_slots, device, layout, &self.gpu_memory);
 
-        // Write only this page's uniforms. Rewriting every batch for every
-        // continuation would turn bounded accumulation into repeated full work.
-        // Each uniform is the transform matrix followed by the constant
-        // per-batch colour (normalized sRGB) and alpha (both clamped by the same
-        // policy used for drawing); they are packed into the shared arena and
-        // uploaded with one `write_buffer` per page below.
-        //
-        // Batches converted to an instanced stream or a merged mesh chunk own no
-        // per-batch uniform (the whole stream/chunk shares one), so they are
-        // skipped and the legacy slots are compacted: a fully converted scene
-        // needs one stream slot and one chunk slot, not one slot per batch.
-        // World units per pixel travels in the otherwise-unused `key_flags.z` word
-        // (bitcast f32) for every uniform: the SDF conic vertex stage floors its
-        // quad margin with it, and the anti-aliased line stages use it as the SDF
-        // ramp width (`w = world_per_px` → 1.0 px of linear ink). The mesh/image
-        // shaders ignore it.
+        // Write only this page's uniforms (rewriting every batch per continuation
+        // repeats full work). Each is the transform plus the constant per-batch
+        // colour/alpha, packed into the shared arena and uploaded with one
+        // `write_buffer` per page. Converted streams/chunks own no per-batch
+        // uniform, so their slots are skipped and legacy slots compacted.
+        // World units per pixel rides the otherwise-unused `key_flags.z` word
+        // (bitcast f32): the SDF conic stage floors its quad margin with it and
+        // the AA line stages use it as the ramp width (`w = world_per_px` → 1.0 px
+        // of linear ink). Mesh/image shaders ignore it.
         let world_per_px_bits = (projection.world_per_px() as f32).to_bits();
         // The line class may use an overridden ramp width (test hook); the SDF
         // conic class always uses the projection's real value.
@@ -603,7 +588,6 @@ impl Renderer {
         // pre-skip layout; only the (purely internal) slot index changes, and the
         // `flush` range shrinks to the compacted count. These classes carry their
         // colour per instance or per vertex, so their uniform tint is opaque white.
-        let white = [1.0, 1.0, 1.0, 1.0];
         let mut next_slot = legacy_slots + draw_images.len();
         let mut stream_slots: Vec<u32> = vec![u32::MAX; stream_slot_count];
         for (s, slot) in stream_slots.iter_mut().enumerate() {
@@ -615,7 +599,12 @@ impl Renderer {
             // The instanced shader ignores the uniform tint (colour and the pick
             // key are per-instance) but the layout keeps them; write opaque white
             // and a zero key, and the SDF ramp width in `key_flags.z`.
-            let uniform = uniform_bytes(&matrix, white, [0, 0, line_wpp_bits, 0], light);
+            let uniform = self.stream_uniform(
+                &matrix,
+                [0, 0, line_wpp_bits, 0],
+                light,
+                self.instance_streams[s].origin,
+            );
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -631,7 +620,8 @@ impl Renderer {
             }
             *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.mesh_chunks[c].origin);
-            let uniform = uniform_bytes(&matrix, white, [0, 0, 0, 0], light);
+            let uniform =
+                self.stream_uniform(&matrix, [0, 0, 0, 0], light, self.mesh_chunks[c].origin);
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -651,7 +641,12 @@ impl Renderer {
             }
             *slot = next_slot as u32;
             let matrix = projection.batch_matrix_f64(self.arc_streams[a].origin);
-            let uniform = uniform_bytes(&matrix, white, [0, 0, world_per_px_bits, 0], light);
+            let uniform = self.stream_uniform(
+                &matrix,
+                [0, 0, world_per_px_bits, 0],
+                light,
+                self.arc_streams[a].origin,
+            );
             self.uniforms.write_slot(next_slot, &uniform);
             next_slot += 1;
         }
@@ -697,7 +692,12 @@ impl Renderer {
         // (the `camera_move_*` fences assert the upload counters stay flat).
         if use_pulled {
             if let Some(camera_buffer) = self.pulled_camera_buffer.as_ref() {
-                let mut columns = pulled_camera_columns(projection, light);
+                let mut columns = pulled_camera_columns(
+                    projection,
+                    light,
+                    self.fog_words(),
+                    self.last_camera_position.unwrap_or([0.0; 3]),
+                );
                 // The line class may use an overridden ramp width (test hook).
                 if let Some(w) = self.line_ramp_override {
                     columns[3][0] = w;

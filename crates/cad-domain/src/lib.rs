@@ -9,6 +9,7 @@ pub mod body;
 pub mod brep;
 mod dimension;
 mod dimension_synthesis;
+pub mod display;
 pub mod hatch;
 pub mod hatch_entity;
 pub mod material;

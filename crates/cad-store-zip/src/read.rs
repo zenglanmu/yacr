@@ -410,7 +410,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 24] = [
+const TABLE_ENTRIES: [(TableKind, &str); 25] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -457,6 +457,7 @@ const TABLE_ENTRIES: [(TableKind, &str); 24] = [
     // name/colour/assignment rules.
     (TableKind::Materials, "tables/materials.json"),
     (TableKind::Scenes, "tables/scenes.json"),
+    (TableKind::Display, "tables/display.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -869,6 +870,7 @@ mod tests {
             TableKind::Views,
             TableKind::Materials,
             TableKind::Scenes,
+            TableKind::Display,
         ];
         let mut paths = std::collections::BTreeSet::new();
         for kind in kinds {
@@ -900,6 +902,7 @@ mod tests {
                 TableKind::Views => "Views",
                 TableKind::Materials => "Materials",
                 TableKind::Scenes => "Scenes",
+                TableKind::Display => "Display",
             };
             assert_eq!(name, format!("{kind:?}"));
             let path = table_entry(kind);

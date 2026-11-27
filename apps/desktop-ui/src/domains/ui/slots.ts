@@ -43,6 +43,8 @@ export type TrayPanelKind =
   | 'mechanicalTree'
   | 'materials'
   | 'soften'
+  | 'shadows'
+  | 'fog'
   | 'pending';
 
 /** One tray panel, in vertical order. */

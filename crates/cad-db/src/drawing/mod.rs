@@ -24,6 +24,7 @@ mod attributes;
 mod bim;
 mod block_edit;
 mod bounds;
+mod display;
 mod document_metadata;
 mod document_times;
 mod edit;
@@ -58,6 +59,7 @@ pub use self::bim::BimPatch;
 pub(crate) use crate::snapshot::material::validate_materials;
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
 pub use block_edit::{BlockPatch, BlockRow};
+pub use display::DisplayPatch;
 pub use document_metadata::{DocumentMetadata, DocumentMetadataField};
 pub use document_times::DocumentTimes;
 pub(crate) use group::validate_groups;
@@ -466,6 +468,8 @@ pub struct DrawingDatabase {
     /// Persisted scenes (`tables/scenes.json`, minor 20). Empty for a document
     /// without scenes.
     pub(crate) scenes: cad_domain::scene::SceneTable,
+    /// Per-document display settings (`tables/display.json`, minor 22).
+    pub(crate) display: cad_domain::display::DisplaySettings,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

@@ -148,6 +148,21 @@ impl HostCore {
                 // the session token directly. Toggling it repaints without a
                 // scene rebuild (`ibl_enabled` is part of the render input).
                 ibl_enabled: c.session.view_extras.pbr_environment.is_image_based(),
+                // SketchUp Shadows/Fog: the document's own display record. Both
+                // are per-frame uniform data (a shading direction and a
+                // distance band), so a write repaints without a scene rebuild.
+                // Cast shadows are NOT IMPLEMENTED.
+                sun: c
+                    .drawing()
+                    .and_then(|database| database.display_settings().shadows.sun_direction()),
+                fog: c
+                    .drawing()
+                    .and_then(|database| database.display_settings().fog.frame_fog())
+                    .map(|(color, start, end)| FogSnapshot {
+                        color,
+                        start: f64::from(start),
+                        end: f64::from(end),
+                    }),
                 // The requested canvas MSAA sample count, resolved from the same
                 // effective view above. It is a per-frame render input, so a
                 // settings write repaints without a scene rebuild.

@@ -41,6 +41,7 @@ impl DrawingHistoryStep {
             }
         }
         bytes += crate::group_patch_bytes::group_patch_bytes(&self.group_patches);
+        bytes += self.display_patches.len() * std::mem::size_of::<cad_db::DisplayPatch>();
         for patch in &self.view_patches {
             bytes += std::mem::size_of::<cad_db::ViewPatch>() + patch.name.len();
             for row in patch.before.iter().chain(patch.after.iter()) {

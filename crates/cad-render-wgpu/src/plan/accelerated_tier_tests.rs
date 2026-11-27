@@ -12,7 +12,7 @@ fn pulled_strides_match_their_wgsl_vec4_layouts() {
         std::mem::size_of::<PulledMeshVertex>(),
         PULLED_MESH_VERTEX_STRIDE as usize
     );
-    assert_eq!(PULLED_CAMERA_BYTES, 80);
+    assert_eq!(PULLED_CAMERA_BYTES, 128);
     // The layout is alignment-clean for the storage array stride.
     assert_eq!(std::mem::align_of::<PulledLine>(), 4);
     assert_eq!(std::mem::align_of::<PulledMeshVertex>(), 4);
@@ -212,7 +212,8 @@ fn pulled_camera_columns_are_origin_independent_and_match_the_batch_matrix() {
         depth: OrthoDepth::default(),
         world_per_px: 0.0,
     };
-    let columns = pulled_camera_columns(projection, [0.0, 0.0, 1.0, 0.0]);
+    let columns =
+        pulled_camera_columns(projection, [0.0, 0.0, 1.0, 0.0], [0.0; 8], [1.0, 2.0, 3.0]);
     // The first three columns of a per-chunk matrix must not depend on the
     // chunk origin: one camera uniform serves every chunk.
     let m = projection.batch_matrix_f64([1.0e6, 2.0e6, 0.0]);
@@ -225,6 +226,11 @@ fn pulled_camera_columns_are_origin_independent_and_match_the_batch_matrix() {
     // The fifth column carries the frame's light vector verbatim, so the pulled
     // mesh stage shades with the same camera-relative light as the universal one.
     assert_eq!(columns[4], [0.0, 0.0, 1.0, 0.0]);
+    // The fog columns default to zero (no fog) and the last column carries the
+    // world-space eye the pulled shaders measure fog distance from.
+    assert_eq!(columns[5], [0.0; 4]);
+    assert_eq!(columns[6], [0.0; 4]);
+    assert_eq!(columns[7], [1.0, 2.0, 3.0, 0.0]);
     // And the chunk column is exactly the per-chunk matrix's last column, so
     // `mat4x4(c0, c1, c2, t)` reproduces `batch_matrix_f64(origin)`.
     let origin = [1.0e6 + 123.5, 2.0e6 - 77.25, 0.0];
@@ -251,19 +257,23 @@ fn chunk_transform_column_keeps_the_f64_camera_reduction() {
 }
 
 #[test]
-fn pulled_camera_bytes_are_five_columns_little_endian() {
+fn pulled_camera_bytes_are_eight_columns_little_endian() {
     let columns = [
         [1.0f32, 2.0, 3.0, 4.0],
         [5.0, 6.0, 7.0, 8.0],
         [9.0, 10.0, 11.0, 12.0],
         [13.0, 14.0, 15.0, 16.0],
         [17.0, 18.0, 19.0, 20.0],
+        [21.0, 22.0, 23.0, 24.0],
+        [25.0, 26.0, 27.0, 28.0],
+        [29.0, 30.0, 31.0, 32.0],
     ];
     let bytes = pulled_camera_bytes(&columns);
     assert_eq!(bytes.len(), PULLED_CAMERA_BYTES as usize);
     for (i, value) in [
         1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-        17.0, 18.0, 19.0, 20.0,
+        17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0,
+        32.0,
     ]
     .iter()
     .enumerate()

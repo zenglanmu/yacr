@@ -301,6 +301,7 @@ mod point_display_style;
 mod refedit;
 mod revision_cloud;
 // The Wave 27 read-only recovery/AEC/URL report contracts.
+mod display;
 mod recovery;
 mod scenes;
 mod select_filter;

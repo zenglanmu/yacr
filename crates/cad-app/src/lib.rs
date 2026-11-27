@@ -72,6 +72,7 @@ mod app_audit;
 // ADR-0036 P2.0: the real one-pick `CHAMFEREDGE` command.
 mod app_chamfer_edge;
 mod app_concept_shapes;
+mod app_display;
 mod app_extrude;
 mod app_follow_me;
 mod app_materials;
@@ -525,10 +526,10 @@ pub use command_payload::{
     CenterLineCommand, CenterMarkCommand, ChangePropertiesRequest, ClipCommand, CommandPayload,
     DashLayerOps, DeclaredUnits, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
     DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
-    DwgPropsCommand, EntityPropertyWrite, FilterExpression, FilterLogic, FilterRequest,
-    GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder, HatchEditOption,
-    HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand, JoinMode,
-    JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
+    DisplayCommand, DwgPropsCommand, EntityPropertyWrite, FilterExpression, FilterLogic,
+    FilterRequest, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
+    HatchEditOption, HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand,
+    JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
     MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment, MLeaderContentSpec,
     MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField, MatchPropSettings,
     MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand, NamedObjectKind,

@@ -399,6 +399,9 @@ pub struct DrawingHistoryStep {
     pub material_patches: Vec<cad_db::MaterialPatch>,
     /// Reversible scene rows (`tables/scenes.json`).
     pub scene_patches: Vec<cad_db::ScenePatch>,
+    /// Reversible document display settings (`tables/display.json`, minor 22):
+    /// the whole Shadows/Fog record before and after a `SHADOWS`/`FOG` write.
+    pub display_patches: Vec<cad_db::DisplayPatch>,
 }
 
 impl DrawingHistoryStep {
@@ -423,6 +426,7 @@ impl DrawingHistoryStep {
         let view_step = !self.view_patches.is_empty();
         let material_step = !self.material_patches.is_empty();
         let scene_step = !self.scene_patches.is_empty();
+        let display_step = !self.display_patches.is_empty();
         if self.record.is_empty()
             && self.linetype_patches.is_empty()
             && self.bim_patches.is_empty()
@@ -431,6 +435,7 @@ impl DrawingHistoryStep {
             && !view_step
             && !material_step
             && !scene_step
+            && !display_step
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo step needs at least one entity, block, layer, layout, style, \
@@ -439,6 +444,42 @@ impl DrawingHistoryStep {
             ));
         }
         self.record.validate_batches()?;
+        if display_step
+            && (!self.record.is_empty()
+                || !self.linetype_patches.is_empty()
+                || !self.bim_patches.is_empty()
+                || !self.group_patches.is_empty()
+                || !self.view_patches.is_empty()
+                || !self.material_patches.is_empty()
+                || !self.scene_patches.is_empty()
+                || parametric)
+        {
+            return Err(CadError::InvalidInput(
+                "a display undo step cannot also carry entity, table, linetype, BIM, group, \
+                 view, material, scene or parameter rows"
+                    .into(),
+            ));
+        }
+        if display_step {
+            // One whole-record write per step: a record is not an orthogonal
+            // per-key edit, so two patches would be two revisions in one undo.
+            if self.display_patches.len() != 1 {
+                return Err(CadError::InvalidInput(
+                    "a display undo step carries exactly one whole-record patch".into(),
+                ));
+            }
+            if self.record.merge_key.is_some() {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record with display patches cannot be merged".into(),
+                ));
+            }
+            let patch = &self.display_patches[0];
+            if patch.before == patch.after {
+                return Err(CadError::InvalidInput(
+                    "a display patch needs two different records".into(),
+                ));
+            }
+        }
         if scene_step
             && (!self.record.is_empty()
                 || !self.linetype_patches.is_empty()
@@ -446,6 +487,7 @@ impl DrawingHistoryStep {
                 || !self.group_patches.is_empty()
                 || !self.view_patches.is_empty()
                 || !self.material_patches.is_empty()
+                || display_step
                 || parametric)
         {
             return Err(CadError::InvalidInput(
@@ -460,6 +502,7 @@ impl DrawingHistoryStep {
                 || !self.bim_patches.is_empty()
                 || !self.group_patches.is_empty()
                 || !self.view_patches.is_empty()
+                || display_step
                 || parametric)
         {
             return Err(CadError::InvalidInput(
@@ -605,6 +648,7 @@ impl DrawingHistoryStep {
             if !self.record.is_empty()
                 || !self.linetype_patches.is_empty()
                 || !self.bim_patches.is_empty()
+                || display_step
                 || parametric
             {
                 return Err(CadError::InvalidInput(

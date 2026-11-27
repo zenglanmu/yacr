@@ -54,6 +54,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::action_recorder::{ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED};
 use crate::bim::{BimFilterWire, BimQueryResponse, BIM_DEFAULT_LIMIT, BIM_UNSUPPORTED};
+use crate::display::{DisplayResponse, DISPLAY_KIND, DISPLAY_UNSUPPORTED};
 use crate::mechanical::{
     MechanicalTreeResponse, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
 };
@@ -106,6 +107,8 @@ pub enum HostReadRequest {
     /// `kind: "scenes"` — the open document's persisted scenes (SketchUp pages).
     /// No fields.
     Scenes,
+    /// `kind: "display"` — the open document's Shadows/Fog record. No fields.
+    Display,
 }
 
 impl HostReadRequest {
@@ -117,6 +120,7 @@ impl HostReadRequest {
             Self::MechanicalTree => MECHANICAL_TREE_KIND,
             Self::ActionRecorder => ACTION_RECORDER_KIND,
             Self::Scenes => SCENES_KIND,
+            Self::Display => DISPLAY_KIND,
         }
     }
 }
@@ -140,6 +144,8 @@ pub enum HostReadAnswer {
     ActionRecorder(ActionRecorderSnapshot),
     /// `kind: "scenes"` — the scene list.
     Scenes(ScenesResponse),
+    /// `kind: "display"` — the Shadows/Fog record.
+    Display(DisplayResponse),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -181,6 +187,11 @@ impl Serialize for HostReadRequest {
                 state.serialize_field("kind", SCENES_KIND)?;
                 state.end()
             }
+            Self::Display => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", DISPLAY_KIND)?;
+                state.end()
+            }
         }
     }
 }
@@ -220,10 +231,11 @@ impl<'de> Deserialize<'de> for HostReadRequest {
             MECHANICAL_TREE_KIND => Ok(Self::MechanicalTree),
             ACTION_RECORDER_KIND => Ok(Self::ActionRecorder),
             SCENES_KIND => Ok(Self::Scenes),
+            DISPLAY_KIND => Ok(Self::Display),
             other => Err(serde::de::Error::custom(format!(
                 "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
                  {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}, \
-                 {SCENES_KIND:?}]"
+                 {SCENES_KIND:?}, {DISPLAY_KIND:?}]"
             ))),
         }
     }
@@ -293,6 +305,7 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
         HostReadRequest::MechanicalTree => MECHANICAL_TREE_UNSUPPORTED.to_string(),
         HostReadRequest::ActionRecorder => ACTION_RECORDER_UNSUPPORTED.to_string(),
         HostReadRequest::Scenes => SCENES_UNSUPPORTED.to_string(),
+        HostReadRequest::Display => DISPLAY_UNSUPPORTED.to_string(),
     }
 }
 

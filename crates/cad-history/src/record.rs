@@ -28,6 +28,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -45,6 +46,7 @@ impl History {
         self.record_drawing_step(
             record,
             linetype_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -72,6 +74,7 @@ impl History {
             record,
             Vec::new(),
             bim_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -108,6 +111,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -124,6 +128,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             group_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -146,6 +151,7 @@ impl History {
             view_patches,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -164,6 +170,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             material_patches,
+            Vec::new(),
             Vec::new(),
         )
     }
@@ -184,6 +191,27 @@ impl History {
             Vec::new(),
             Vec::new(),
             scene_patches,
+            Vec::new(),
+        )
+    }
+
+    /// Record a committed display-settings write (`SHADOWS`/`FOG`).
+    pub fn record_drawing_with_display(
+        &mut self,
+        record: DrawingUndoRecord,
+        display_patches: Vec<cad_db::DisplayPatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            display_patches,
         )
     }
 
@@ -203,6 +231,7 @@ impl History {
         view_patches: Vec<cad_db::ViewPatch>,
         material_patches: Vec<cad_db::MaterialPatch>,
         scene_patches: Vec<cad_db::ScenePatch>,
+        display_patches: Vec<cad_db::DisplayPatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
@@ -215,6 +244,7 @@ impl History {
             view_patches,
             material_patches,
             scene_patches,
+            display_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {

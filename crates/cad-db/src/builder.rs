@@ -1,5 +1,4 @@
 //! The sanctioned construction path for a [`DrawingDatabase`].
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -66,6 +65,7 @@ impl DrawingDatabaseBuilder {
                 insertion_base: None,
                 materials: cad_domain::material::MaterialDocument::new(),
                 scenes: cad_domain::scene::SceneTable::new(),
+                display: cad_domain::display::DisplaySettings::default(),
                 limits_min: None,
                 limits_max: None,
                 dim_styles: BTreeMap::new(),

@@ -18,7 +18,7 @@ use super::*;
 /// shaders reads — so a per-batch uniform stays one slot on one page and needs no
 /// second arena. Every other shader declares the shorter prefix, which is valid
 /// for a uniform binding at least as large as the declared struct.
-pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 160;
+pub(crate) const UNIFORM_STRUCT_BYTES: u32 = 192;
 
 /// Bytes of the selection-flags control uniform (`enabled` + row width + two
 /// reserved words, 16-byte aligned for the uniform layout).
@@ -645,6 +645,10 @@ impl Default for PbrUniforms {
 ///
 /// Word-oriented so the byte layout is exactly what the shaders declare and does
 /// not depend on the host's float representation or `bytemuck` alignment rules.
+///
+/// This wrapper writes **no fog** (words 40..47 stay zero, `enabled = 0`); the
+/// frame's visible geometry uses [`uniform_bytes_fog`] so the fog words and the
+/// camera position (the fog distance reference) travel together.
 pub(crate) fn uniform_bytes(
     matrix: &[f32; 16],
     tint: [f32; 4],
@@ -658,6 +662,29 @@ pub(crate) fn uniform_bytes(
         light,
         PbrUniforms::default(),
         [0.0; 3],
+        [0.0; 8],
+    )
+}
+
+/// [`uniform_bytes`] plus the frame's fog: `fog` is `[r, g, b, enabled,
+/// start, end, 0, 0]` and `camera_position` is the eye in the same vertex space
+/// as the geometry (a stream's fixed-point origin already subtracted).
+pub(crate) fn uniform_bytes_fog(
+    matrix: &[f32; 16],
+    tint: [f32; 4],
+    key_flags: [u32; 4],
+    light: [f32; 4],
+    fog: [f32; 8],
+    camera_position: [f32; 3],
+) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
+    uniform_bytes_pbr(
+        matrix,
+        tint,
+        key_flags,
+        light,
+        PbrUniforms::default(),
+        camera_position,
+        fog,
     )
 }
 
@@ -671,6 +698,7 @@ pub(crate) fn uniform_bytes_pbr(
     light: [f32; 4],
     pbr: PbrUniforms,
     camera_position: [f32; 3],
+    fog: [f32; 8],
 ) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
     let mut words = [0u32; UNIFORM_STRUCT_BYTES as usize / 4];
     for (slot, value) in matrix.iter().enumerate() {
@@ -698,6 +726,12 @@ pub(crate) fn uniform_bytes_pbr(
     words[38] = camera_position[2].to_bits();
     // Word 39 is `Camera.pbr_eye.w`, the frame's procedural-IBL flag (ADR-0044).
     words[39] = (if pbr.ibl { 1.0f32 } else { 0.0 }).to_bits();
+    // Words 40..47: `Camera.fog_color` (rgb + enabled) and `Camera.fog_range`
+    // (start, end, 0, 0). A fog-less frame writes zeros, which the shaders read
+    // as `enabled == 0`.
+    for (slot, value) in fog.iter().enumerate() {
+        words[40 + slot] = value.to_bits();
+    }
     let mut bytes = [0u8; UNIFORM_STRUCT_BYTES as usize];
     for (slot, word) in words.iter().enumerate() {
         bytes[slot * 4..slot * 4 + 4].copy_from_slice(&word.to_le_bytes());
@@ -723,6 +757,7 @@ pub(crate) fn uniform_bytes_pbr(
 ///
 /// `ibl` is the frame's procedural-IBL switch (ADR-0044) and travels in
 /// `Camera.pbr_eye.w`; it is per-frame renderer state, not a batch property.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn batch_uniform(
     batch: &GpuBatch,
     matrix: &[f32; 16],
@@ -731,9 +766,15 @@ pub(crate) fn batch_uniform(
     light: [f32; 4],
     camera_position: [f32; 3],
     ibl: bool,
+    fog: [f32; 8],
 ) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
+    let eye = [
+        camera_position[0] - batch.origin[0],
+        camera_position[1] - batch.origin[1],
+        camera_position[2] - batch.origin[2],
+    ];
     let Some(pbr) = &batch.pbr else {
-        return uniform_bytes(matrix, tint, key_flags, light);
+        return uniform_bytes_fog(matrix, tint, key_flags, light, fog, eye);
     };
     let mut channels = 0;
     if batch.texture.is_some() {
@@ -764,11 +805,8 @@ pub(crate) fn batch_uniform(
             emissive: pbr.emissive,
             ibl,
         },
-        [
-            camera_position[0] - batch.origin[0],
-            camera_position[1] - batch.origin[1],
-            camera_position[2] - batch.origin[2],
-        ],
+        eye,
+        fog,
     )
 }
 

@@ -24,6 +24,7 @@
 pub(crate) mod bim;
 pub(crate) mod build;
 pub(crate) mod configurations;
+pub(crate) mod display;
 pub(crate) mod elements;
 pub(crate) mod features;
 pub(crate) mod groups;
@@ -210,6 +211,7 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // document holds a row; minor-19 tier.
         TableKind::Materials => "tables/materials.json",
         TableKind::Scenes => "tables/scenes.json",
+        TableKind::Display => "tables/display.json",
     }
 }
 
@@ -487,6 +489,14 @@ impl DocumentSnapshot {
     pub fn has_materials(&self) -> bool {
         self.tables
             .get(TableKind::Materials)
+            .is_some_and(|rows| !rows.is_empty())
+    }
+
+    /// Whether this document carries display settings (`tables/display.json`,
+    /// minor 22).
+    pub fn has_display_settings(&self) -> bool {
+        self.tables
+            .get(TableKind::Display)
             .is_some_and(|rows| !rows.is_empty())
     }
 

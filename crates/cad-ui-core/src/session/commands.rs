@@ -763,7 +763,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),
     ("PYRAMID", CommandId::Extended(ExtendedCommandId::Pyramid)), ("POLYSOLID", CommandId::Extended(ExtendedCommandId::PolySolid)),
-    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
+    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("SHADOWS", CommandId::Shadows), ("FOG", CommandId::Fog), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
     ("SWEEP", CommandId::Extended(ExtendedCommandId::Sweep)), ("LOFT", CommandId::Extended(ExtendedCommandId::Loft)),
     ("INTERSECT", CommandId::Extended(ExtendedCommandId::Intersect)), ("UNION", CommandId::Extended(ExtendedCommandId::Union)),
     ("SUBTRACT", CommandId::Extended(ExtendedCommandId::Subtract)), ("SLICE", CommandId::Extended(ExtendedCommandId::Slice)),
@@ -816,18 +816,12 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
 ///
 /// The four measurement selectors name the four real
 /// [`MeasurementToolKind`] algorithms, so a measurement button starts *its own*
-/// kind instead of every button collapsing onto `MEASURE`/Distance. `DIST`
-/// (distance) and `AREA` are the real AutoCAD command names with exactly this
-/// meaning — `AREA` is the **interactive point** area; its AutoCAD `Object`
-/// sub-prompt is the separate canonical selector `AREA OBJECT`
-/// ([`CommandId::AreaObject`], a selection-based measurement, not a point
-/// algorithm, so it is not listed here). `MEASUREPOLYLINE` (polyline length) and
-/// `MEASUREANGLE` are explicit
-/// project selectors: AutoCAD's `PLINE` now names the polyline **draw** command
-/// (a [`COMMAND_TABLE`] entry, not a measurement selector) and `ANGLE` is not an
-/// AutoCAD command at all, so neither measurement meaning shadows a real
-/// command. `MEASURE` remains the default [`MeasurementToolKind::Distance`]
-/// selector.
+/// kind instead of collapsing onto `MEASURE`/Distance. `DIST` and `AREA` are the
+/// real AutoCAD names with exactly this meaning (`AREA` is the interactive point
+/// area; its `Object` sub-prompt is the separate `AREA OBJECT` selector); the
+/// `MEASUREPOLYLINE`/`MEASUREANGLE` project selectors exist because AutoCAD's
+/// `PLINE` now names the polyline draw command and `ANGLE` is not a command, so
+/// neither shadows a real one. `MEASURE` is the default Distance selector.
 ///
 /// These names live in this table (never a hand-written UI list):
 /// [`admissible_names`] folds them into the single vocabulary a frontend enables
@@ -901,7 +895,9 @@ mod paint_grammar;
 pub use paint_grammar::*;
 mod scene_grammar;
 pub use scene_grammar::*;
+mod display_grammar;
 mod soften_grammar;
+pub use display_grammar::*;
 pub use soften_grammar::*;
 // The typed `PYRAMID` regular n-gon base line (the one typed 3D primitive).
 mod solid_arguments;

@@ -29,6 +29,12 @@ pub enum CommandId {
     SoftenEdges,
     /// `SCENE SAVE|RESTORE|LIST|DELETE`: persisted scenes (`tables/scenes.json`).
     Scene,
+    /// `SHADOWS [ON|OFF|SUN <azimuth> <elevation>]`: the document sun used for
+    /// shading (`tables/display.json`). Cast shadows are NOT IMPLEMENTED.
+    Shadows,
+    /// `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`: the document's
+    /// distance fog (`tables/display.json`).
+    Fog,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

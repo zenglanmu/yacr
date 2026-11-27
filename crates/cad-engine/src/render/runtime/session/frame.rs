@@ -66,6 +66,17 @@ impl CadRenderRuntime {
             // Per-frame PBR environment switch (ADR-0044): uniform data only, no
             // pipeline/scene rebuild.
             renderer.set_ibl_enabled(view.ibl_enabled);
+            // SketchUp Shadows/Fog: per-frame uniform data only, like the IBL
+            // switch above. Cast shadows are not implemented.
+            renderer.set_sun(
+                view.sun
+                    .map(|sun| [sun[0] as f32, sun[1] as f32, sun[2] as f32]),
+            );
+            renderer.set_fog(view.fog.map(|fog| cad_render_wgpu::FrameFog {
+                color: fog.color,
+                start: fog.start as f32,
+                end: fog.end as f32,
+            }));
             // MSAA is a 3D-view quality setting: the 2D path already has
             // analytic 1 px line coverage (ADR-0009) and must keep its exact
             // pixels at any requested level. A view-mode switch is a real

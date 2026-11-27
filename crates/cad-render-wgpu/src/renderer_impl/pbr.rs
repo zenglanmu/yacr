@@ -496,6 +496,7 @@ impl Renderer {
             self.last_light,
             self.last_camera_position.unwrap_or([0.0; 3]),
             self.ibl_enabled,
+            self.fog_words(),
         )
     }
 
@@ -518,6 +519,78 @@ impl Renderer {
     /// exactly like a selection-flag toggle (`set_selection_flags_enabled`),
     /// instead of dropping the plan (which would clear the background) or doing a
     /// full scene rebuild.
+    /// SketchUp "Shadows": use `sun` (a unit vector toward the sun) instead of
+    /// the camera-relative key light for the next frames. `None` restores the
+    /// camera key light.
+    ///
+    /// Per-frame uniform data only; the frame light the id pass reuses is the
+    /// same value. A non-finite vector is refused (the previous light stays).
+    pub fn set_sun(&mut self, sun: Option<[f32; 3]>) {
+        let sun = sun.and_then(|sun| {
+            let length = sun[0].hypot(sun[1]).hypot(sun[2]);
+            (length.is_finite() && length > 1e-9)
+                .then(|| [sun[0] / length, sun[1] / length, sun[2] / length])
+        });
+        if self.sun == sun {
+            return;
+        }
+        self.sun = sun;
+        // A shading change is uniform data, but a progressive frame mid-walk
+        // would keep the old light in its retained colour half.
+        if let Some(frame) = self.progressive_frame.as_mut() {
+            frame.cursor = 0;
+            self.preserve_color_on_restart = true;
+        }
+    }
+
+    /// The frame's distance fog, or `None` to draw unfogged geometry.
+    pub fn set_fog(&mut self, fog: Option<FrameFog>) {
+        if self.fog == fog {
+            return;
+        }
+        self.fog = fog;
+        if let Some(frame) = self.progressive_frame.as_mut() {
+            frame.cursor = 0;
+            self.preserve_color_on_restart = true;
+        }
+    }
+
+    /// The shared uniform's fog words for this frame.
+    pub(super) fn fog_words(&self) -> [f32; 8] {
+        self.fog.map_or([0.0; 8], FrameFog::words)
+    }
+
+    /// The shared uniform for one stream/chunk draw: opaque white tint, zero
+    /// key, and the frame's fog words plus the eye in that stream's fixed-point
+    /// space (the stream origin is already folded into `matrix`).
+    pub(super) fn stream_uniform(
+        &self,
+        matrix: &[f32; 16],
+        key_flags: [u32; 4],
+        light: [f32; 4],
+        origin: [f64; 3],
+    ) -> [u8; UNIFORM_STRUCT_BYTES as usize] {
+        uniform_bytes_fog(
+            matrix,
+            [1.0; 4],
+            key_flags,
+            light,
+            self.fog_words(),
+            self.eye_local(origin),
+        )
+    }
+
+    /// The eye position in one stream's fixed-point space (the fog distance
+    /// reference; the stream's origin is already folded into its matrix).
+    pub(super) fn eye_local(&self, origin: [f64; 3]) -> [f32; 3] {
+        let eye = self.last_camera_position.unwrap_or([0.0; 3]);
+        [
+            eye[0] - origin[0] as f32,
+            eye[1] - origin[1] as f32,
+            eye[2] - origin[2] as f32,
+        ]
+    }
+
     pub fn set_ibl_enabled(&mut self, enabled: bool) {
         if self.ibl_enabled == enabled {
             return;

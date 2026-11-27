@@ -35,6 +35,8 @@ import type { TrayPanel } from './slots.ts';
 import { BUILTIN_MATERIALS, paintCommand } from '../concept/materials.ts';
 import { readScenes } from '../concept/scenes.ts';
 import type { ScenesAnswer } from '../concept/scenes.ts';
+import { readDisplay } from '../concept/display.ts';
+import type { DisplayAnswer } from '../concept/display.ts';
 
 function EntityInfoBody() {
   const { t } = useI18n();
@@ -413,6 +415,220 @@ function ScenesBody() {
  * selection must be 3D bodies, the range is `0..=180`, one undo step); the panel
  * only validates the input enough to disable a meaningless click.
  */
+
+/**
+ * The Shadows and Fog panels (one body each, one shared document record).
+ *
+ * Both write through the ordinary command path (`SHADOWS ...`, `FOG ...`); the
+ * panel only validates inputs enough to disable a meaningless click, and the
+ * command re-validates everything. The Shadows hint names the real boundary:
+ * cast shadows are not implemented, this panel moves the shading sun.
+ */
+function DisplayBody({ part }: { readonly part: 'shadows' | 'fog' }) {
+  const { t } = useI18n();
+  const shell = useShell();
+  const documentLabel = shell.status?.documentLabel ?? null;
+  const entityCount = shell.status?.entityCount ?? null;
+  const commandCount = shell.status?.commandLog?.length ?? 0;
+  const [nonce, setNonce] = useState(0);
+  const [state, setState] = useState<{
+    phase: 'ready' | 'loading' | 'error';
+    answer: DisplayAnswer | null;
+    reason: string;
+  }>({ phase: 'ready', answer: null, reason: '' });
+  const [azimuth, setAzimuth] = useState<string | null>(null);
+  const [elevation, setElevation] = useState<string | null>(null);
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
+  useEffect(() => {
+    if (documentLabel === null) {
+      setState({ phase: 'ready', answer: null, reason: '' });
+      return undefined;
+    }
+    let live = true;
+    setState(previous => ({ phase: 'loading', answer: previous.answer, reason: '' }));
+    readDisplay(invoke)
+      .then(answer => {
+        if (live) setState({ phase: 'ready', answer, reason: '' });
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        const reason = error instanceof Error ? error.message : String(error);
+        setState(previous => ({ phase: 'error', answer: previous.answer, reason }));
+      });
+    return () => { live = false; };
+  }, [documentLabel, entityCount, commandCount, nonce]);
+
+  if (documentLabel === null) {
+    return (
+      <p className="concept-panel__hint">
+        {t(part === 'shadows' ? 'concept.shadows.no_document' : 'concept.fog.no_document')}
+      </p>
+    );
+  }
+  const answer = state.answer;
+  const refresh = () => setNonce(value => value + 1);
+  const failure = state.phase === 'error' ? (
+    <p className="concept-panel__hint" role="alert">
+      {t('concept.display.error', { reason: state.reason })}
+    </p>
+  ) : null;
+
+  if (part === 'shadows') {
+    const enabled = answer?.shadows.enabled === true;
+    const currentAzimuth = answer?.shadows.azimuth ?? 135;
+    const currentElevation = answer?.shadows.elevation ?? 45;
+    const azimuthText = azimuth ?? String(currentAzimuth);
+    const elevationText = elevation ?? String(currentElevation);
+    const azimuthValue = Number(azimuthText);
+    const elevationValue = Number(elevationText);
+    const valid = azimuthText.trim() !== '' && elevationText.trim() !== ''
+      && Number.isFinite(azimuthValue) && azimuthValue >= 0 && azimuthValue < 360
+      && Number.isFinite(elevationValue) && elevationValue >= 0 && elevationValue <= 90;
+    const available = shell.canCommand('SHADOWS');
+    return (
+      <>
+        <p className="concept-panel__hint">{t('concept.shadows.hint')}</p>
+        <label className="concept-panel__hint">
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={!available}
+            onChange={event => {
+              shell.runCommand(`SHADOWS ${event.currentTarget.checked ? 'ON' : 'OFF'}`);
+              refresh();
+            }}
+          />{' '}
+          {t('concept.shadows.display')}
+        </label>
+        <div className="concept-scenes__save">
+          <input
+            type="number"
+            min={0}
+            max={359.9}
+            step={1}
+            className="concept-scenes__name"
+            value={azimuthText}
+            aria-label={t('concept.shadows.azimuth')}
+            onChange={event => setAzimuth(event.currentTarget.value)}
+          />
+          <input
+            type="number"
+            min={0}
+            max={90}
+            step={1}
+            className="concept-scenes__name"
+            value={elevationText}
+            aria-label={t('concept.shadows.elevation')}
+            onChange={event => setElevation(event.currentTarget.value)}
+          />
+          <button
+            type="button"
+            className="concept-panel__action"
+            disabled={!valid || !available}
+            onClick={() => {
+              shell.runCommand(`SHADOWS SUN ${azimuthValue} ${elevationValue}`);
+              setAzimuth(null);
+              setElevation(null);
+              refresh();
+            }}
+          >
+            {t('concept.shadows.apply')}
+          </button>
+        </div>
+        {!valid ? (
+          <p className="concept-panel__hint" role="alert">{t('concept.shadows.invalid')}</p>
+        ) : null}
+        {failure}
+      </>
+    );
+  }
+
+  const enabled = answer?.fog.enabled === true;
+  const currentStart = answer?.fog.start ?? 100;
+  const currentEnd = answer?.fog.end ?? 1000;
+  const color = answer?.fog.color ?? [200, 210, 220];
+  const startText = start ?? String(currentStart);
+  const endText = end ?? String(currentEnd);
+  const startValue = Number(startText);
+  const endValue = Number(endText);
+  const valid = startText.trim() !== '' && endText.trim() !== ''
+    && Number.isFinite(startValue) && startValue >= 0
+    && Number.isFinite(endValue) && endValue > startValue;
+  const available = shell.canCommand('FOG');
+  const hex = `#${color.map(value => value.toString(16).padStart(2, '0')).join('')}`;
+  return (
+    <>
+      <p className="concept-panel__hint">{t('concept.fog.hint')}</p>
+      <label className="concept-panel__hint">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={!available}
+          onChange={event => {
+            shell.runCommand(`FOG ${event.currentTarget.checked ? 'ON' : 'OFF'}`);
+            refresh();
+          }}
+        />{' '}
+        {t('concept.fog.display')}
+      </label>
+      <div className="concept-scenes__save">
+        <input
+          type="number"
+          min={0}
+          step={1}
+          className="concept-scenes__name"
+          value={startText}
+          aria-label={t('concept.fog.start')}
+          onChange={event => setStart(event.currentTarget.value)}
+        />
+        <input
+          type="number"
+          min={0}
+          step={1}
+          className="concept-scenes__name"
+          value={endText}
+          aria-label={t('concept.fog.end')}
+          onChange={event => setEnd(event.currentTarget.value)}
+        />
+        <button
+          type="button"
+          className="concept-panel__action"
+          disabled={!valid || !available}
+          onClick={() => {
+            shell.runCommand(`FOG RANGE ${startValue} ${endValue}`);
+            setStart(null);
+            setEnd(null);
+            refresh();
+          }}
+        >
+          {t('concept.fog.apply')}
+        </button>
+      </div>
+      <label className="concept-panel__hint">
+        {t('concept.fog.color')}{' '}
+        <input
+          type="color"
+          value={hex}
+          disabled={!available}
+          onChange={event => {
+            const text = event.currentTarget.value;
+            const channels = [1, 3, 5].map(index => Number.parseInt(text.slice(index, index + 2), 16));
+            if (channels.every(channel => Number.isFinite(channel))) {
+              shell.runCommand(`FOG COLOR ${channels.join(' ')}`);
+              refresh();
+            }
+          }}
+        />
+      </label>
+      {!valid ? (
+        <p className="concept-panel__hint" role="alert">{t('concept.fog.invalid')}</p>
+      ) : null}
+      {failure}
+    </>
+  );
+}
+
 function SoftenBody() {
   const { t } = useI18n();
   const shell = useShell();
@@ -470,6 +686,8 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'materials': return <MaterialsBody />;
     case 'scenes': return <ScenesBody />;
     case 'soften': return <SoftenBody />;
+    case 'shadows': return <DisplayBody part="shadows" />;
+    case 'fog': return <DisplayBody part="fog" />;
     case 'pending':
     default: return <PendingBody panel={panel} />;
   }

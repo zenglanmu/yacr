@@ -47,7 +47,7 @@ use cad_engine::{
         SharedRequestResult, SnapHint, StatusArgument, StatusMessage, SubmissionReceipt,
     },
     queue::RequestQueue,
-    render::{OverlayVisibility, RenderSessionHandle, ViewSnapshot},
+    render::{FogSnapshot, OverlayVisibility, RenderSessionHandle, ViewSnapshot},
 };
 use cad_platform::{
     ConfigLoad, ConfigStore, FileTarget, HostCapabilities, PlatformFiles, SavePurpose,
@@ -59,6 +59,7 @@ mod command_log;
 mod command_log_echo;
 mod core;
 mod dispatch;
+mod display;
 mod document_archive;
 mod domain;
 mod fonts;

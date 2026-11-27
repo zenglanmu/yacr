@@ -10,12 +10,14 @@
 //! culling and per-fragment shading (audit F14). The pure geometry decisions
 //! live in [`geometry`] and are unit tested without a GPU.
 
+pub use fog::FrameFog;
 pub use wgpu;
 
 pub mod geometry;
 
 /// Named refusals for an in-place resident-batch overwrite (phase P4). See
 /// [`Renderer::overwrite_batch`] and [`BatchOverwriteRefusal`].
+mod fog;
 mod overwrite;
 pub use overwrite::BatchOverwriteRefusal;
 
@@ -162,21 +164,16 @@ pub(crate) struct GpuMeshChunk {
     index_charge: GpuCharge,
 }
 
-/// One device-resident instanced line stream, plus the `f64` reference origin
-/// its positions are stored relative to.
+/// One device-resident instanced line stream plus its `f64` reference origin.
 ///
-/// Uploaded once (upload/commit) and never rewritten on pan/zoom: a camera move
-/// is a small uniform write only. On the **orthographic** path the per-frame
-/// matrix subtracts the camera centre from `origin` in `f64` on the CPU before
-/// narrowing, so stream positions stay small; the **perspective** path narrows
-/// the origin to `f32` before `translate_left` (see
-/// `FrameProjection::batch_matrix_f64`), so that `f64` subtraction guarantee is
-/// Ortho-only. Each stream covers a spatially bounded chunk of the converted
-/// geometry (see [`build_instance_chunks`]), so a stored coordinate is within
-/// [`MAX_STREAM_RADIUS`] of `origin` — the f32 ulp stays under ~1 µm and the
-/// deep-zoom-on-a-large-drawing precision floor holds. It is not byte-exact
-/// against the legacy per-batch path for arbitrary origins; see the deep-zoom
-/// parity fence.
+/// Uploaded once and never rewritten on pan/zoom: a camera move is a small
+/// uniform write. The orthographic path subtracts the camera centre from
+/// `origin` in `f64` before narrowing; the perspective path narrows the origin
+/// first (see `FrameProjection::batch_matrix_f64`), so the `f64` guarantee is
+/// Ortho-only. Each stream covers a bounded chunk ([`build_instance_chunks`]),
+/// so coordinates stay within [`MAX_STREAM_RADIUS`] of `origin` and the f32 ulp
+/// stays under ~1 µm (deep-zoom precision floor). Not byte-exact against the
+/// legacy per-batch path for arbitrary origins (deep-zoom parity fence).
 pub(crate) struct InstanceStream {
     buffer: wgpu::Buffer,
     instance_count: u32,
@@ -202,20 +199,14 @@ pub(crate) struct InstanceStream {
     buffer_charge: Option<GpuCharge>,
 }
 
-/// One device-resident SDF conic stream, plus the `f64` reference origin its
-/// centers are stored relative to.
+/// One device-resident SDF conic stream plus its `f64` reference origin.
 ///
-/// Uploaded once (upload/commit) and never rewritten on pan/zoom: a camera move
-/// is a small uniform write only. Each stream covers a spatially bounded chunk of
-/// the converted conics (see `build_arc_chunks`), so a stored center is within
-/// `MAX_STREAM_RADIUS` of `origin` and the f32 ulp stays under ~1 µm. A **conic
-/// overwrite** (`Renderer::overwrite_batch`) rewrites the instances of the runs
-/// it is given in place, re-packing them against this stored `origin` and
-/// widening [`ArcStream::aabb`] by union; the origin itself is never rewritten
-/// (it is shared by every batch in the stream). The conic path is
-/// **universal-tier only** (no pulled variant this round), so there is no pulled
-/// copy of these instances to keep in sync; `base` is kept for symmetry with
-/// [`InstanceStream`] and is always `0`.
+/// Uploaded once; a camera move is a small uniform write. Each stream covers a
+/// bounded chunk ([`build_arc_chunks`]), so centers stay within
+/// `MAX_STREAM_RADIUS` of `origin` (f32 ulp under ~1 µm). A conic overwrite
+/// rewrites runs in place against this origin and unions their AABBs; the origin
+/// itself is never rewritten. Universal-tier only (no pulled variant), so `base`
+/// is kept for symmetry with [`InstanceStream`] and is always `0`.
 pub(crate) struct ArcStream {
     buffer: wgpu::Buffer,
     instance_count: u32,
@@ -795,6 +786,13 @@ pub struct Renderer {
     /// recent color frame, so the id pass writes the same uniform layout. `a` is
     /// the frame's light-background ink flag (the pick shaders ignore it).
     last_light: [f32; 4],
+    /// SketchUp "Shadows" sun: a unit vector toward the document's sun, or
+    /// `None` for the camera-relative key light. Uniform data only (it replaces
+    /// the frame's `light` vector); cast shadows are not implemented.
+    sun: Option<[f32; 3]>,
+    /// The frame's fog, or `None` (the default): distance fog toward `color`
+    /// between `start` and `end` model units from the camera. Uniform data only.
+    fog: Option<FrameFog>,
     /// Procedural image-based lighting (ADR-0044) for the PBR channel.
     ///
     /// Per-frame uniform data only (`Camera.pbr_eye.w`): it never selects a

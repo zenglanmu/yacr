@@ -179,6 +179,11 @@ impl DrawingDatabase {
         if !self.scenes.is_empty() {
             tables.set(TableKind::Scenes, super::scene::encode_scenes(self));
         }
+        // The display record is written only when it differs from the default.
+        let display = super::display::encode_display(self);
+        if !display.is_empty() {
+            tables.set(TableKind::Display, display);
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -244,6 +249,7 @@ impl DrawingDatabase {
         let named_views = views::decode_views(&snapshot.tables)?;
         let materials = super::material::decode_materials(&snapshot.tables)?;
         let scenes = super::scene::decode_scenes(&snapshot.tables)?;
+        let display = super::display::decode_display(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
                 builder.set_parameters(parameters),
@@ -288,6 +294,12 @@ impl DrawingDatabase {
         }
         if !scenes.is_empty() {
             checked(builder.set_scenes(scenes), table_entry(TableKind::Scenes))?;
+        }
+        if !display.is_default() {
+            checked(
+                builder.set_display_settings(display),
+                table_entry(TableKind::Display),
+            )?;
         }
 
         for layer in tables.layers.values() {

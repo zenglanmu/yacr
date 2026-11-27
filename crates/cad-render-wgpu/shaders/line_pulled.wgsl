@@ -46,6 +46,12 @@ struct PullCamera {
     // vertex normal); a = 1 when the frame's clear colour is light (the
     // ink-flip flag, see `background_is_light`), else 0.
     light: vec4<f32>,
+    // rgb = fog colour, a = 1 when fog is enabled for this frame.
+    fog_color: vec4<f32>,
+    // x = start distance, y = end distance (model units), z/w unused.
+    fog_range: vec4<f32>,
+    // World-space eye position (xyz), w unused; the fog distance reference.
+    eye: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: PullCamera;
 
@@ -154,6 +160,7 @@ struct VsOut {
     @location(3) color: vec4<f32>,
     // The pick key is an integer, so it must be passed flat.
     @location(4) @interpolate(flat) key: u32,
+    @location(5) world_position: vec3<f32>,
 };
 
 @vertex
@@ -177,6 +184,7 @@ fn vs_main(
     out.p1 = b;
     out.color = inst.rgba;
     out.key = inst.info.x;
+    out.world_position = t.xyz + world;
     return out;
 }
 
@@ -194,6 +202,21 @@ fn ink_for_background(rgb: vec3<f32>) -> vec3<f32> {
     return rgb;
 }
 
+
+// Distance fog (SketchUp's Fog): blend toward `camera.fog_color.rgb` as the
+// fragment's distance from the eye goes from `start` to `end`. The pulled
+// vertices are chunk-relative, so the eye rides `camera.eye.xyz` in **world**
+// space and `world` must be the chunk-translation-plus-relative position.
+fn fog_mix(color: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    if (camera.fog_color.a < 0.5) {
+        return color;
+    }
+    let start = camera.fog_range.x;
+    let end = max(camera.fog_range.y, start + 1e-3);
+    let t = clamp((distance(world, camera.eye.xyz) - start) / (end - start), 0.0, 1.0);
+    return mix(color, camera.fog_color.rgb, t);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d = segment_distance(in.world_pos, in.p0, in.p1);
@@ -207,5 +230,5 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
     let shaded = flag_tint(vec4<f32>(in.color.rgb, in.color.a * coverage), in.key);
-    return vec4<f32>(ink_for_background(shaded.rgb), shaded.a);
+    return vec4<f32>(fog_mix(ink_for_background(shaded.rgb), in.world_position), shaded.a);
 }

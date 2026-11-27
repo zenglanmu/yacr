@@ -117,6 +117,19 @@ pub struct ViewSnapshot {
     /// the scene or a pipeline. `false` (the default) is the legacy
     /// `AMBIENT`-floor shading.
     pub ibl_enabled: bool,
+    /// SketchUp **Shadows**: unit vector toward the document sun, in world
+    /// space, or `None` for the renderer's camera-relative key light.
+    ///
+    /// Uniform data only (`Camera.light`), so a change repaints through the
+    /// ordinary snapshot path and never rebuilds the scene. Cast shadows are
+    /// **NOT IMPLEMENTED** (see `docs/concept-sketchup.md`).
+    pub sun: Option<[f64; 3]>,
+    /// SketchUp **Fog**: the distance band and colour, or `None`.
+    ///
+    /// Uniform data only (`Camera.fog_color`/`Camera.fog_range`): the visible
+    /// shaders blend toward the colour as the fragment's distance from the eye
+    /// goes from `start` to `end` model units.
+    pub fog: Option<FogSnapshot>,
     /// Requested MSAA sample count for this frame: `1` (off), `2` or `4`.
     ///
     /// The host resolves `view.msaa.mode` into this value; it is a per-frame
@@ -126,6 +139,17 @@ pub struct ViewSnapshot {
     /// default for direct/test renderer callers.
     pub msaa_samples: u32,
 }
+/// One frame's distance fog (SketchUp's Fog), in model units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FogSnapshot {
+    /// Target colour, linear channels in `[0, 1]`.
+    pub color: [f32; 3],
+    /// Distance where the fog begins.
+    pub start: f64,
+    /// Distance where geometry is fully fogged (`> start`).
+    pub end: f64,
+}
+
 impl Default for ViewSnapshot {
     fn default() -> Self {
         Self {
@@ -137,6 +161,8 @@ impl Default for ViewSnapshot {
             canvas_origin: None,
             clear_color: [0.0, 0.0, 0.0, 1.0],
             ibl_enabled: false,
+            sun: None,
+            fog: None,
             msaa_samples: 1,
         }
     }

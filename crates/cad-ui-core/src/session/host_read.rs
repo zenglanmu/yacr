@@ -24,6 +24,7 @@ use std::sync::Arc;
 
 use crate::action_recorder::ActionRecorderSnapshot;
 use crate::bim::{BimFilterWire, BimQueryRequest, BimQueryResponse};
+use crate::display::DisplayResponse;
 use crate::host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
 };
@@ -56,6 +57,7 @@ impl CadSession {
                 Ok(HostReadAnswer::ActionRecorder(self.action_recorder()?))
             }
             HostReadRequest::Scenes => Ok(HostReadAnswer::Scenes(self.scenes())),
+            HostReadRequest::Display => Ok(HostReadAnswer::Display(self.display())),
         }
     }
 }
@@ -68,6 +70,15 @@ impl CadSession {
     /// lane reports.
     pub fn scenes(&self) -> ScenesResponse {
         ScenesResponse::from_host(self.core.scenes())
+    }
+
+    /// The open document's Shadows/Fog record.
+    ///
+    /// Host content only: no document answers the default record (the panels'
+    /// "nothing customised" state), never an error; a carrier with no lane still
+    /// reports its own refusal at the wire layer.
+    pub fn display(&self) -> DisplayResponse {
+        DisplayResponse::from_host(self.core.display())
     }
 }
 
@@ -111,7 +122,8 @@ pub fn bim_query(
         HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::ActionRecorder(_)
-        | HostReadAnswer::Scenes(_) => Err(format!(
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Display(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a BIM query"
         )),
     }
@@ -129,7 +141,8 @@ pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::MechanicalTree(_)
         | HostReadAnswer::ActionRecorder(_)
-        | HostReadAnswer::Scenes(_) => Err(format!(
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Display(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a parameter list"
         )),
     }
@@ -147,7 +160,8 @@ pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, 
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
-        | HostReadAnswer::Scenes(_) => Err(format!(
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Display(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an action-recorder read"
         )),
     }
@@ -166,7 +180,8 @@ pub fn scenes(reads: &dyn HostReads) -> Result<ScenesResponse, String> {
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::MechanicalTree(_)
-        | HostReadAnswer::ActionRecorder(_) => Err(format!(
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Display(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a scenes read"
         )),
     }
@@ -178,8 +193,27 @@ pub fn mechanical_tree(reads: &dyn HostReads) -> Result<MechanicalTreeResponse, 
         HostReadAnswer::BimQuery(_)
         | HostReadAnswer::ParamList(_)
         | HostReadAnswer::ActionRecorder(_)
-        | HostReadAnswer::Scenes(_) => Err(format!(
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Display(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a mechanical tree"
+        )),
+    }
+}
+
+/// `cad_display`: the open document's Shadows/Fog record.
+///
+/// One request-carrying read over the shared seam; the session's handler is
+/// [`CadSession::display`]. A carrier without a lane answers its own
+/// `unsupported-runtime: display` refusal, never a default record.
+pub fn display(reads: &dyn HostReads) -> Result<DisplayResponse, String> {
+    match reads.host_read(&HostReadRequest::Display)? {
+        HostReadAnswer::Display(response) => Ok(response),
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::ParamList(_)
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Scenes(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a display read"
         )),
     }
 }
