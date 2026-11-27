@@ -219,6 +219,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("ROTATE", CommandId::RotateEntities),
     ("SCALE", CommandId::ScaleEntities),
     ("MIRROR", CommandId::MirrorEntities),
+    ("FLIP", CommandId::Flip),
     ("COPYCLIP", CommandId::CopyToClipboard),
     ("CUTCLIP", CommandId::CutToClipboard),
     // `PASTECLIP` is the **insertion-point** paste: it starts the one-point `PasteClip` capture (the clipboard is the input, so a selection is not required) and translates every clipboard entry by `insertion − base`. `PASTEORIG` is the other half of the AutoCAD pair: it takes no point and inserts at the original coordinates, ignoring the base.
@@ -892,6 +893,7 @@ pub use scene_grammar::*;
 mod block_grammar;
 mod camera_grammar;
 mod display_grammar;
+mod flip_grammar;
 mod protractor_grammar;
 mod soften_grammar;
 mod text3d_grammar;
@@ -899,6 +901,7 @@ mod walk_grammar;
 pub use block_grammar::*;
 pub use camera_grammar::*;
 pub use display_grammar::*;
+pub use flip_grammar::*;
 pub use protractor_grammar::*;
 pub use soften_grammar::*;
 pub use text3d_grammar::*;
@@ -981,8 +984,7 @@ pub use paper_arguments::*;
 mod style;
 pub use style::*;
 
-// The interactive modify argument grammars (`JOIN`, `OFFSET`, `MIRROR`,
-// `CHAMFER`, `FILLET` and the full `PEDIT` option line).
+// Interactive modify grammars (JOIN/OFFSET/MIRROR/CHAMFER/FILLET/PEDIT).
 mod modify;
 pub use modify::*;
 
@@ -993,8 +995,6 @@ pub use mleader::*;
 // The `-PARAMETERS` command-line Parameter Manager grammar (ADR-0043 D9/D14).
 mod param_arguments;
 pub use param_arguments::*;
-
-// The selector -> interactive-tool routing table (split out for the code-size
-// gate). Re-exported so `commands::interaction_request_for` still resolves.
+// The selector -> tool routing table (split out for the code-size gate).
 mod routing;
 pub(super) use routing::interaction_request_for;

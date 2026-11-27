@@ -75,6 +75,7 @@ mod app_chamfer_edge;
 mod app_concept_shapes;
 mod app_display;
 mod app_extrude;
+mod app_flip;
 mod app_follow_me;
 mod app_materials;
 mod app_panels;
@@ -530,7 +531,7 @@ pub use command_payload::{
     DashLayerOps, DeclaredUnits, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
     DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
     DisplayCommand, DwgPropsCommand, EntityPropertyWrite, FilterExpression, FilterLogic,
-    FilterRequest, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
+    FilterRequest, FlipAxis, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
     HatchEditOption, HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand,
     JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
     LookAroundCommand, MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment,

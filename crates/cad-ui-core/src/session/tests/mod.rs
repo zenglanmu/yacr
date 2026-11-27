@@ -23,6 +23,7 @@ mod tests_command_log;
 mod tests_commands;
 mod tests_display;
 mod tests_explode;
+mod tests_flip;
 mod tests_fonts;
 mod tests_hatch;
 mod tests_hatch_arguments;

@@ -54,6 +54,9 @@
   **场景阴影/雾快照**（2026-11-27，ADR-0080）：`SCENE SAVE` 把文档 `tables/display.json`
   记录存进场景行的 `display`（minor 24）；`SCENE RESTORE` 在记录有差异时执行一次与
   `SHADOWS`/`FOG` 相同的显示写入（一步撤销），Viewer 下有差异则在改动前拒绝。
+  **Flip Along**（2026-11-28，ADR-0083）：`FLIP X|Y|Z` 以选择包围盒中心为平面原地反射
+  （源删除 + 镜像副本、一次事务/一步撤销、字形真反射）；新副本是新 entity id，块定义成员/子图元
+  仍按名拒绝。
   **逐面材质**（2026-11-27，ADR-0081）：`PAINT <name>` 接受带 `SubElementId` 的网格面选择，
   材质表行新增 `faces` 快照（minor 25）；渲染器按面材质把网格拆成多个 fragment（fragment 自带
   颜色/alpha），未涂面保留实体颜色；陈旧 face key 只报告不重映射。
@@ -155,7 +158,7 @@
 | Rotate | `ROTATE` | full | |
 | Follow Me | `FOLLOWME` | full | 把所选闭合直线轮廓沿所选开放直线路径扫掠成闭合网格体（拐角按角平分面剪切、两端封盖，一面一个 `face_sources` 身份，可继续 `PRESSPULL`）；不支持圆/弧轮廓（投影会变椭圆）、闭合路径、通过点选路径面驱动 |
 | Scale | `SCALE` | full | |
-| Mirror/Flip | `MIRROR` | partial | CAD 镜像，不是 Flip |
+| Mirror/Flip | `MIRROR` / `FLIP` | partial | `MIRROR` 是 CAD 镜像（保留原件、新增副本）；`FLIP X\|Y\|Z`（`RED/GREEN/BLUE`）是 SketchUp Flip Along：绕**选择包围盒中心**、垂直于该轴的平面**原地**反射（源删除 + 镜像副本，一次事务/一步撤销，文字字形真反射）。**边界**：副本获得新 entity id（不是同一 group/component 对象身份）；块定义成员/子图元按名拒绝；`MIRROR` 与 `FLIP` 的选区/显示属性继承差异沿用既有规则 |
 | Offset | `OFFSET` | full | 二维 |
 
 ### Construction（6；full 3 / partial 1 / pending 2）

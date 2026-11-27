@@ -90,6 +90,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `ROTATE` | 编辑 | 是 | `RO` |
 | `SCALE` | 编辑 | 是 | `SC` |
 | `MIRROR` | 编辑（保留原件） | 是 | `MI` |
+| `FLIP` | 编辑（SketchUp Flip Along：`FLIP X\|Y\|Z` / `RED\|GREEN\|BLUE` 绕选择包围盒中心垂直于该轴的平面**原地**反射；源删除 + 镜像副本，一条事务/一步撤销；副本为新 entity id） | 是 | — |
 | `OFFSET` | 编辑（LINE / CIRCLE / **ARC** / **LWPOLYLINE**：直线段与**含弧段**；`Ellipse` 按名拒绝） | 是 | `O` |
 | `MATCHPROP` | 编辑（**选择式**特性匹配：首个选中实体为源，其余为目标；转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项） | 是 | `MA` |
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |

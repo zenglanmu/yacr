@@ -1,5 +1,4 @@
 //! The typed input payloads of the command funnel; one [`crate::CommandId`] each.
-
 use cad_domain::{
     LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
     TextAlignV,
@@ -839,6 +838,9 @@ pub enum CommandPayload {
     },
     /// `CAMERA TWO-POINT`: level the current perspective camera (view-only).
     PositionCameraTwoPoint,
+    /// `FLIP <axis>`: mirror the selection **in place** about the plane through
+    /// its bounds centre perpendicular to the chosen axis.
+    Flip(FlipAxis),
     Walk(WalkCommand),
     LookAround(LookAroundCommand),
     SoftenEdges(f64),
@@ -989,10 +991,10 @@ pub enum CommandPayload {
     },
     /// `EXTRUDE`: the selected closed profile rows (the distance is the channel).
     ExtrudeProfile(Vec<SelectionRef>),
-    /// `FOLLOWME`: the profile and path rows.
+    /// `FOLLOWME`: profile and path rows.
     FollowMeProfile(Vec<SelectionRef>),
     /// `PAINT`: the material name to apply to the current selection.
     PaintMaterial(String),
-    /// 3D primitive option construction; see [`SolidPrimitiveCommand`].
+    /// 3D primitive construction; see [`SolidPrimitiveCommand`].
     Solid(SolidPrimitiveCommand),
 }

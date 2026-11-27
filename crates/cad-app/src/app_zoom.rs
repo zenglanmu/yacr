@@ -472,7 +472,7 @@ impl Application {
     /// member has no independent paper object, so its bounds are never invented.
     ///
     /// Every refusal is named and happens before anything moves.
-    fn selected_object_bounds(
+    pub(crate) fn selected_object_bounds(
         &self,
         session: &SessionState,
         command: &Command,

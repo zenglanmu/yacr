@@ -500,3 +500,34 @@ pub enum CenterEditPayload {
     Mark(CenterMarkCommand),
     Line(CenterLineCommand),
 }
+
+/// The axis a SketchUp-style `FLIP` mirrors across.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlipAxis {
+    /// Red / X: reflect through the plane `x = bounds center`.
+    Red,
+    /// Green / Y: reflect through the plane `y = bounds center`.
+    Green,
+    /// Blue / Z: reflect through the plane `z = bounds center`.
+    Blue,
+}
+
+impl FlipAxis {
+    /// The world component this axis flips (`0` = X, `1` = Y, `2` = Z).
+    pub fn component(self) -> usize {
+        match self {
+            Self::Red => 0,
+            Self::Green => 1,
+            Self::Blue => 2,
+        }
+    }
+
+    /// The stable token for diagnostics (`X`/`Y`/`Z`).
+    pub fn token(self) -> &'static str {
+        match self {
+            Self::Red => "X",
+            Self::Green => "Y",
+            Self::Blue => "Z",
+        }
+    }
+}

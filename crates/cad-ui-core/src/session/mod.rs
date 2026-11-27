@@ -27,6 +27,7 @@ mod command_log;
 mod command_overrides;
 mod commands;
 mod diagnostics;
+mod flip_arguments;
 mod param;
 mod walk_arguments;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
@@ -995,6 +996,5 @@ impl CadSession {
         self.core.request_context().metrics_revision.unwrap_or(0)
     }
 }
-
 #[cfg(test)]
 mod tests;

@@ -115,7 +115,7 @@ impl Application {
     /// readable rotation, and a dimension's definition points are reflected with
     /// its display re-synthesized. Any kind this build cannot mirror honestly
     /// (`Shape`, `Opaque`, …) refuses the whole command, never a silent drop.
-    pub(super) fn mirror_selection_with_options(
+    pub(crate) fn mirror_selection_with_options(
         &mut self,
         command: &Command,
         refs: &[SelectionRef],

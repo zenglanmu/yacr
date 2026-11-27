@@ -241,6 +241,8 @@ impl CadSession {
             // block name.
             super::commands::INSERT_SELECTOR => self.insert_argument(argument, text),
             super::commands::BLOCK_SELECTOR => self.block_argument(argument, text),
+            // `FLIP X|Y|Z`: the SketchUp in-place axis flip.
+            super::commands::FLIP_SELECTOR => self.flip_argument(argument, text),
             // `CAMERA TWO-POINT|WALK`: named refusals (the bare selector is a
             // capture and never reaches this arm).
             super::commands::CAMERA_SELECTOR => self.camera_argument(argument, text),

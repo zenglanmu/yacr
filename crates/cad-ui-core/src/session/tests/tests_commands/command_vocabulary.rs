@@ -1,5 +1,4 @@
-//! Command vocabulary contracts: normalization, the selector tables and their
-//! exhaustiveness/disjointness invariants.
+//! Command vocabulary contracts: normalization and selector-table invariants.
 
 use super::super::super::*;
 use super::super::test_support::*;
@@ -141,6 +140,7 @@ command_selector_contract! {
     RotateEntities => "ROTATE",
     ScaleEntities => "SCALE",
     MirrorEntities => "MIRROR",
+    Flip => "FLIP",
     CopyToClipboard => "COPYCLIP",
     CutToClipboard => "CUTCLIP",
     PasteFromClipboard => "PASTECLIP",
@@ -279,7 +279,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 260,
+        EXPECTED_COMMAND_COUNT, 261,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);
