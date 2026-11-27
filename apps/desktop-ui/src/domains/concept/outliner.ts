@@ -32,6 +32,8 @@ export interface OutlinerRow {
   readonly id: number;
   /** Display label. */
   readonly label: string;
+  /** Containing group name for a group member row, else `null`. */
+  readonly parentGroup: string | null;
   /** Nesting depth (top level is `0`). */
   readonly depth: number;
   /** Whether the row is temporarily hidden in this session. */
@@ -113,6 +115,34 @@ export function groupCreateCommand(name: unknown): string | null {
   return `GROUP CREATE "${trimmed}"`;
 }
 
+/**
+ * `GROUPEDIT "<group>" ADD|REMOVE <ids>` for a drag/regroup action.
+ *
+ * The group name uses the typed grammar's double quotes (no escape); ids are
+ * positive safe integers joined by commas. An unsafe name or an empty/invalid
+ * id list yields `null`.
+ */
+export function groupEditCommand(
+  group: unknown,
+  verb: 'ADD' | 'REMOVE',
+  ids: readonly unknown[],
+): string | null {
+  const name = typeof group === 'string' ? group.trim() : '';
+  if (name === '' || name.includes('"') || name.includes('\n') || name.includes('\r')) {
+    return null;
+  }
+  const entityIds: number[] = [];
+  for (const raw of ids) {
+    if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0
+      || entityIds.includes(raw)) {
+      continue;
+    }
+    entityIds.push(raw);
+  }
+  if (entityIds.length === 0) return null;
+  return `GROUPEDIT "${name}" ${verb} ${entityIds.join(',')}`;
+}
+
 /** The stable key for one row (its kind and id are unique in one tree). */
 export function outlinerRowKey(row: Pick<OutlinerRow, 'kind' | 'id'>): string {
   return `${row.kind}:${row.id}`;
@@ -131,6 +161,9 @@ export function parseOutlinerAnswer(answer: unknown): OutlinerAnswer {
     const label = typeof fields.label === 'string' ? fields.label : null;
     const kind = typeof fields.kind === 'string' && fields.kind !== '' ? fields.kind : null;
     if (id === null || label === null || kind === null) continue;
+    const parentGroup = typeof fields.parentGroup === 'string' && fields.parentGroup !== ''
+      ? fields.parentGroup
+      : null;
     const depth = idOf(fields.depth) ?? 0;
     const selectIds: number[] = [];
     for (const candidate of Array.isArray(fields.selectIds) ? fields.selectIds : []) {
@@ -141,6 +174,7 @@ export function parseOutlinerAnswer(answer: unknown): OutlinerAnswer {
       kind,
       id,
       label,
+      parentGroup,
       depth,
       hidden: fields.hidden === true,
       hasChildren: fields.hasChildren === true,

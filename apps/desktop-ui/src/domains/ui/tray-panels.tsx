@@ -9,6 +9,7 @@ import { readMatchPhoto, readOverlays } from '../concept/panels.ts';
 import { BUILTIN_MATERIALS, paintCommand, readMaterials } from '../concept/materials.ts';
 import {
   groupCreateCommand,
+  groupEditCommand,
   groupRenameCommand,
   outlinerRowKey,
   readOutliner,
@@ -274,6 +275,7 @@ export function OutlinerBody() {
   const [renameValue, setRenameValue] = useState('');
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [groupName, setGroupName] = useState('');
+  const [dragKeys, setDragKeys] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [state, setState] = useState<{
     phase: 'ready' | 'loading' | 'error';
     answer: OutlinerAnswer | null;
@@ -326,6 +328,45 @@ export function OutlinerBody() {
       if (result.kind === 'error') setSelectionError(result.reason);
       else setNonce(value => value + 1);
     });
+  };
+  const dropOnGroup = (row: OutlinerRow) => {
+    if (row.kind !== 'group') return;
+    const dragged = rows.filter(candidate =>
+      dragKeys.has(outlinerRowKey(candidate))
+      && candidate.selectable
+      && candidate.kind !== 'group');
+    if (dragged.length === 0) return;
+    const target = row.label;
+    // A real regroup moves the rows: remove them from their current groups first,
+    // then add them to the target. The two GROUPEDIT commands are two undo steps.
+    const moving = dragged.filter(candidate => candidate.parentGroup !== target);
+    const addCommand = groupEditCommand(
+      target,
+      'ADD',
+      selectedOutlinerIds(rows, new Set(
+        moving.map(candidate => outlinerRowKey(candidate)),
+      )),
+    );
+    if (addCommand === null) return;
+    const parents = new Set<string>();
+    for (const candidate of moving) {
+      if (candidate.parentGroup !== null) parents.add(candidate.parentGroup);
+    }
+    for (const parent of parents) {
+      const removeCommand = groupEditCommand(
+        parent,
+        'REMOVE',
+        selectedOutlinerIds(rows, new Set(
+          moving
+            .filter(candidate => candidate.parentGroup === parent)
+            .map(candidate => outlinerRowKey(candidate)),
+        )),
+      );
+      if (removeCommand !== null) shell.runCommand(removeCommand);
+    }
+    shell.runCommand(addCommand);
+    setDragKeys(new Set());
+    setNonce(value => value + 1);
   };
   const groupSelected = () => {
     const ids = selectedOutlinerIds(rows, selected);
@@ -381,6 +422,7 @@ export function OutlinerBody() {
   return (
     <>
       <p className="concept-panel__hint">{t('concept.outliner.hint')}</p>
+      <p className="concept-panel__hint">{t('concept.outliner.regroup_hint')}</p>
       <div className="concept-scenes__save">
         <input
           type="text"
@@ -421,7 +463,32 @@ export function OutlinerBody() {
             const key = outlinerRowKey(row);
             const isCollapsed = collapsed.has(key);
             return (
-              <li key={key} style={{ paddingInlineStart: `${row.depth * 14}px` }}>
+              <li
+                key={key}
+                style={{ paddingInlineStart: `${row.depth * 14}px` }}
+                draggable={row.kind !== 'group' && row.selectable}
+                onDragStart={() => {
+                  if (row.kind === 'group' || !row.selectable) return;
+                  setDragKeys(selected.has(key) ? selected : new Set([key]));
+                }}
+                onDragOver={row.kind === 'group'
+                  ? event => {
+                    if (groupEditCommand(
+                      row.label,
+                      'ADD',
+                      selectedOutlinerIds(rows, dragKeys),
+                    ) !== null) {
+                      event.preventDefault();
+                    }
+                  }
+                  : undefined}
+                onDrop={row.kind === 'group'
+                  ? event => {
+                    event.preventDefault();
+                    dropOnGroup(row);
+                  }
+                  : undefined}
+              >
                 {row.hasChildren ? (
                   <button
                     type="button"
@@ -508,6 +575,29 @@ export function OutlinerBody() {
                     onClick={() => hide(row)}
                   >
                     {t('concept.outliner.hide')}
+                  </button>
+                ) : null}
+                {row.parentGroup !== null && row.selectable ? (
+                  <button
+                    type="button"
+                    className="concept-panel__action"
+                    disabled={groupEditCommand(row.parentGroup, 'REMOVE', row.selectIds) === null
+                      || !shell.canCommand('GROUPEDIT')}
+                    title={t('concept.outliner.remove_named', { name: row.parentGroup })}
+                    onClick={() => {
+                      if (row.parentGroup === null) return;
+                      const command = groupEditCommand(
+                        row.parentGroup,
+                        'REMOVE',
+                        row.selectIds,
+                      );
+                      if (command !== null) {
+                        shell.runCommand(command);
+                        setNonce(value => value + 1);
+                      }
+                    }}
+                  >
+                    {t('concept.outliner.remove_from_group')}
                   </button>
                 ) : null}
                 {renaming !== key && row.kind === 'group'

@@ -29,6 +29,9 @@ pub struct OutlinerRowWire {
     pub id: u64,
     /// Display label (`LINE #12`, the block name, or the group name).
     pub label: String,
+    /// The containing group's name for a group member row, else absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_group: Option<String>,
     /// Nesting depth (top-level rows are `0`).
     pub depth: u32,
     /// Whether the row is temporarily hidden in this session.
@@ -67,6 +70,7 @@ impl OutlinerResponse {
                     kind: row.kind.to_string(),
                     id: row.id,
                     label: row.label,
+                    parent_group: row.parent_group,
                     depth: row.depth,
                     hidden: row.hidden,
                     has_children: row.has_children,

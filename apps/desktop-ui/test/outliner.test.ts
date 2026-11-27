@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   OUTLINER_COMMAND,
   groupCreateCommand,
+  groupEditCommand,
   groupRenameCommand,
   selectedOutlinerIds,
   outlinerRowKey,
@@ -131,5 +132,27 @@ test('group-create uses the quoted GROUP grammar and refuses unsafe names', () =
   assert.equal(groupCreateCommand('  My Group  '), 'GROUP CREATE "My Group"');
   for (const name of ['', '   ', 'a"b', 'a\nb', null, 3]) {
     assert.equal(groupCreateCommand(name), null, String(name));
+  }
+});
+
+test('the parent group is preserved for member rows and null otherwise', () => {
+  const answer = parseOutlinerAnswer({ rows: [
+    { kind: 'entity', id: 10, label: 'a', parentGroup: 'Walls', selectIds: [10] },
+    { kind: 'entity', id: 11, label: 'b', selectIds: [11] },
+    { kind: 'group', id: 1, label: 'Walls', selectIds: [10] },
+  ] });
+  assert.equal(answer.rows[0].parentGroup, 'Walls');
+  assert.equal(answer.rows[1].parentGroup, null);
+  assert.equal(answer.rows[2].parentGroup, null);
+});
+
+test('regroup commands use GROUPEDIT with quoted names and deduplicated ids', () => {
+  assert.equal(groupEditCommand('Walls', 'ADD', [10, 11, 10]), 'GROUPEDIT "Walls" ADD 10,11');
+  assert.equal(groupEditCommand('  Walls  ', 'REMOVE', [10]), 'GROUPEDIT "Walls" REMOVE 10');
+  for (const group of ['', 'a"b', 'a\nb', null]) {
+    assert.equal(groupEditCommand(group, 'ADD', [10]), null, String(group));
+  }
+  for (const ids of [[], ['10'], [1.5], [-2]]) {
+    assert.equal(groupEditCommand('Walls', 'ADD', ids), null, String(ids));
   }
 });

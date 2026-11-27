@@ -44,6 +44,8 @@ pub struct OutlinerRow {
     pub id: u64,
     /// Display label (`LINE #12`, the block name, or the group name).
     pub label: String,
+    /// The containing group's name for a group member row, else `None`.
+    pub parent_group: Option<String>,
     /// Nesting depth (a pre-order walk; top-level rows are `0`).
     pub depth: u32,
     /// Whether this row has children in the same answer or beyond the page.
@@ -118,6 +120,7 @@ impl HostCore {
                 kind: "group",
                 id: group.seq.0,
                 label: group.name.clone(),
+                parent_group: None,
                 depth: 0,
                 hidden: group_hidden,
                 has_children: !members.is_empty(),
@@ -129,6 +132,7 @@ impl HostCore {
                     kind: "entity",
                     id: entity.id.0 as u64,
                     label: entity_label(&entity.object.type_key, entity.id),
+                    parent_group: Some(group.name.clone()),
                     depth: 1,
                     hidden: is_hidden(entity.id),
                     has_children: false,
@@ -164,6 +168,7 @@ impl HostCore {
                             .block_name(*block)
                             .map(|name| format!("{name} #{}", entity.id.0))
                             .unwrap_or_else(|| entity_label(&entity.object.type_key, entity.id)),
+                        parent_group: None,
                         depth: 0,
                         hidden: is_hidden(entity.id),
                         has_children: !members.is_empty(),
@@ -175,6 +180,7 @@ impl HostCore {
                             kind: "member",
                             id: member.id.0 as u64,
                             label: entity_label(&member.object.type_key, member.id),
+                            parent_group: None,
                             depth: 1,
                             hidden: false,
                             has_children: false,
@@ -189,6 +195,7 @@ impl HostCore {
                     kind: "entity",
                     id: entity.id.0 as u64,
                     label: entity_label(&entity.object.type_key, entity.id),
+                    parent_group: None,
                     depth: 0,
                     hidden: is_hidden(entity.id),
                     has_children: false,

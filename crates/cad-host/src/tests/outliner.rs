@@ -92,6 +92,7 @@ fn groups_and_block_references_project_as_containers() {
         .find(|row| row.kind == "group")
         .expect("the group row");
     assert_eq!(group_row.label, "walls");
+    assert_eq!(group_row.parent_group, None);
     assert_eq!(group_row.depth, 0);
     assert!(group_row.has_children);
     assert!(group_row.selectable);
@@ -110,6 +111,7 @@ fn groups_and_block_references_project_as_containers() {
     assert!(insert_row.selectable);
     assert_eq!(insert_row.select_ids, vec![insert_row.id]);
     assert_eq!(insert_row.depth, 0);
+    assert_eq!(insert_row.parent_group, None);
 
     let block_members: Vec<_> = tree
         .rows
@@ -134,6 +136,7 @@ fn groups_and_block_references_project_as_containers() {
     for row in entity_rows {
         assert_eq!(row.depth, 1);
         assert!(row.selectable);
+        assert_eq!(row.parent_group.as_deref(), Some("walls"));
         assert_eq!(row.select_ids, vec![row.id]);
     }
 }
