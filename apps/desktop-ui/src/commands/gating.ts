@@ -777,6 +777,9 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // TRIMSOLID subtracts the cutters from the first selected body and keeps the
   // cutters, so a target plus at least one cutter is the real minimum.
   TRIMSOLID: Object.freeze({ count: 2, reasonKey: 'draw.kind.trimsolid.hint' }),
+  // SPLITSOLID cuts the first selected body by the others into two pieces, so a
+  // target plus at least one cutter is the real minimum.
+  SPLITSOLID: Object.freeze({ count: 2, reasonKey: 'draw.kind.splitsolid.hint' }),
   SUBTRACT: Object.freeze({ count: 2, reasonKey: 'draw.kind.subtract.hint' }),
   INTERSECT: Object.freeze({ count: 2, reasonKey: 'draw.kind.intersect.hint' }),
   // CHAMFEREDGE (ADR-0036 P2.0) cuts one edge of the **one** selected exact

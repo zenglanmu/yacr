@@ -34,6 +34,8 @@ pub enum MeshJobPoll {
     /// The mesh was committed in one transaction; the operands are gone.
     Done {
         object: ObjectId,
+        /// The inside piece's row for a split; `None` for every other job.
+        second_object: Option<ObjectId>,
         /// Present for a repair (`Partial`); `None` for a boolean.
         repair: Option<MeshRepair>,
         diagnostics: Vec<Diagnostic>,
@@ -62,11 +64,13 @@ impl HostController {
                 plan,
                 mesh,
                 topology: _topology,
+                second,
                 repair,
                 diagnostics,
-            } => match self.commit_mesh_job(&plan, mesh, repair) {
-                Ok(object) => MeshJobPoll::Done {
+            } => match self.commit_mesh_job(&plan, mesh, second.map(|pair| pair.0), repair) {
+                Ok((object, second_object)) => MeshJobPoll::Done {
                     object,
+                    second_object,
                     repair,
                     diagnostics,
                 },
@@ -82,13 +86,18 @@ impl HostController {
         self.application.cancel_mesh_job();
     }
 
-    /// Commit the mesh product in one transaction and one undo step.
+    /// Commit the mesh product(s) in one transaction and one undo step.
+    ///
+    /// `Trim`/`Split` delete only the target (operand 0) and keep every cutter;
+    /// `Split` inserts two rows (outside then inside). Every result inherits the
+    /// target's layer, space, draw order and display state.
     fn commit_mesh_job(
         &mut self,
         plan: &MeshJobPlan,
         mesh: MeshData,
+        second: Option<MeshData>,
         _repair: Option<MeshRepair>,
-    ) -> CadResult<ObjectId> {
+    ) -> CadResult<(ObjectId, Option<ObjectId>)> {
         if plan.document != self.document_id {
             return Err(CadError::StaleResult);
         }
@@ -97,9 +106,13 @@ impl HostController {
                 "mesh.job_invalid_plan: a mesh job carries no operands".into(),
             ));
         }
-        // Trim keeps every cutter (operand 1..) and replaces only the target.
-        let trim = matches!(plan.kind, crate::tasks::MeshJobKind::Trim);
-        let (candidate, operands, display_states, change_set, new_id, entity) = {
+        // Trim and Split keep every cutter (operand 1..) and replace only the
+        // target; a boolean or repair replaces the whole operand group.
+        let keep_cutters = matches!(
+            plan.kind,
+            crate::tasks::MeshJobKind::Trim | crate::tasks::MeshJobKind::Split
+        );
+        let (candidate, operands, display_states, change_set, entities) = {
             let document = self
                 .application
                 .workspace
@@ -120,54 +133,63 @@ impl HostController {
                 display_states.push(candidate.entity_display_state(before.id));
                 operands.push(before);
             }
-            let new_id = candidate.allocate_entity_id();
-            let entity = DbEntity {
-                object: DbObject {
-                    id: ObjectId(new_id.0),
-                    type_key: MESH_TYPE_KEY.to_string(),
-                    revision: Revision(0),
-                    source_handle: None,
-                },
-                id: new_id,
-                layer: plan.layer,
-                space: plan.space.clone(),
-                // A mesh result is derived display geometry: no source face
-                // identity, normals, UVs or material travels with it.
-                geometry: SemanticGeometry::Mesh(cad_domain::Mesh {
-                    vertices: mesh.vertices,
-                    triangles: mesh.triangles,
-                    ..Default::default()
-                }),
-                draw_order: plan.draw_order,
+            let inherited = if keep_cutters {
+                display_states.first().cloned()
+            } else {
+                inherited_display_state(&display_states).cloned()
             };
+            let mut products: Vec<MeshData> = vec![mesh];
+            if let Some(second) = second {
+                products.push(second);
+            }
+            let mut entities = Vec::with_capacity(products.len());
+            for product in products {
+                let new_id = candidate.allocate_entity_id();
+                entities.push(DbEntity {
+                    object: DbObject {
+                        id: ObjectId(new_id.0),
+                        type_key: MESH_TYPE_KEY.to_string(),
+                        revision: Revision(0),
+                        source_handle: None,
+                    },
+                    id: new_id,
+                    layer: plan.layer,
+                    space: plan.space.clone(),
+                    // A mesh result is derived display geometry: no source face
+                    // identity, normals, UVs or material travels with it.
+                    geometry: SemanticGeometry::Mesh(cad_domain::Mesh {
+                        vertices: product.vertices,
+                        triangles: product.triangles,
+                        ..Default::default()
+                    }),
+                    draw_order: plan.draw_order,
+                });
+            }
             let transaction = next_transaction_id();
             let change_set = {
                 let mut staged =
                     candidate.begin_drawing_transaction("mesh operation", transaction)?;
                 for (index, operand) in operands.iter().enumerate() {
-                    if !trim || index == 0 {
+                    if !keep_cutters || index == 0 {
                         staged.delete_entity(operand.id)?;
                     }
                 }
-                staged.insert_entity(entity.clone())?;
-                if let Some(state) = inherited_display_state(&display_states) {
-                    staged.update_entity_display_state(new_id, state)?;
+                for entity in &entities {
+                    staged.insert_entity(entity.clone())?;
+                }
+                if let Some(state) = inherited {
+                    for entity in &entities {
+                        staged.update_entity_display_state(entity.id, &state)?;
+                    }
                 }
                 staged.commit()?
             };
-            (
-                candidate,
-                operands,
-                display_states,
-                change_set,
-                new_id,
-                entity,
-            )
+            (candidate, operands, display_states, change_set, entities)
         };
 
-        // A trim result inherits the target's display state; a boolean merges
-        // the group's. Only the operands the commit really deleted get a patch.
-        let inherited = if trim {
+        // A kept operand gets no delete patch, so undo cannot resurrect a second
+        // copy of the cutter.
+        let inherited = if keep_cutters {
             display_states.first().cloned()
         } else {
             inherited_display_state(&display_states).cloned()
@@ -176,16 +198,18 @@ impl HostController {
             .iter()
             .zip(display_states)
             .enumerate()
-            .filter(|(index, _)| !trim || *index == 0)
+            .filter(|(index, _)| !keep_cutters || *index == 0)
             .map(|(_, (operand, state))| drawing_patch_deleted(operand.id, operand.clone(), state))
             .collect();
-        patches.push(DrawingPatch {
-            id: new_id,
-            before: None,
-            after: Some(entity),
-            before_state: None,
-            after_state: inherited,
-        });
+        for entity in &entities {
+            patches.push(DrawingPatch {
+                id: entity.id,
+                before: None,
+                after: Some(entity.clone()),
+                before_state: None,
+                after_state: inherited.clone(),
+            });
+        }
         let document_id = self.document_id;
         self.application.publish_candidate(
             document_id,
@@ -204,6 +228,10 @@ impl HostController {
             },
         )?;
         self.application.reconcile_selection(&mut self.session);
-        Ok(ObjectId(new_id.0))
+        let mut ids = entities.iter().map(|entity| ObjectId(entity.id.0));
+        let first = ids.next().ok_or_else(|| {
+            CadError::Invariant("mesh.job_invalid_plan: a mesh job produced no row".into())
+        })?;
+        Ok((first, ids.next()))
     }
 }

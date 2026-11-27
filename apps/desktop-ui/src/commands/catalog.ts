@@ -656,8 +656,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'VIEWFORWARD', labelKey: 'draw.kind.viewforward', icon: 'view', group: 'view' },
   { id: 'VPOINT', labelKey: 'draw.kind.vpoint', icon: 'axes', group: 'view' },
 
-  // The 2026-11-07 extras batch; `-PAN`/`REGEN3`/`-LINETYPE` alias PAN/REGEN/
-  // LINETYPE. SKETCH is the Freehand drag tool; MSTRETCH takes an IPC payload.
+  // Extras batch; SKETCH is the Freehand drag tool, MSTRETCH takes an IPC payload.
   { id: 'SKETCH', labelKey: 'draw.kind.sketch', icon: 'spline', group: 'draw' },
   { id: 'TEXT3D', labelKey: 'draw.kind.text3d', icon: 'pushPull', group: 'draw' },
   { id: 'TRACE', labelKey: 'draw.kind.trace', icon: 'line', group: 'draw' },
@@ -923,6 +922,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'UNION', labelKey: 'draw.kind.union', icon: 'dot', group: 'modify' },
   { id: 'OUTERSHELL', labelKey: 'draw.kind.outershell', icon: 'dot', group: 'modify' },
   { id: 'TRIMSOLID', labelKey: 'draw.kind.trimsolid', icon: 'trim', group: 'modify' },
+  { id: 'SPLITSOLID', labelKey: 'draw.kind.splitsolid', icon: 'explode', group: 'modify' },
   { id: 'SUBTRACT', labelKey: 'draw.kind.subtract', icon: 'dot', group: 'modify' },
   { id: 'SLICE', labelKey: 'draw.kind.slice', icon: 'dot', group: 'modify' },
   { id: 'THICKEN', labelKey: 'draw.kind.thicken', icon: 'dot', group: 'modify' },

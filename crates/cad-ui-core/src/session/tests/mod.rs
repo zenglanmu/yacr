@@ -40,6 +40,7 @@ mod tests_scenes;
 mod tests_session_surfaces;
 mod tests_settings;
 mod tests_soften;
+mod tests_splitsolid;
 mod tests_stretch;
 mod tests_sysvdlg;
 mod tests_text;

@@ -438,6 +438,7 @@ impl Application {
             CommandId::Text3d => self.text3d(session, &command),
             CommandId::OuterShell => self.outer_shell(session, &command),
             CommandId::TrimSolid => self.trim_solid(session, &command),
+            CommandId::SplitSolid => self.split_solid(session, &command),
             CommandId::SoftenEdges => self.soften_selected_edges(session, &command),
             CommandId::ViewGo => self.view_go(session, &command),
             CommandId::ViewBack => self.view_back(session, &command),

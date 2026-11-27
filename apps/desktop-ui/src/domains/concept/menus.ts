@@ -139,7 +139,7 @@ const TOOLS_SOLID = panel('concept.tools.solid', 'concept.section.solid', [
   { id: 'INTERSECT', labelKey: 'draw.kind.intersect', icon: 'dot', command: 'INTERSECT' },
   { id: 'OUTERSHELL', labelKey: 'concept.tool.outer_shell', icon: 'dot', command: 'OUTERSHELL', hintKey: 'concept.tool.outer_shell.hint' },
   { id: 'TRIMSOLID', labelKey: 'concept.tool.trim_solid', icon: 'trim', command: 'TRIMSOLID', hintKey: 'concept.tool.trim_solid.hint' },
-  pending('SPLITSOLID', 'concept.tool.split_solid', 'explode'),
+  { id: 'SPLITSOLID', labelKey: 'concept.tool.split_solid', icon: 'explode', command: 'SPLITSOLID', hintKey: 'concept.tool.split_solid.hint' },
 ]);
 
 const TOOLS_OTHER = panel('concept.tools.other', 'concept.section.other', [

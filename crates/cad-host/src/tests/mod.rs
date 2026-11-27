@@ -72,6 +72,7 @@ mod settings_paths;
 mod settings_units;
 mod snap_marker;
 mod solid_boolean;
+mod split_solid;
 mod stretch_lasso;
 mod text3d;
 mod text_tool;

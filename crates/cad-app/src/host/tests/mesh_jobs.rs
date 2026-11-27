@@ -239,6 +239,7 @@ fn a_mesh_boolean_commits_one_mesh_row_and_one_undo_step() {
 
     let MeshJobPoll::Done {
         object,
+        second_object,
         repair,
         diagnostics,
     } = wait(&mut controller)
@@ -246,6 +247,7 @@ fn a_mesh_boolean_commits_one_mesh_row_and_one_undo_step() {
         panic!("the fake mesh boolean must commit");
     };
     assert!(repair.is_none(), "a boolean carries no repair report");
+    assert!(second_object.is_none(), "a boolean has one product");
     assert_eq!(diagnostics[0].code, "mesh.test_note");
 
     assert_eq!(entity_count(&controller), 1, "both operands are replaced");
@@ -511,4 +513,79 @@ fn trim_solid_keeps_the_cutter_and_replaces_only_the_target() {
     let document = &controller.application.workspace.documents[&controller.document_id];
     assert!(document.drawing.entity(EntityId(40)).is_some());
     assert!(document.drawing.entity(EntityId(object.0)).is_none());
+}
+
+#[test]
+fn split_solid_commits_two_pieces_and_keeps_the_cutter() {
+    let mut controller = controller_with(&[(60, cube_data()), (61, cube_data())]);
+    controller
+        .application
+        .set_mesh_modeler(Some(Arc::new(FakeMeshModeler { refusal: None })));
+    let cutter_before = controller.application.workspace.documents[&controller.document_id]
+        .drawing
+        .entity(EntityId(61))
+        .expect("the cutter row")
+        .clone();
+    let references: Vec<cad_domain::SelectionRef> = [60_u128, 61]
+        .into_iter()
+        .map(|id| cad_domain::SelectionRef {
+            document: controller.document_id,
+            entity: EntityId(id),
+            instance: cad_domain::InstancePath::default(),
+            sub_element: None,
+        })
+        .collect();
+    controller.session.selection.replace(references);
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::SplitSolid,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: CommandPayload::None,
+        })
+        .expect("SPLITSOLID starts the split job");
+
+    let MeshJobPoll::Done {
+        object,
+        second_object,
+        ..
+    } = wait(&mut controller)
+    else {
+        panic!("the fake split must commit");
+    };
+    let second_object = second_object.expect("a split produces two rows");
+    assert_ne!(object, second_object);
+    assert_eq!(
+        entity_count(&controller),
+        3,
+        "two split pieces plus the kept cutter"
+    );
+    let document = &controller.application.workspace.documents[&controller.document_id];
+    let cutter_after = document
+        .drawing
+        .entity(EntityId(61))
+        .expect("the cutter survives");
+    assert_eq!(cutter_after.object.revision, cutter_before.object.revision);
+    assert_eq!(cutter_after.geometry, cutter_before.geometry);
+    for id in [object, second_object] {
+        let row = document
+            .drawing
+            .entity(EntityId(id.0))
+            .expect("the split piece");
+        assert_eq!(row.object.type_key, "AcDbSubDMesh");
+    }
+    assert!(document.drawing.entity(EntityId(60)).is_none());
+    assert_eq!(undo_depth(&controller), 1);
+
+    controller
+        .execute(Command {
+            schema_version: 1,
+            id: CommandId::Undo,
+            document: controller.document_id,
+            viewport: controller.viewport_id,
+            payload: CommandPayload::None,
+        })
+        .expect("the split commit is undoable");
+    assert_eq!(entity_count(&controller), 2, "the original pair is back");
 }

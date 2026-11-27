@@ -243,6 +243,9 @@ pub(crate) const OUTERSHELL_MAX_INPUT_TRIANGLES: usize = 1_000_000;
 /// The safety valve on the combined TRIMSOLID input (same shape as OUTERSHELL).
 pub(crate) const TRIMSOLID_MAX_INPUT_TRIANGLES: usize = 1_000_000;
 
+/// The safety valve on the combined SPLITSOLID input (same shape as TRIMSOLID).
+pub(crate) const SPLITSOLID_MAX_INPUT_TRIANGLES: usize = 1_000_000;
+
 impl Application {
     /// `OUTERSHELL`: union the selected closed mesh bodies into one shell.
     ///
@@ -601,6 +604,202 @@ impl Application {
             message: format!(
                 "TRIMSOLID: {MESH_JOB_SETTLEMENT} (target + {cutter_count} cutter(s); the \
                  cutters are kept)"
+            ),
+        });
+        Ok(CommandOutcome {
+            objects: Vec::new(),
+            changes: None,
+            diagnostics,
+            measurement: None,
+            point_report: None,
+        })
+    }
+}
+
+impl Application {
+    /// `SPLITSOLID`: cut the first selected mesh body by the union of the other
+    /// selected bodies into an **outside** and an **inside** piece.
+    ///
+    /// The first selected body is the target; every other selected body is a
+    /// cutter and is kept as its own row (a cutter is a tool, not the piece being
+    /// split). The worker unions the cutters and runs `target − ∪cutters` and
+    /// `target ∩ ∪cutters`, so the two results tile the target exactly; both
+    /// results are inserted in one transaction / one undo step.
+    ///
+    /// Refusals (nothing written, no worker): `splitsolid.payload`,
+    /// `splitsolid.needs_two`, `splitsolid.sub_element_not_supported`,
+    /// `splitsolid.space_mismatch`, `splitsolid.not_mesh`, `splitsolid.open_shell`,
+    /// `splitsolid.non_manifold`, `splitsolid.budget`, the carrier's
+    /// `unsupported-runtime: mesh-modeler`, and Viewer's `PermissionDenied`.
+    /// A cut that leaves one side empty fails the job with `splitsolid.no_intersection`
+    /// or `splitsolid.empty_piece` and writes nothing.
+    pub(crate) fn split_solid(
+        &mut self,
+        session: &SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        require_none_payload(command, "SPLITSOLID")?;
+        if session.app_mode() == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
+        let refs = session.selection.refs().to_vec();
+        if refs.len() < 2 {
+            return Err(invalid(
+                "splitsolid.needs_two",
+                format!(
+                    "SPLITSOLID needs a target and at least one cutter body, got {} selection(s)",
+                    refs.len()
+                ),
+            ));
+        }
+        if refs
+            .iter()
+            .any(|reference| reference.sub_element.is_some() || !reference.instance.0.is_empty())
+        {
+            return Err(invalid(
+                "splitsolid.sub_element_not_supported",
+                "SPLITSOLID combines whole bodies; a sub-element or instance-path reference is not \
+                 a body",
+            ));
+        }
+        let (entities, diagnostics) = {
+            let Some(document) = self.workspace.documents.get(&command.document) else {
+                return Err(CadError::InvalidInput("document not open".into()));
+            };
+            let drawing = document.drawing.as_ref();
+            Self::resolve_selection(
+                drawing,
+                command.document,
+                &refs,
+                "splitsolid",
+                "SPLITSOLID",
+                "split",
+                false,
+            )?
+        };
+        if entities.len() < 2 {
+            return Err(invalid(
+                "splitsolid.needs_two",
+                "SPLITSOLID needs at least two distinct selected bodies",
+            ));
+        }
+        let target_space = entities[0].space.clone();
+        let mut total_triangles = 0usize;
+        for entity in &entities {
+            if entity.space != target_space {
+                return Err(invalid(
+                    "splitsolid.space_mismatch",
+                    format!(
+                        "entity {} is in another space than the target; SPLITSOLID never crosses \
+                         model/paper space",
+                        entity.id.0
+                    ),
+                ));
+            }
+            match classify_boolean_operand(entity) {
+                Some(BooleanOperand::Mesh) => {}
+                Some(BooleanOperand::Exact(_)) => {
+                    return Err(invalid(
+                        "splitsolid.not_mesh",
+                        format!(
+                            "entity {} is an exact solid; SPLITSOLID splits closed mesh bodies \
+                             (use SUBTRACT for exact solids)",
+                            entity.id.0
+                        ),
+                    ))
+                }
+                None => {
+                    return Err(invalid(
+                        "splitsolid.not_mesh",
+                        format!(
+                            "entity {} is {}; SPLITSOLID needs closed mesh bodies",
+                            entity.id.0,
+                            describe_operand(entity)
+                        ),
+                    ))
+                }
+            }
+            let Some(mesh) = mesh_geometry(entity) else {
+                return Err(invalid(
+                    "splitsolid.not_mesh",
+                    format!("entity {} carries no mesh geometry", entity.id.0),
+                ));
+            };
+            total_triangles += mesh.triangles.len();
+            if total_triangles > SPLITSOLID_MAX_INPUT_TRIANGLES {
+                return Err(invalid(
+                    "splitsolid.budget",
+                    format!(
+                        "the selected meshes hold {total_triangles} triangles, over the \
+                         {SPLITSOLID_MAX_INPUT_TRIANGLES} SPLITSOLID input budget; reduce the \
+                         selection"
+                    ),
+                ));
+            }
+            let data = MeshData::from_parts(mesh.vertices.clone(), mesh.triangles.clone());
+            let topology = cad_kernel_adapter::inspect_topology_welded(&data);
+            match topology.topology() {
+                cad_kernel_adapter::MeshTopology::ClosedManifold => {}
+                cad_kernel_adapter::MeshTopology::OpenShell => {
+                    return Err(invalid(
+                        "splitsolid.open_shell",
+                        format!(
+                            "entity {} is an open shell ({} boundary edge(s)); SPLITSOLID needs \
+                             closed bodies",
+                            entity.id.0, topology.boundary_edges
+                        ),
+                    ))
+                }
+                cad_kernel_adapter::MeshTopology::NonManifold => {
+                    return Err(invalid(
+                        "splitsolid.non_manifold",
+                        format!(
+                            "entity {} is non-manifold ({} edge(s) shared by three or more \
+                             triangles); SPLITSOLID needs closed manifold bodies",
+                            entity.id.0, topology.non_manifold_edges
+                        ),
+                    ))
+                }
+            }
+        }
+        self.split_meshes(command, entities, diagnostics)
+    }
+
+    /// Start the split job for an already-validated selection.
+    fn split_meshes(
+        &mut self,
+        command: &Command,
+        entities: Vec<DbEntity>,
+        mut diagnostics: Vec<Diagnostic>,
+    ) -> CadResult<CommandOutcome> {
+        let Some(modeler) = self.mesh_modeler.clone() else {
+            return Err(CadError::Unsupported(MESH_MODELER_UNSUPPORTED.into()));
+        };
+        let Some(target) = entities.first() else {
+            return Err(CadError::Invariant(
+                "splitsolid.invalid_plan: SPLITSOLID needs a target and at least one cutter".into(),
+            ));
+        };
+        let layer = target.layer;
+        let space = target.space.clone();
+        let draw_order = target.draw_order;
+        let cutter_count = entities.len() - 1;
+        let operands = entities.into_iter().map(MeshJobOperand::new).collect();
+        let plan = MeshJobPlan {
+            document: command.document,
+            kind: MeshJobKind::Split,
+            layer,
+            space,
+            draw_order,
+            operands,
+        };
+        self.start_mesh_job(plan, modeler)?;
+        diagnostics.push(Diagnostic {
+            object: None,
+            code: "mesh.split_started".into(),
+            message: format!(
+                "SPLITSOLID: {MESH_JOB_SETTLEMENT} (target + {cutter_count} cutter(s); two pieces, \
+                 outside and inside; the cutters are kept)"
             ),
         });
         Ok(CommandOutcome {

@@ -157,6 +157,8 @@ impl CommandId {
                 | Self::OuterShell
                 // TRIMSOLID replaces the target and keeps the cutters.
                 | Self::TrimSolid
+                // SPLITSOLID replaces the target with two pieces, keeping the cutters.
+                | Self::SplitSolid
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock

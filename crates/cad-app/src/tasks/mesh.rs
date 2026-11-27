@@ -142,6 +142,10 @@ pub(crate) enum MeshJobKind {
         mode: MeshRepairMode,
         rule: MeshWindingRule,
     },
+    /// SketchUp Solid Tools **Split**: cut the target (operand 0) by the union
+    /// of the cutters (operands 1..), producing an **outside** and an **inside**
+    /// piece; every cutter row is kept untouched.
+    Split,
     /// SketchUp Solid Tools **Trim**: subtract the cutters (operands 1..) from
     /// the target (operand 0) and keep every cutter row untouched.
     ///
@@ -157,6 +161,7 @@ impl MeshJobKind {
         match self {
             MeshJobKind::Boolean(op) => op.as_str(),
             MeshJobKind::Repair { mode, .. } => mode.as_str(),
+            MeshJobKind::Split => "split",
             MeshJobKind::Trim => "trim",
         }
     }
@@ -225,6 +230,9 @@ enum Terminal {
     Product {
         mesh: MeshData,
         topology: MeshTopologyReport,
+        /// The **inside** piece of a split (`Some`); `None` for every other job.
+        /// Boxed: a second mesh product would otherwise dominate this enum.
+        second: Option<Box<(MeshData, MeshTopologyReport)>>,
         repair: Option<MeshRepair>,
         diagnostics: Vec<Diagnostic>,
     },
@@ -323,6 +331,8 @@ pub(crate) enum MeshJobTake {
         plan: Arc<MeshJobPlan>,
         mesh: MeshData,
         topology: MeshTopologyReport,
+        /// The inside piece of a split, or `None` for a single-product job.
+        second: Option<Box<(MeshData, MeshTopologyReport)>>,
         /// Present for a repair product (`Partial`); `None` for a boolean.
         repair: Option<MeshRepair>,
         diagnostics: Vec<Diagnostic>,
@@ -478,12 +488,14 @@ impl MeshJobManager {
             Ok(Some(Terminal::Product {
                 mesh,
                 topology,
+                second,
                 repair,
                 diagnostics,
             })) => MeshJobTake::Done {
                 plan,
                 mesh,
                 topology,
+                second,
                 repair,
                 diagnostics,
             },
@@ -523,6 +535,7 @@ fn run_job(
         MeshJobKind::Boolean(op) => run_boolean(plan, op, modeler, stamp, cancelled),
         // Trim is the same subtract fold; the commit keeps the cutters.
         MeshJobKind::Trim => run_boolean(plan, MeshBooleanOp::Subtract, modeler, stamp, cancelled),
+        MeshJobKind::Split => run_split(plan, modeler, stamp, cancelled),
         MeshJobKind::Repair { mode, rule } => {
             run_repair(plan, mode, rule, modeler, stamp, cancelled)
         }
@@ -566,50 +579,12 @@ fn run_boolean(
                 "mesh.boolean_invalid_plan: a frozen operand is no longer a mesh".into(),
             ));
         };
-        let request = MeshRequest {
-            stamp: stamp.clone(),
-            operation: MeshOperation::Boolean {
-                op,
-                left: &accumulated,
-                right: &mesh,
-            },
-        };
-        let result = match execute_mesh(modeler, &request, cancelled) {
-            Ok(result) => result,
-            Err(error) => return Terminal::Failed(error),
-        };
-        match result.outcome {
-            MeshOutcome::Success {
-                mesh,
-                diagnostics: notes,
-                ..
-            } => {
+        match boolean_product(modeler, op, &accumulated, &mesh, stamp, cancelled) {
+            Ok((mesh, notes)) => {
                 accumulated = mesh;
                 diagnostics.extend(notes);
             }
-            MeshOutcome::Partial { .. } => {
-                // A boolean must not answer with a repair report; accepting the
-                // mesh would hide a kernel contract violation.
-                return Terminal::Failed(CadError::Invariant(
-                    "mesh.boolean_unexpected_repair: the modeler answered a boolean with a repair \
-                     product"
-                        .into(),
-                ));
-            }
-            MeshOutcome::Unsupported { reason } => {
-                return Terminal::Failed(CadError::Unsupported(format!(
-                    "{}: {}",
-                    reason.code, reason.detail
-                )))
-            }
-            MeshOutcome::Failed {
-                diagnostics: failure,
-            } => {
-                return Terminal::Failed(CadError::Unsupported(format!(
-                    "mesh.boolean_failed: {}",
-                    failure_message(&failure)
-                )))
-            }
+            Err(error) => return Terminal::Failed(error),
         }
     }
     if cancelled() {
@@ -683,15 +658,183 @@ fn run_repair(
     }
 }
 
+/// Run one boolean operation and map the kernel outcome to a mesh product.
+///
+/// Shared by the fold (`run_boolean`) and the split (union/subtract/intersect
+/// against the cutter union), so every boolean answer is interpreted exactly
+/// once.
+fn boolean_product(
+    modeler: &dyn MeshModeler,
+    op: MeshBooleanOp,
+    left: &MeshData,
+    right: &MeshData,
+    stamp: &TaskStamp,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<(MeshData, Vec<Diagnostic>), CadError> {
+    let request = MeshRequest {
+        stamp: stamp.clone(),
+        operation: MeshOperation::Boolean { op, left, right },
+    };
+    let result = execute_mesh(modeler, &request, cancelled)?;
+    match result.outcome {
+        MeshOutcome::Success {
+            mesh, diagnostics, ..
+        } => Ok((mesh, diagnostics)),
+        MeshOutcome::Partial { .. } => Err(CadError::Invariant(
+            "mesh.boolean_unexpected_repair: the modeler answered a boolean with a repair product"
+                .into(),
+        )),
+        MeshOutcome::Unsupported { reason } => Err(CadError::Unsupported(format!(
+            "{}: {}",
+            reason.code, reason.detail
+        ))),
+        MeshOutcome::Failed { diagnostics } => Err(CadError::Unsupported(format!(
+            "mesh.boolean_failed: {}",
+            failure_message(&diagnostics)
+        ))),
+    }
+}
+
+/// Split the target by the union of the cutters into an outside and an inside
+/// piece. Both pieces must be closed; an empty side is a named refusal.
+fn run_split(
+    plan: &MeshJobPlan,
+    modeler: &dyn MeshModeler,
+    stamp: &TaskStamp,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Terminal {
+    if plan.operands.len() < 2 {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.split_invalid_plan: a split needs a target and at least one cutter".into(),
+        ));
+    }
+    if cancelled() {
+        return Terminal::Failed(CadError::Cancelled);
+    }
+    let Some(target) = plan.operands[0].mesh() else {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.split_invalid_plan: a frozen operand is no longer a mesh".into(),
+        ));
+    };
+    // The cutters are one combined volume: union them first, so the inside piece
+    // is `target ∩ (cutter ∪ …)` rather than `target ∩ cutter1 ∩ cutter2`.
+    let mut cutters = plan.operands[1..].iter();
+    let Some(first_cutter) = cutters.next() else {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.split_invalid_plan: a split needs a target and at least one cutter".into(),
+        ));
+    };
+    let Some(mut union) = first_cutter.mesh() else {
+        return Terminal::Failed(CadError::Invariant(
+            "mesh.split_invalid_plan: a frozen operand is no longer a mesh".into(),
+        ));
+    };
+    for cutter in cutters {
+        if cancelled() {
+            return Terminal::Failed(CadError::Cancelled);
+        }
+        let Some(mesh) = cutter.mesh() else {
+            return Terminal::Failed(CadError::Invariant(
+                "mesh.split_invalid_plan: a frozen operand is no longer a mesh".into(),
+            ));
+        };
+        match boolean_product(
+            modeler,
+            MeshBooleanOp::Union,
+            &union,
+            &mesh,
+            stamp,
+            cancelled,
+        ) {
+            Ok((mesh, _)) => union = mesh,
+            Err(error) => return Terminal::Failed(error),
+        }
+    }
+    if cancelled() {
+        return Terminal::Failed(CadError::Cancelled);
+    }
+    let outside = match boolean_product(
+        modeler,
+        MeshBooleanOp::Subtract,
+        &target,
+        &union,
+        stamp,
+        cancelled,
+    ) {
+        Ok((mesh, _)) => mesh,
+        Err(error) => return Terminal::Failed(error),
+    };
+    if cancelled() {
+        return Terminal::Failed(CadError::Cancelled);
+    }
+    let inside = match boolean_product(
+        modeler,
+        MeshBooleanOp::Intersect,
+        &target,
+        &union,
+        stamp,
+        cancelled,
+    ) {
+        Ok((mesh, _)) => mesh,
+        Err(error) => return Terminal::Failed(error),
+    };
+    if inside.is_empty() {
+        return Terminal::Failed(CadError::Unsupported(
+            "splitsolid.no_intersection: the cutters do not intersect the target, so there is no              inside piece to split off"
+                .into(),
+        ));
+    }
+    if outside.is_empty() {
+        return Terminal::Failed(CadError::Unsupported(
+            "splitsolid.empty_piece: the cutters cover the whole target, so there is no outside              piece to keep"
+                .into(),
+        ));
+    }
+    finish_split(outside, inside, Vec::new())
+}
+
 /// Enforce the ADR-0061 product gate: the returned mesh must be closed.
 fn finish_product(
     mesh: MeshData,
     repair: Option<MeshRepair>,
     diagnostics: Vec<Diagnostic>,
 ) -> Terminal {
-    let topology = cad_kernel_adapter::inspect_topology_welded(&mesh);
+    match closed_topology(&mesh) {
+        Ok(topology) => Terminal::Product {
+            mesh,
+            topology,
+            second: None,
+            repair,
+            diagnostics,
+        },
+        Err(error) => Terminal::Failed(error),
+    }
+}
+
+/// The split product: an outside piece plus an inside piece, both closed.
+fn finish_split(outside: MeshData, inside: MeshData, diagnostics: Vec<Diagnostic>) -> Terminal {
+    let outside_topology = match closed_topology(&outside) {
+        Ok(topology) => topology,
+        Err(error) => return Terminal::Failed(error),
+    };
+    let inside_topology = match closed_topology(&inside) {
+        Ok(topology) => topology,
+        Err(error) => return Terminal::Failed(error),
+    };
+    Terminal::Product {
+        mesh: outside,
+        topology: outside_topology,
+        second: Some(Box::new((inside, inside_topology))),
+        repair: None,
+        diagnostics,
+    }
+}
+
+/// The closed-2-manifold gate every stored mesh product must pass.
+fn closed_topology(mesh: &MeshData) -> Result<MeshTopologyReport, CadError> {
+    let topology = cad_kernel_adapter::inspect_topology_welded(mesh);
     if topology.topology != MeshTopology::ClosedManifold {
-        return Terminal::Failed(CadError::Unsupported(format!(
+        return Err(CadError::Unsupported(format!(
             "{}: the mesh job produced a {} mesh ({} boundary, {} non-manifold \
              edge(s)); a stored mesh product must be a closed 2-manifold",
             codes::MESH_NOT_CLOSED,
@@ -700,12 +843,7 @@ fn finish_product(
             topology.non_manifold_edges
         )));
     }
-    Terminal::Product {
-        mesh,
-        topology,
-        repair,
-        diagnostics,
-    }
+    Ok(topology)
 }
 
 fn failure_message(diagnostics: &[Diagnostic]) -> String {

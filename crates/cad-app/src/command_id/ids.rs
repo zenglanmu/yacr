@@ -44,6 +44,9 @@ pub enum CommandId {
     /// `TRIMSOLID`: subtract the selected cutters from the first selected mesh
     /// body, keeping the cutters (SketchUp Solid Tools Trim).
     TrimSolid,
+    /// `SPLITSOLID`: split the first selected mesh body by the union of the
+    /// others into an outside and an inside piece, keeping the cutters.
+    SplitSolid,
     ToggleLayer,
     /// Atomically publish a nonempty batch of temporary layer overrides. Allowed in Viewer and Work; no drawing write, reparse or undo entry.
     SetLayerVisibilities,

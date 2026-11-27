@@ -820,3 +820,150 @@ fn trim_solid_refuses_without_a_modeler_and_over_budget() {
     .expect_err("over the trim budget");
     assert!(invalid_text(error).contains("trimsolid.budget"));
 }
+
+#[test]
+fn split_solid_starts_one_job_and_produces_two_products() {
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    let ops = attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect("a valid split must start a job");
+    let diagnostic = outcome
+        .diagnostics
+        .iter()
+        .find(|row| row.code == "mesh.split_started")
+        .expect("the outcome names the split job");
+    assert!(
+        diagnostic.message.contains("outside and inside"),
+        "{diagnostic:?}"
+    );
+    assert!(
+        ops.lock().expect("op log").is_empty(),
+        "the worker runs later"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match app.poll_mesh_job_take() {
+            MeshJobTake::Running => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the split job did not settle"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            MeshJobTake::Done {
+                plan,
+                second,
+                topology,
+                ..
+            } => {
+                assert_eq!(topology.topology, MeshTopology::ClosedManifold);
+                assert_eq!(plan.kind, crate::tasks::MeshJobKind::Split);
+                assert!(second.is_some(), "a split produces the inside piece too");
+                break;
+            }
+            other => panic!("the fake split job must succeed, got {other:?}"),
+        }
+    }
+    assert_eq!(
+        ops.lock().expect("op log").as_slice(),
+        &[
+            "boolean:subtract".to_string(),
+            "boolean:intersect".to_string()
+        ],
+        "one cutter needs no union: subtract for outside, intersect for inside"
+    );
+}
+
+#[test]
+fn split_solid_refuses_invalid_operands_before_the_kernel() {
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids[..1]);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect_err("one body cannot be split");
+    assert!(invalid_text(error).contains("splitsolid.needs_two"));
+
+    let (mut app, mut session, ids) =
+        app_with_entities(vec![mesh_entity(10, 0), open_mesh_entity(11, 1)]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect_err("an open shell cannot be split");
+    assert!(invalid_text(error).contains("splitsolid.open_shell"));
+
+    let (mut app, mut session, ids) =
+        app_with_entities(vec![mesh_entity(10, 0), exact_entity(11, 1)]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect_err("split is mesh-only");
+    assert!(invalid_text(error).contains("splitsolid.not_mesh"));
+
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    session.switch_mode(AppMode::Viewer).expect("Viewer");
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect_err("a document write is work-only");
+    assert!(matches!(error, CadError::PermissionDenied), "{error:?}");
+}
+
+#[test]
+fn split_solid_refuses_without_a_modeler_and_over_budget() {
+    let (mut app, mut session, ids) = app_with_meshes(2);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect_err("no mesh modeler");
+    assert!(unsupported_text(error).contains("unsupported-runtime: mesh-modeler"));
+
+    let mut huge = domain_mesh();
+    huge.triangles =
+        vec![[0, 1, 2]; crate::app_drawing::mesh_solids::SPLITSOLID_MAX_INPUT_TRIANGLES + 1];
+    let huge_entity = DbEntity {
+        geometry: SemanticGeometry::Mesh(huge),
+        ..mesh_entity(12, 0)
+    };
+    let (mut app, mut session, ids) = app_with_entities(vec![mesh_entity(10, 0), huge_entity]);
+    attach_modeler(&mut app, None);
+    select(&mut session, &ids);
+    let error = execute(
+        &mut app,
+        &mut session,
+        CommandId::SplitSolid,
+        CommandPayload::None,
+    )
+    .expect_err("over the split budget");
+    assert!(invalid_text(error).contains("splitsolid.budget"));
+}

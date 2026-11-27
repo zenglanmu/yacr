@@ -555,6 +555,7 @@ export const HOST_NAMES = [
   'UNION',
   'OUTERSHELL',
   'TRIMSOLID',
+  'SPLITSOLID',
   'SUBTRACT',
   'SLICE',
   'THICKEN',
