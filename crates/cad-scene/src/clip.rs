@@ -173,7 +173,7 @@ fn clip_mesh(batch: &mut RenderBatch, plane: &ClipPlane) {
     let mut colors = Vec::new();
     let mut uvs = Vec::new();
     let mut indices = Vec::new();
-    let mut cut_edges = Vec::new();
+    let mut cut_segments: Vec<([f64; 3], [f64; 3])> = Vec::new();
     for tri in triangles {
         let Some(mut polygon) = tri
             .iter()
@@ -188,16 +188,11 @@ fn clip_mesh(batch: &mut RenderBatch, plane: &ClipPlane) {
         }
         for pair in polygon.windows(2) {
             if pair[0].on_plane && pair[1].on_plane {
-                push_edge(&mut cut_edges, pair[0], pair[1], origin);
+                cut_segments.push((pair[0].position, pair[1].position));
             }
         }
         if polygon[0].on_plane && polygon[polygon.len() - 1].on_plane {
-            push_edge(
-                &mut cut_edges,
-                polygon[polygon.len() - 1],
-                polygon[0],
-                origin,
-            );
+            cut_segments.push((polygon[polygon.len() - 1].position, polygon[0].position));
         }
         let base = vertices.len() as u32;
         for point in &polygon {
@@ -214,8 +209,31 @@ fn clip_mesh(batch: &mut RenderBatch, plane: &ClipPlane) {
             indices.push([base, base + fan as u32, base + fan as u32 + 1]);
         }
     }
+    let caps = cap_triangles(&cut_segments, plane);
+    let cap_normal = [
+        plane.normal.x as f32,
+        plane.normal.y as f32,
+        plane.normal.z as f32,
+    ];
+    for triangle in &caps {
+        let base = vertices.len() as u32;
+        for point in triangle {
+            vertices.push(local(*point, origin));
+            normals.push(cap_normal);
+            if has_colors {
+                colors.push(batch.color);
+            }
+            if has_uvs {
+                uvs.push([0.0, 0.0]);
+            }
+        }
+        indices.push([base, base + 1, base + 2]);
+    }
     let mut edges = clip_line_positions(&batch.edges, origin, plane);
-    edges.extend(cut_edges);
+    for (start, end) in &cut_segments {
+        edges.push(local(*start, origin));
+        edges.push(local(*end, origin));
+    }
     batch.vertices = vertices;
     batch.normals = normals;
     batch.colors = colors;
@@ -377,6 +395,242 @@ fn clip_conics(batch: &mut RenderBatch, plane: &ClipPlane) {
     batch.conics.clear();
 }
 
+/// Triangulate the cut boundary loops into cap triangles.
+///
+/// The graph must be a disjoint union of closed degree-2 loops; a non-manifold
+/// boundary or any nested loop (a hole) is skipped rather than filled wrong.
+/// Coordinates are quantized at 1e-6 model units so independently clipped
+/// triangles that share an intersection point join the same loop.
+fn cap_triangles(segments: &[([f64; 3], [f64; 3])], plane: &ClipPlane) -> Vec<[[f64; 3]; 3]> {
+    if segments.is_empty() {
+        return Vec::new();
+    }
+    let (u, v) = plane_basis(plane.normal);
+    let mut points: Vec<([f64; 3], [f64; 2])> = Vec::new();
+    let mut lookup: std::collections::BTreeMap<(i64, i64), usize> =
+        std::collections::BTreeMap::new();
+    let mut edges: std::collections::BTreeSet<(usize, usize)> = std::collections::BTreeSet::new();
+    let mut index = |point: [f64; 3]| {
+        let relative = [
+            point[0] - plane.origin.x,
+            point[1] - plane.origin.y,
+            point[2] - plane.origin.z,
+        ];
+        let key = (
+            (relative[0] * 1_000_000.0).round() as i64,
+            (relative[1] * 1_000_000.0).round() as i64,
+        );
+        *lookup.entry(key).or_insert_with(|| {
+            let uv = [
+                relative[0] * u[0] + relative[1] * u[1] + relative[2] * u[2],
+                relative[0] * v[0] + relative[1] * v[1] + relative[2] * v[2],
+            ];
+            points.push((point, uv));
+            points.len() - 1
+        })
+    };
+    for (start, end) in segments {
+        let a = index(*start);
+        let b = index(*end);
+        if a != b {
+            edges.insert(if a < b { (a, b) } else { (b, a) });
+        }
+    }
+    if points.len() < 3 {
+        return Vec::new();
+    }
+    let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); points.len()];
+    for &(a, b) in &edges {
+        adjacency[a].push(b);
+        adjacency[b].push(a);
+    }
+    if adjacency.iter().any(|neighbours| neighbours.len() != 2) {
+        return Vec::new();
+    }
+    let mut used: std::collections::BTreeSet<(usize, usize)> = std::collections::BTreeSet::new();
+    let mut loops: Vec<Vec<usize>> = Vec::new();
+    for start in 0..points.len() {
+        if adjacency[start].is_empty() {
+            continue;
+        }
+        if adjacency[start]
+            .iter()
+            .all(|next| used.contains(&edge_key(start, *next)))
+        {
+            continue;
+        }
+        let mut current = start;
+        let mut previous = usize::MAX;
+        let mut indices = Vec::new();
+        loop {
+            indices.push(current);
+            if indices.len() > 4096 {
+                return Vec::new();
+            }
+            let Some(next) = adjacency[current]
+                .iter()
+                .copied()
+                .find(|next| *next != previous && !used.contains(&edge_key(current, *next)))
+            else {
+                break;
+            };
+            used.insert(edge_key(current, next));
+            previous = current;
+            current = next;
+            if current == start {
+                break;
+            }
+        }
+        if current == start && indices.len() >= 3 {
+            loops.push(indices);
+        }
+    }
+    // A nested loop is a hole; filling the outer loop alone would close it.
+    for (outer, first) in loops.iter().enumerate() {
+        for (inner, second) in loops.iter().enumerate() {
+            if outer == inner {
+                continue;
+            }
+            if polygon_contains(&points, first, points[second[0]].1) {
+                return Vec::new();
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for indices in loops {
+        let polygon: Vec<[f64; 2]> = indices.iter().map(|index| points[*index].1).collect();
+        for triangle in ear_clip(&polygon) {
+            out.push([
+                points[indices[triangle[0]]].0,
+                points[indices[triangle[1]]].0,
+                points[indices[triangle[2]]].0,
+            ]);
+        }
+    }
+    out
+}
+
+fn edge_key(a: usize, b: usize) -> (usize, usize) {
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+fn plane_basis(normal: Point3) -> ([f64; 3], [f64; 3]) {
+    let helper = if normal.z.abs() < 0.9 {
+        [0.0, 0.0, 1.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
+    let u = normalize(cross(helper, [normal.x, normal.y, normal.z]));
+    let v = cross([normal.x, normal.y, normal.z], u);
+    (u, v)
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn normalize(v: [f64; 3]) -> [f64; 3] {
+    let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    [v[0] / length, v[1] / length, v[2] / length]
+}
+
+fn polygon_contains(
+    points: &[([f64; 3], [f64; 2])],
+    loop_indices: &[usize],
+    point: [f64; 2],
+) -> bool {
+    let mut inside = false;
+    let polygon: Vec<[f64; 2]> = loop_indices.iter().map(|index| points[*index].1).collect();
+    let mut j = polygon.len() - 1;
+    for i in 0..polygon.len() {
+        let (xi, yi) = (polygon[i][0], polygon[i][1]);
+        let (xj, yj) = (polygon[j][0], polygon[j][1]);
+        if (yi > point[1]) != (yj > point[1])
+            && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+fn ear_clip(points: &[[f64; 2]]) -> Vec<[usize; 3]> {
+    let mut indices: Vec<usize> = (0..points.len()).collect();
+    if signed_area(points) < 0.0 {
+        indices.reverse();
+    }
+    let mut out = Vec::new();
+    while indices.len() > 3 {
+        let mut clipped = false;
+        for i in 0..indices.len() {
+            let previous = indices[(i + indices.len() - 1) % indices.len()];
+            let current = indices[i];
+            let next = indices[(i + 1) % indices.len()];
+            if cross2(points[previous], points[current], points[next]) <= 1.0e-12 {
+                continue;
+            }
+            let mut blocked = false;
+            for other in &indices {
+                if *other == previous || *other == current || *other == next {
+                    continue;
+                }
+                if point_in_triangle(
+                    points[*other],
+                    points[previous],
+                    points[current],
+                    points[next],
+                ) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if blocked {
+                continue;
+            }
+            out.push([previous, current, next]);
+            indices.remove(i);
+            clipped = true;
+            break;
+        }
+        if !clipped {
+            return Vec::new();
+        }
+    }
+    if indices.len() == 3 {
+        out.push([indices[0], indices[1], indices[2]]);
+    }
+    out
+}
+
+fn signed_area(points: &[[f64; 2]]) -> f64 {
+    let mut area = 0.0;
+    for i in 0..points.len() {
+        let next = (i + 1) % points.len();
+        area += points[i][0] * points[next][1] - points[next][0] * points[i][1];
+    }
+    area * 0.5
+}
+
+fn cross2(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> f64 {
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+}
+
+fn point_in_triangle(point: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool {
+    let d1 = cross2(a, b, point);
+    let d2 = cross2(b, c, point);
+    let d3 = cross2(c, a, point);
+    (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
+}
+
 fn world(point: [f32; 3], origin: Point3) -> [f64; 3] {
     [
         f64::from(point[0]) + origin.x,
@@ -399,11 +653,6 @@ fn lerp_position(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
         a[1] + (b[1] - a[1]) * t,
         a[2] + (b[2] - a[2]) * t,
     ]
-}
-
-fn push_edge(out: &mut Vec<[f32; 3]>, a: Vertex, b: Vertex, origin: Point3) {
-    out.push(a.local(origin));
-    out.push(b.local(origin));
 }
 
 #[cfg(test)]
@@ -536,6 +785,53 @@ mod tests {
         assert_eq!(batch.topology, RenderTopology::Lines);
         assert!(batch.conics.is_empty());
         assert!(!batch.vertices.is_empty());
+        assert!(batch.vertices.iter().all(|point| point[2] <= 1.0e-6));
+    }
+
+    #[test]
+    fn a_closed_box_gets_a_triangulated_cut_cap() {
+        let vertices = vec![
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
+        ];
+        let mut batch = batch(RenderTopology::Mesh, vertices);
+        batch.indices = vec![
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
+        ];
+        clip_batch(&mut batch, &z_plane(0.0));
+        let mut cap_area = 0.0;
+        for triangle in &batch.indices {
+            let points: Vec<[f32; 3]> = triangle
+                .iter()
+                .map(|index| batch.vertices[*index as usize])
+                .collect();
+            if points.iter().all(|point| point[2].abs() < 1.0e-6) {
+                let a = [points[1][0] - points[0][0], points[1][1] - points[0][1]];
+                let b = [points[2][0] - points[0][0], points[2][1] - points[0][1]];
+                cap_area += (a[0] * b[1] - a[1] * b[0]).abs() * 0.5;
+            }
+        }
+        assert!(
+            (cap_area - 4.0).abs() < 1.0e-6,
+            "the 2x2 cut cap must be 4 square units, got {cap_area}"
+        );
         assert!(batch.vertices.iter().all(|point| point[2] <= 1.0e-6));
     }
 }

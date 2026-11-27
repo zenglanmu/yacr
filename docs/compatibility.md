@@ -2468,7 +2468,7 @@ underlay、OLE2 嵌入对象、CoordinationModel/Navisworks NWD、**超出 ACIS 
 | `RULESURF` | **部分实现（具名拒绝）**：`rulesurf.unsupported: no 3D surface (NURBS) model` | 不写库/不升修订/不入历史 |
 | `XEDGES` | **完整实现**：存储的 `BodyDisplay.edges` 逐段复制为 `LINE` 实体（同层/同空间、源 body 保留、零长段跳过），一条事务/一步撤销；空选择/非 body/子元素/无显示边按名拒绝 | 不焊接、不去重、不删除源；证据仅 Linux 契约，GPU/像素 NOT VERIFIED |
 | `SECTION` | **部分实现（具名拒绝）**：`section.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
-| `SECTIONPLANE` | **部分实现**：一个文档级平面（origin/unit normal/active）写入 `tables/sections.json`（minor 32）；`ON`/`OFF`/`TOGGLE`/`CLEAR`/`LIST`/`SET` 一 revision/一步撤销；模型空间 scene 按半空间真实裁剪网格/线/弧（conic 激活时转线段），切边绘制但**不封盖**；图片/mask 与纸空间不裁剪；场景可保存/恢复。多剖面/section box/jog/settings 仍未实现 | Linux 契约/单元证据；真实 GUI/GPU/像素 NOT VERIFIED |
+| `SECTIONPLANE` | **部分实现**：一个文档级平面（origin/unit normal/active）写入 `tables/sections.json`（minor 32）；`ON`/`OFF`/`TOGGLE`/`CLEAR`/`LIST`/`SET` 一 revision/一步撤销；模型空间 scene 按半空间真实裁剪网格/线/弧（conic 激活时转线段），简单闭合切边环耳切成 cap（嵌套孔/非流形边界只画切边）；图片/mask 与纸空间不裁剪；场景可保存/恢复。多剖面/section box/jog/settings 仍未实现 | Linux 契约/单元证据；真实 GUI/GPU/像素 NOT VERIFIED |
 | `SECTIONPLANEJOG` | **部分实现（具名拒绝）**：`sectionplanejog.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
 | `SECTIONPLANESETTINGS` | **部分实现（具名拒绝）**：`sectionplanesettings.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
 | `SECTIONPLANETOBLOCK` | **部分实现（具名拒绝）**：`sectionplanetoblock.unsupported: no 3D section-plane model` | 不写库/不升修订/不入历史 |
