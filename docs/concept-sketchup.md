@@ -81,7 +81,7 @@
   （不是退化为错误），测量仍返回 0 距离。
   **文档剖面**（2026-11-28，ADR-0103）：`SECTIONPLANE ON|OFF|TOGGLE|CLEAR|LIST|SET ...` 写
   `tables/sections.json`（minor 32）；模型空间 scene 构建用 `cad-scene::clip_delta` 真实裁剪
-  网格/线/弧（conic 激活时转线段），简单闭合切边环耳切成 cap，嵌套孔/非流形边界只画切边；图片/mask 与纸空间不裁剪；场景保存/恢复
+  网格/线/弧（conic 激活时转线段），简单闭合切边环耳切成 cap，嵌套孔/非流形边界只画切边；图片四边形/既有 clip 多边形按同一平面裁剪并插值 UV，wipeout mask 与纸空间不裁剪；场景保存/恢复
   剖面，View → Section Planes 菜单与命令线均为真实入口。
   **参考线样式**（2026-11-28，ADR-0101）：`GUIDE STYLE COLOR/DASH` 持久化共享颜色与虚线开关
   （`tables/guides.json` 的 style 行，minor 30），renderer 使用该颜色/开关；concept 域 Styles
@@ -261,7 +261,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**逐面涂刷**：选中网格面（pick 的 `SubElementId` / `Mesh.face_sources` key）时只涂该面，材质表行的 `faces` 快照（minor 25）；渲染器按材质把网格拆成多个 fragment（未涂面保留实体颜色，透明材质乘实体 alpha），陈旧 face key 不重映射并报 `representation.material_face_inert`。**编辑器**：`MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE` 直接改文档材质行（rename 保 seq/赋值；delete 清实体与面赋值；一步撤销）；面板文档材质行提供 **Edit**（名称/颜色/透明度，按变更字段各发一条命令；多字段保存是多步撤销）与 **Delete**。**未建模**：贴图/纹理、材质库、材质缩略图/拖放；整实体涂刷仍在 |
-| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）、文档 **Shadows/Fog 记录**（行的 `display` 快照，minor 24）、**显式逐实体柔化角度**（行的 `soften` 快照，minor 28）、**无显式柔化的 body 列表**（行的 `soften_cleared`，minor 29）、**会话隐藏的顶层实体**（行的 `hidden`，minor 31；空数组是真实快照，旧档缺字段则不触碰隐藏集）与**文档剖面**（行的 `section`，minor 32；`null` 是真实“无平面”捕获）；恢复把标签快照作为会话图层覆盖应用（不写图层表），阴影/雾各写一次，柔化按一次 display 属性事务写回显式值并清空 cleared body，隐藏集只替换当前文档的顶层 refs（嵌套/子元素隐藏保留），剖面有差异时写一次 section slot（一步撤销），Viewer 下有差异的恢复在改动前按 `PermissionDenied` 拒绝。**未建模**：场景缩略图、隐藏几何/边级快照、多剖面/section box；剖面带孔/非流形切面不封盖、不裁图片 |
+| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）、文档 **Shadows/Fog 记录**（行的 `display` 快照，minor 24）、**显式逐实体柔化角度**（行的 `soften` 快照，minor 28）、**无显式柔化的 body 列表**（行的 `soften_cleared`，minor 29）、**会话隐藏的顶层实体**（行的 `hidden`，minor 31；空数组是真实快照，旧档缺字段则不触碰隐藏集）与**文档剖面**（行的 `section`，minor 32；`null` 是真实“无平面”捕获）；恢复把标签快照作为会话图层覆盖应用（不写图层表），阴影/雾各写一次，柔化按一次 display 属性事务写回显式值并清空 cleared body，隐藏集只替换当前文档的顶层 refs（嵌套/子元素隐藏保留），剖面有差异时写一次 section slot（一步撤销），Viewer 下有差异的恢复在改动前按 `PermissionDenied` 拒绝。**未建模**：场景缩略图、隐藏几何/边级快照、多剖面/section box；剖面带孔/非流形切面不封盖、不裁 wipeout mask/点云 |
 | Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
 | Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |
 | Match Photo | partial | 真实面板 + host read（`cad_match_photo` / `kind:"matchPhoto"`）：明确报告 `modeled:false` 与稳定原因（照片匹配模型未建模：无照片导入/相机求解/照片背景），动作按钮 dispatch `MATCHPHOTO`，命令以 `matchphoto.not_implemented` 具名拒绝；不伪造照片列表 |

@@ -1111,7 +1111,7 @@
 | `SCRIPT` | 部分实现 | 具名拒绝（`script.unsupported: no script-file runner`）。 |
 | `SCRIPTCALL` | 部分实现 | 具名拒绝（`scriptcall.unsupported: no script-file engine`）。 |
 | `SECTION` | 部分实现 | 具名拒绝（`section.unsupported: no 3D section-plane model`）。 |
-| `SECTIONPLANE` | 部分实现 | 一个文档级平面；`ON|OFF|TOGGLE|CLEAR|LIST|SET` 写 `tables/sections.json`（minor 32），模型空间真实裁剪网格/线/弧，简单闭合切面有 cap（带孔/非流形只画切边），图片/mask 不裁剪。 |
+| `SECTIONPLANE` | 部分实现 | 一个文档级平面；`ON|OFF|TOGGLE|CLEAR|LIST|SET` 写 `tables/sections.json`（minor 32），模型空间真实裁剪网格/线/弧，简单闭合切面有 cap（带孔/非流形只画切边），图片几何裁剪并插值 UV，wipeout mask 不裁剪。 |
 | `SECTIONPLANEJOG` | 部分实现 | 具名拒绝（`sectionplanejog.unsupported: no 3D section-plane model`）。 |
 | `SECTIONPLANESETTINGS` | 部分实现 | 具名拒绝（`sectionplanesettings.unsupported: no 3D section-plane model`）。 |
 | `SECTIONPLANETOBLOCK` | 部分实现 | 具名拒绝（`sectionplanetoblock.unsupported: no 3D section-plane model`）。 |
@@ -2092,7 +2092,7 @@
 | 772 | `SCRIPT` | 部分实现 | Executes a sequence of commands from a script file. | 具名拒绝（`script.unsupported: no script-file runner`）。 |
 | 773 | `SCRIPTCALL` | 部分实现 | Executes a sequence of commands and nested scripts from a script file. | 具名拒绝（`scriptcall.unsupported: no script-file engine`）。 |
 | 774 | `SECTION` | 部分实现 | Uses the intersection of a plane with 3D solids, surfaces, or meshes to create a 2D region object. | 具名拒绝（`section.unsupported: no 3D section-plane model`）。 |
-| 775 | `SECTIONPLANE` | 部分实现 | Creates a section object that acts as a cutting plane through 3D objects, and point clouds. | 一个文档级平面；`ON|OFF|TOGGLE|CLEAR|LIST|SET` 写 `tables/sections.json`（minor 32），模型空间真实裁剪网格/线/弧，简单闭合切面有 cap（带孔/非流形只画切边），图片/mask 不裁剪。 |
+| 775 | `SECTIONPLANE` | 部分实现 | Creates a section object that acts as a cutting plane through 3D objects, and point clouds. | 一个文档级平面；`ON|OFF|TOGGLE|CLEAR|LIST|SET` 写 `tables/sections.json`（minor 32），模型空间真实裁剪网格/线/弧，简单闭合切面有 cap（带孔/非流形只画切边），图片几何裁剪并插值 UV，wipeout mask 不裁剪。 |
 | 776 | `SECTIONPLANEJOG` | 部分实现 | Adds a jogged segment to a section object. | 具名拒绝（`sectionplanejog.unsupported: no 3D section-plane model`）。 |
 | 777 | `SECTIONPLANESETTINGS` | 部分实现 | Sets display options for a selected section plane. | 具名拒绝（`sectionplanesettings.unsupported: no 3D section-plane model`）。 |
 | 778 | `SECTIONPLANETOBLOCK` | 部分实现 | Saves selected section planes as 2D or 3D blocks. | 具名拒绝（`sectionplanetoblock.unsupported: no 3D section-plane model`）。 |

@@ -26,7 +26,8 @@ SketchUp 的 Section Plane 用一个无限平面切开模型；此前 `SECTIONPL
     未被裁剪的解析弧）；
   - 网格切边追加到 `edges` 流；切边闭合环用耳切法生成 cap 三角（非流形边界或
     嵌套孔洞整批跳过 cap，避免把孔填死）；切面法向取 `+normal`。
-  - 图片/wipeout mask 不参与裁剪；纸空间不裁剪。
+  - 光栅图片的四边形/既有 clip 多边形按同一半空间裁剪并插值 UV；wipeout mask 与纸空间
+    不参与裁剪（明确边界）。
 - 场景保存 `Some(plane)`/`Some(None)`（真实“无平面”捕获）/`None`（旧档不触碰）；恢复时按
   display 同样的方式写一次 section slot，Viewer 有差异时在改动前拒绝。`section` 行使归档
   minor 32。
@@ -34,7 +35,8 @@ SketchUp 的 Section Plane 用一个无限平面切开模型；此前 `SECTIONPL
 
 ## 不在本 ADR 范围
 
-- 多个剖面、剖切盒（section box）、剖面 jog/settings/转块、带孔/非流形切面的 cap、隐藏几何；
+- 多个剖面、剖切盒（section box）、剖面 jog/settings/转块、带孔/非流形切面的 cap、隐藏几何、
+  wipeout mask 裁剪；
 - 图片/点云裁剪、真实 GUI 交互/GPU/像素与其它载体运行时。
 
 ## 后果

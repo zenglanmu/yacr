@@ -15,9 +15,12 @@
 //! Images, wipeout masks and the cut-face fill are not part of this pass; those
 //! are explicit boundaries, not silent approximations.
 
-use cad_domain::Point3;
+use std::sync::Arc;
 
-use super::{RenderBatch, RenderTopology, SceneDelta};
+use cad_domain::Point3;
+use cad_representation::ImageVertex;
+
+use super::{ImageBatch, RenderBatch, RenderTopology, SceneDelta};
 
 /// A half-space clip plane in world space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,6 +69,75 @@ pub fn clip_delta(delta: &mut SceneDelta, plane: &ClipPlane) {
         clip_batch(batch, plane);
         batch_has_geometry(batch)
     });
+    delta.images.retain_mut(|image| clip_image(image, plane));
+}
+
+fn clip_image(image: &mut ImageBatch, plane: &ClipPlane) -> bool {
+    let polygon: Vec<ImageVertex> = if let Some(clip) = &image.clip {
+        clip.to_vec()
+    } else {
+        const CORNERS: [[f64; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        CORNERS
+            .iter()
+            .map(|[u, v]| ImageVertex {
+                position: image.transform.apply_point(Point3 {
+                    x: *u,
+                    y: *v,
+                    z: 0.0,
+                }),
+                uv: [*u, *v],
+            })
+            .collect()
+    };
+    let clipped: Vec<ImageVertex> = clip_image_polygon(&polygon, plane);
+    if clipped.len() < 3 {
+        return false;
+    }
+    image.clip = Some(Arc::from(clipped.into_boxed_slice()));
+    true
+}
+
+fn clip_image_polygon(polygon: &[ImageVertex], plane: &ClipPlane) -> Vec<ImageVertex> {
+    if polygon.is_empty() {
+        return Vec::new();
+    }
+    let mut output = Vec::with_capacity(polygon.len() + 1);
+    for index in 0..polygon.len() {
+        let current = polygon[index];
+        let previous = polygon[(index + polygon.len() - 1) % polygon.len()];
+        let current_distance =
+            plane.distance([current.position.x, current.position.y, current.position.z]);
+        let previous_distance = plane.distance([
+            previous.position.x,
+            previous.position.y,
+            previous.position.z,
+        ]);
+        let current_inside = current_distance <= 0.0;
+        let previous_inside = previous_distance <= 0.0;
+        if current_inside != previous_inside {
+            let denominator = previous_distance - current_distance;
+            let t = if denominator.abs() > 1.0e-12 {
+                previous_distance / denominator
+            } else {
+                0.0
+            };
+            output.push(ImageVertex {
+                position: Point3 {
+                    x: previous.position.x + (current.position.x - previous.position.x) * t,
+                    y: previous.position.y + (current.position.y - previous.position.y) * t,
+                    z: previous.position.z + (current.position.z - previous.position.z) * t,
+                },
+                uv: [
+                    previous.uv[0] + (current.uv[0] - previous.uv[0]) * t,
+                    previous.uv[1] + (current.uv[1] - previous.uv[1]) * t,
+                ],
+            });
+        }
+        if current_inside {
+            output.push(current);
+        }
+    }
+    output
 }
 
 fn batch_has_geometry(batch: &RenderBatch) -> bool {
@@ -833,5 +905,88 @@ mod tests {
             "the 2x2 cut cap must be 4 square units, got {cap_area}"
         );
         assert!(batch.vertices.iter().all(|point| point[2] <= 1.0e-6));
+    }
+    #[test]
+    fn an_image_quad_is_clipped_with_its_uvs_interpolated() {
+        let image = ImageBatch {
+            resource: cad_resources::ResourceKey::sanitize("test.png"),
+            transform: cad_domain::Transform3::from_basis(
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 2.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: -1.0,
+                },
+            ),
+            clip: None,
+            alpha: 1.0,
+            draw_order: 0,
+            sources: Vec::new(),
+            adjust: cad_domain::ImageAdjust::default(),
+        };
+        let mut delta = SceneDelta {
+            stamp: cad_domain::TaskStamp::new(cad_domain::DocumentId(1), 0),
+            added: Vec::new(),
+            images: vec![image],
+            masks: Vec::new(),
+        };
+        clip_delta(&mut delta, &z_plane(0.0));
+        let clip = delta.images[0]
+            .clip
+            .as_ref()
+            .expect("the quad gained a clip");
+        assert!(clip.len() >= 3);
+        assert!(clip.iter().all(|vertex| vertex.position.z <= 1.0e-6));
+        assert!(
+            clip.iter()
+                .any(|vertex| (vertex.uv[1] - 0.5).abs() < 1.0e-6),
+            "the cut edge interpolates v=0.5"
+        );
+    }
+
+    #[test]
+    fn a_fully_cut_away_image_is_dropped() {
+        let image = ImageBatch {
+            resource: cad_resources::ResourceKey::sanitize("test.png"),
+            transform: cad_domain::Transform3::from_basis(
+                Point3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 2.0,
+                },
+                Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+            ),
+            clip: None,
+            alpha: 1.0,
+            draw_order: 0,
+            sources: Vec::new(),
+            adjust: cad_domain::ImageAdjust::default(),
+        };
+        let mut delta = SceneDelta {
+            stamp: cad_domain::TaskStamp::new(cad_domain::DocumentId(1), 0),
+            added: Vec::new(),
+            images: vec![image],
+            masks: Vec::new(),
+        };
+        clip_delta(&mut delta, &z_plane(0.0));
+        assert!(delta.images.is_empty());
     }
 }
