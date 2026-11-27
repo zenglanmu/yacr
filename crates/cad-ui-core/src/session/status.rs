@@ -448,6 +448,11 @@ pub struct CadStatus {
     /// an older host. Session state only; the Styles tray reads it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body_edges: Option<bool>,
+    /// The session body edge-overlay colour (`EDGECOLOR`), or absent on an older
+    /// host. `None` is not serialized; the UI reads an absent value as "body
+    /// colour", which is also the reset state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_edge_color: Option<[u8; 3]>,
     pub error: Option<String>,
     /// Whether the host can start a **blank** document right now: the host
     /// advertises the NEW capability and no open/import is in flight
@@ -701,6 +706,7 @@ pub fn unsupported_status(error: Option<String>) -> CadStatus {
         visual_style: None,
         guide_style: None,
         body_edges: None,
+        body_edge_color: None,
         error,
         // No session means no document/command capability at all.
         can_new: false,
@@ -883,6 +889,7 @@ pub(super) fn assemble_status(
         visual_style: None,
         guide_style: None,
         body_edges: None,
+        body_edge_color: None,
         error,
         can_new: capabilities.can_new,
         can_open,

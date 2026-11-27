@@ -251,6 +251,8 @@ impl CadSession {
             super::commands::DIST_SELECTOR => self.dist_argument(argument, text),
             // `SECTIONPLANE ...`: the persisted section plane.
             super::commands::SECTIONPLANE_SELECTOR => self.section_argument(argument, text),
+            // `EDGECOLOR DEFAULT|<r> <g> <b>`: session body edge colour.
+            super::commands::EDGECOLOR_SELECTOR => self.edge_color_argument(argument, text),
             // `CAMERA TWO-POINT|WALK`: named refusals (the bare selector is a
             // capture and never reaches this arm).
             super::commands::CAMERA_SELECTOR => self.camera_argument(argument, text),

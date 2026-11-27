@@ -49,8 +49,7 @@ pub enum CommandPayload {
         factor: f64,
         cursor: [f64; 2],
     },
-    /// `ZOOM WINDOW`: frame the picked two-corner rectangle **exactly** (margin
-    /// `1.0`, unlike `FIT`'s `1.05`).
+    /// `ZOOM WINDOW`: frame the picked two-corner rectangle exactly (margin 1.0).
     ///
     /// `rect_logical` is the two opposite corners in **canvas logical pixels**,
     /// the same convention as [`CommandPayload::ZoomAt`] and
@@ -828,6 +827,7 @@ pub enum CommandPayload {
     /// The typed `SCENE <option>` line.
     Scene(SceneCommand),
     Section(SectionCommand),
+    EdgeColor(EdgeColorCommand),
     /// The typed `SHADOWS`/`FOG` line.
     Display(DisplayCommand),
     Text3d(Text3dInput),

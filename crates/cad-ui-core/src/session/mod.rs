@@ -28,6 +28,7 @@ mod command_overrides;
 mod commands;
 mod diagnostics;
 mod dist_arguments;
+mod edge_color_arguments;
 mod flip_arguments;
 mod guide_arguments;
 mod material_arguments;
@@ -396,7 +397,6 @@ impl CadSession {
     pub fn owner_mirror(&self) -> (CadSettings, Vec<(String, String)>) {
         (self.settings(), self.runtime_command_aliases())
     }
-
     /// Apply validated canvas-local logical metrics (origin `[0, 0]`).
     pub fn set_canvas_metrics(&self, logical: [f64; 2], scale: f64) -> Result<(), String> {
         let metrics = CanvasMetrics::new([0.0; 2], logical, scale);

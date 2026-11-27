@@ -15,3 +15,15 @@ test('EDGES is a bare session toggle, not a typed argument', () => {
     'the toggle has no argument grammar; the tray flips it by re-running EDGES',
   );
 });
+
+test('EDGECOLOR is admitted with a byte triplet or DEFAULT', () => {
+  setCommandCatalog(['EDGECOLOR']);
+  const status = { documentLabel: 'demo', loading: false };
+  for (const line of ['EDGECOLOR', 'EDGECOLOR DEFAULT', 'EDGECOLOR 10 20 30']) {
+    assert.equal(admitCommandText(line, { status }).kind, 'admitted', line);
+  }
+  assert.equal(
+    admitCommandText('EDGECOLOR 10 20 300', { status }).kind,
+    'unsupported',
+  );
+});

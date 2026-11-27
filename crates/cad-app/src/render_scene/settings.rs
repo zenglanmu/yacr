@@ -69,6 +69,9 @@ pub struct DisplaySettings {
     ///
     /// Part of `SceneVersion`, so a flip rebuilds the base; session-only.
     pub body_edges: bool,
+    /// Session 3D body edge-overlay colour (`EDGECOLOR`); `None` uses the body's
+    /// own colour. Part of `SceneVersion`; session-only.
+    pub edge_color: Option<[u8; 3]>,
 }
 
 impl Default for DisplaySettings {
@@ -92,6 +95,7 @@ impl Default for DisplaySettings {
             // which is the pre-`VSCURRENT` filled body display.
             body_wireframe: false,
             body_edges: true,
+            edge_color: None,
         }
     }
 }
@@ -111,6 +115,7 @@ impl DisplaySettings {
             .with_curve_segments(self.curve_segments)
             .with_body_wireframe(self.body_wireframe)
             .with_body_edges(self.body_edges)
+            .with_edge_color(self.edge_color)
     }
 }
 
@@ -163,6 +168,11 @@ impl CadSceneController {
     /// Set the session `EDGES` token. Returns whether the flag changed.
     pub fn set_body_edges(&mut self, enabled: bool) -> bool {
         self.set_display_setting(|settings| settings.body_edges = enabled)
+    }
+
+    /// Set the session body edge-overlay colour (`None` = body colour).
+    pub fn set_edge_color(&mut self, color: Option<[u8; 3]>) -> bool {
+        self.set_display_setting(|settings| settings.edge_color = color)
     }
 
     /// Set the session `VIEWRES` chord-segment ceiling. Returns whether the

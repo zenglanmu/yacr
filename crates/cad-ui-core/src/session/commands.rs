@@ -352,6 +352,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("FILL", CommandId::Extended(ExtendedCommandId::Fill)),
     ("TFRAMES", CommandId::Extended(ExtendedCommandId::TFrames)),
     ("EDGES", CommandId::Extended(ExtendedCommandId::Edges)),
+    ("EDGECOLOR", CommandId::Extended(ExtendedCommandId::EdgeColor)),
     ("REGENAUTO", CommandId::Extended(ExtendedCommandId::RegenAuto)),
     ("ISODRAFT", CommandId::Extended(ExtendedCommandId::IsoDraft)),
     ("BCOUNT", CommandId::Extended(ExtendedCommandId::BlockCount)),
@@ -448,7 +449,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("LAYERPALETTE", CommandId::Extended(ExtendedCommandId::LayerPalette)),
     ("CONSTRAINTBAR", CommandId::Extended(ExtendedCommandId::ConstraintBar)),
     ("CONSTRAINTSETTINGS", CommandId::Extended(ExtendedCommandId::ConstraintSettings)),
-
     // Wave 4 (2026-11-09): the first extended batch with real entity writes.
     // Twelve selection-based 2D edits (CENTERMARK, CENTERLINE, NCOPY,
     // COPYTOLAYER, -COPYTOLAYER, CDORDER, FLATTEN, XPLODE, BTRIM, BEXTEND,
@@ -617,7 +617,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SYSWINDOWS", CommandId::Extended(ExtendedCommandId::SysWindows)),
     ("MENU", CommandId::Extended(ExtendedCommandId::Menu)),
     ("RIBBON", CommandId::Extended(ExtendedCommandId::Ribbon)),
-
     // Wave 9 (2026-11-09): 2D draw/modify routes, real edits and named
     // refusals. All are `CommandId::Extended`.
     ("ARRAY", CommandId::Extended(ExtendedCommandId::Array)),
@@ -645,7 +644,6 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("TXTEXP", CommandId::Extended(ExtendedCommandId::TextExplode)),
     ("UPDATEFIELD", CommandId::Extended(ExtendedCommandId::UpdateField)),
     ("UNITS", CommandId::Extended(ExtendedCommandId::Units)),
-
     // Wave 10 (2026-11-09): layer/view/session reports and named refusals.
     ("-UNITS", CommandId::Extended(ExtendedCommandId::DashUnits)),
     ("-LAYER", CommandId::Extended(ExtendedCommandId::DashLayer)),
@@ -890,6 +888,7 @@ mod block_grammar;
 mod camera_grammar;
 mod display_grammar;
 mod dist_grammar;
+mod edge_color_grammar;
 mod flip_grammar;
 mod guide_grammar;
 mod material_grammar;
@@ -902,6 +901,7 @@ pub use block_grammar::*;
 pub use camera_grammar::*;
 pub use display_grammar::*;
 pub use dist_grammar::*;
+pub use edge_color_grammar::*;
 pub use flip_grammar::*;
 pub use guide_grammar::*;
 pub use material_grammar::*;

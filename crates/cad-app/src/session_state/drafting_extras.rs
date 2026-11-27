@@ -248,6 +248,8 @@ pub struct DraftingExtras {
     /// (`render_scene::DisplaySettings::body_edges`). `false` keeps fills but
     /// hides stored/topology edges and wire-only bodies.
     body_edges: bool,
+    /// `EDGECOLOR`: optional body edge-overlay colour; `None` uses the body colour.
+    edge_color: Option<[u8; 3]>,
     /// `TFRAMES`: whether the frames this build models are drawn.
     ///
     /// AutoCAD's `TFRAMES` toggles the frames of images, wipeouts and external
@@ -323,6 +325,7 @@ impl Default for DraftingExtras {
             fs_mode: false,
             tframes: true,
             body_edges: true,
+            edge_color: None,
             regenauto: false,
             isodraft: false,
             dragmode: true,
@@ -500,6 +503,14 @@ impl DraftingExtras {
     pub fn toggle_body_edges(&mut self) -> bool {
         self.body_edges = !self.body_edges;
         self.body_edges
+    }
+
+    pub fn edge_color(&self) -> Option<[u8; 3]> {
+        self.edge_color
+    }
+
+    pub fn set_edge_color(&mut self, color: Option<[u8; 3]>) {
+        self.edge_color = color;
     }
 
     pub fn set_tframes(&mut self, value: bool) {

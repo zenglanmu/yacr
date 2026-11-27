@@ -11,6 +11,7 @@
 // `argument-{mleader,selection,record}-grammar.ts`. The `LINETYPE`/`MLINE`/
 // `LAYOUT`/`TABLEEXPORT` shapes — plus the quote-aware tokenizer they share with
 // `RENAME` live in `argument-extras-grammar.ts`.
+import { isEdgeColorArgument } from './argument-edge-color-grammar.ts';
 import { isGuideArgument } from './argument-guide-grammar.ts';
 import { isSectionPlaneArgument } from './argument-section-grammar.ts';
 import { isHatchEditArgument } from './argument-hatchedit.ts';
@@ -43,7 +44,6 @@ import { isSsxArgument } from './argument-selection-grammar.ts';
 export interface ArgumentSpec {
   readonly parse: (argument: string) => boolean;
 }
-
 /**
  * Whether `text` is one `ZOOM` argument from the host's grammar: a positive
  * decimal factor, `ALL`/`EXTENTS`, `WINDOW`, `PREVIOUS`, `OBJECT`, `nX`, or
@@ -69,7 +69,6 @@ function isZoomArgument(text: string): boolean {
   if (upper.endsWith('X')) return isPositiveDecimal(key.slice(0, -1));
   return false;
 }
-
 /**
  * Whether `text` is a plain decimal number, sign and zero included (`3`, `2.5`,
  * `0`, `-5`).
@@ -124,6 +123,7 @@ function isPositiveSignedDecimal(text: string): boolean {
  */
 export const ARGUMENT_COMMANDS: Readonly<Record<string, ArgumentSpec>> = Object.freeze({
   GUIDE: Object.freeze({ parse: isGuideArgument }),
+  EDGECOLOR: Object.freeze({ parse: isEdgeColorArgument }),
   SECTIONPLANE: Object.freeze({ parse: isSectionPlaneArgument }),
   ZOOM: Object.freeze({
     /**

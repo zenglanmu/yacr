@@ -41,6 +41,7 @@ impl Application {
             | ExtendedCommandId::Edges
             | ExtendedCommandId::RegenAuto
             | ExtendedCommandId::IsoDraft => self.drafting_toggle(session, command, ext)?,
+            ExtendedCommandId::EdgeColor => self.edge_color_command(session, command)?,
             ExtendedCommandId::BlockCount
             | ExtendedCommandId::CountObjects
             | ExtendedCommandId::EditTime

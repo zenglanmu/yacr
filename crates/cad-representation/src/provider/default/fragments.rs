@@ -224,14 +224,21 @@ pub(super) fn body_fragment(
     } else {
         GeometrySource::DirectMesh
     };
-    let fragment = |primitive: DisplayPrimitive| DisplayFragment {
+    let edge_color = context.edge_color.map(|rgb| {
+        [
+            rgb[0] as f32 / 255.0,
+            rgb[1] as f32 / 255.0,
+            rgb[2] as f32 / 255.0,
+        ]
+    });
+    let fragment = |primitive: DisplayPrimitive, color: [f32; 3]| DisplayFragment {
         source: source.clone(),
         geometry_source: geometry_source.clone(),
         precision: body.display.precision.clone(),
         alpha: 1.0,
         draw_order: entity.draw_order,
-        color: DEFAULT_RENDER_COLOR,
-        color_unresolved: true,
+        color,
+        color_unresolved: color == DEFAULT_RENDER_COLOR,
         lineweight: DEFAULT_LINEWEIGHT_MM,
         lineweight_unresolved: true,
         linetype: LinetypePattern::continuous(),
@@ -259,11 +266,10 @@ pub(super) fn body_fragment(
             None => segments,
         };
         if !segments.is_empty() {
-            representation
-                .fragments
-                .push(fragment(DisplayPrimitive::LineSegments(Arc::from(
-                    segments.into_boxed_slice(),
-                ))));
+            representation.fragments.push(fragment(
+                DisplayPrimitive::LineSegments(Arc::from(segments.into_boxed_slice())),
+                edge_color.unwrap_or(DEFAULT_RENDER_COLOR),
+            ));
             representation.completeness = body.display.completeness.clone();
             return;
         }
@@ -307,6 +313,28 @@ pub(super) fn body_fragment(
         // edge set keeps today's plain `Mesh`, whose overlay is derived from the
         // triangles and whose display class stays "not a text glyph".
         let stored = body_edge_segments(&body.display.edges);
+        // A coloured edge overlay is a separate line fragment: the mesh keeps
+        // its fill, the stored edges take the session colour.
+        if context.body_edges && !stored.is_empty() {
+            if let Some(color) = edge_color {
+                let edges = match soften {
+                    Some(angle) => soften_edge_segments(&body.display.mesh, &stored, angle),
+                    None => stored,
+                };
+                representation.fragments.push(fragment(
+                    DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(body.display.mesh.clone())),
+                    DEFAULT_RENDER_COLOR,
+                ));
+                if !edges.is_empty() {
+                    representation.fragments.push(fragment(
+                        DisplayPrimitive::LineSegments(Arc::from(edges.into_boxed_slice())),
+                        color,
+                    ));
+                }
+                representation.completeness = body.display.completeness.clone();
+                return;
+            }
+        }
         let primitive = if !context.body_edges {
             // Edges off: keep the fill but never emit a stored or derived edge.
             DisplayPrimitive::MeshWithoutEdgeOverlay(Arc::new(body.display.mesh.clone()))
@@ -328,7 +356,9 @@ pub(super) fn body_fragment(
                 derive_when_empty: soften.is_none(),
             }
         };
-        representation.fragments.push(fragment(primitive));
+        representation
+            .fragments
+            .push(fragment(primitive, DEFAULT_RENDER_COLOR));
         representation.completeness = body.display.completeness.clone();
         return;
     }
@@ -338,11 +368,10 @@ pub(super) fn body_fragment(
         return;
     }
     if !segments.is_empty() {
-        representation
-            .fragments
-            .push(fragment(DisplayPrimitive::LineSegments(Arc::from(
-                segments.into_boxed_slice(),
-            ))));
+        representation.fragments.push(fragment(
+            DisplayPrimitive::LineSegments(Arc::from(segments.into_boxed_slice())),
+            edge_color.unwrap_or(DEFAULT_RENDER_COLOR),
+        ));
         representation.completeness = body.display.completeness.clone();
         return;
     }

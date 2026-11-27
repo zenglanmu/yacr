@@ -79,3 +79,30 @@ fn the_status_projects_the_body_edges_session_token() {
         Some("EDGES")
     );
 }
+
+#[test]
+fn edgecolor_grammar_and_status_projection() {
+    use crate::session::commands::{parse_edge_color_argument, EdgeColorArgument};
+    assert_eq!(
+        parse_edge_color_argument("10 20 30"),
+        Some(EdgeColorArgument::Set([10, 20, 30]))
+    );
+    assert_eq!(
+        parse_edge_color_argument("DEFAULT"),
+        Some(EdgeColorArgument::Default)
+    );
+    assert_eq!(
+        parse_edge_color_argument(""),
+        Some(EdgeColorArgument::Report)
+    );
+    assert_eq!(parse_edge_color_argument("10 20 300"), None);
+    let session = fresh_session();
+    assert_eq!(session.snapshot(None, None, 0).body_edge_color, None);
+    session.command("EDGECOLOR 1 2 3").expect("set");
+    assert_eq!(
+        session.snapshot(None, None, 0).body_edge_color,
+        Some([1, 2, 3])
+    );
+    session.command("EDGECOLOR DEFAULT").expect("reset");
+    assert_eq!(session.snapshot(None, None, 0).body_edge_color, None);
+}

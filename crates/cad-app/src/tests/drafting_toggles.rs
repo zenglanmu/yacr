@@ -208,3 +208,39 @@ fn edges_is_a_viewer_legal_session_toggle() {
     .expect("EDGES is session-only");
     assert!(!session.drafting_extras.body_edges());
 }
+
+#[test]
+fn edgecolor_sets_resets_and_reports_without_a_drawing_write() {
+    let (mut app, mut session) = application_with_document();
+    let revision = app.workspace.documents[&DocumentId(1)].drawing.revision();
+    let id = CommandId::Extended(ExtendedCommandId::EdgeColor);
+    let outcome = execute(
+        &mut app,
+        &mut session,
+        id,
+        CommandPayload::EdgeColor(EdgeColorCommand::Set([10, 20, 30])),
+    )
+    .expect("set");
+    assert_eq!(session.drafting_extras.edge_color(), Some([10, 20, 30]));
+    assert!(outcome.changes.is_none());
+    assert_eq!(
+        app.workspace.documents[&DocumentId(1)].drawing.revision(),
+        revision
+    );
+    execute(
+        &mut app,
+        &mut session,
+        id,
+        CommandPayload::EdgeColor(EdgeColorCommand::Report),
+    )
+    .expect("report");
+    execute(
+        &mut app,
+        &mut session,
+        id,
+        CommandPayload::EdgeColor(EdgeColorCommand::Default),
+    )
+    .expect("default");
+    assert_eq!(session.drafting_extras.edge_color(), None);
+    assert!(!app.can_undo(&DocumentId(1)));
+}

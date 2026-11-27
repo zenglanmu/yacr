@@ -215,6 +215,29 @@ function StylesBody() {
         {t('concept.styles.body_edges')}
       </button>
       <p className="concept-panel__hint">{t('concept.styles.body_edges_hint')}</p>
+      <div className="concept-panel__guide">
+        <label htmlFor="concept-edge-color">{t('concept.styles.edge_color')}</label>
+        <input
+          id="concept-edge-color"
+          type="color"
+          value={guideStyleHex(shell.status?.bodyEdgeColor ?? [255, 255, 255])}
+          disabled={!shell.canCommand('EDGECOLOR') || shell.status?.bodyEdges === false}
+          aria-label={t('concept.styles.edge_color')}
+          onChange={event => {
+            const rgb = parseGuideStyleHex(event.currentTarget.value);
+            if (rgb !== null) shell.runCommand(`EDGECOLOR ${rgb[0]} ${rgb[1]} ${rgb[2]}`);
+          }}
+        />
+      </div>
+      <button
+        type="button"
+        className="concept-panel__action"
+        disabled={!shell.canCommand('EDGECOLOR')}
+        onClick={() => shell.runCommand('EDGECOLOR DEFAULT')}
+      >
+        {t('concept.styles.edge_color_default')}
+      </button>
+      <p className="concept-panel__hint">{t('concept.styles.edge_color_hint')}</p>
       <p className="concept-panel__hint">{t('concept.styles.boundary')}</p>
       <p className="concept-panel__hint">{t('concept.styles.theme')}</p>
       <ThemeToggle />

@@ -1,5 +1,4 @@
 #![doc = include_str!("extended.md")]
-
 mod refusal_names;
 mod selectors;
 
@@ -22,6 +21,8 @@ pub enum ExtendedCommandId {
     TFrames,
     /// `EDGES`: toggle a shaded body's edge overlay (session-only style).
     Edges,
+    /// `EDGECOLOR`: set/reset the session body edge-overlay colour.
+    EdgeColor,
     /// `REGENAUTO`: toggle the session automatic-regeneration flag.
     RegenAuto,
     /// `ISODRAFT`: toggle the session isometric-plane drafting flag.

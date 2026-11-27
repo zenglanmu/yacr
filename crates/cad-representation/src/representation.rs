@@ -318,6 +318,9 @@ pub struct RepresentationContext {
     /// style). `true` is the default; `false` emits `MeshWithoutEdgeOverlay`
     /// and hides a wire-only body's edge segments. It never changes the mesh.
     pub body_edges: bool,
+    /// Optional session edge colour for the 3D body edge overlay (`EDGECOLOR`).
+    /// `None` uses the body fragment's own colour.
+    pub edge_color: Option<[u8; 3]>,
 }
 
 /// The active annotation scale a host applies while building representations.
@@ -371,6 +374,7 @@ impl RepresentationContext {
             // the pre-`VSCURRENT` scene (the session default is `SHADED`).
             body_wireframe: false,
             body_edges: true,
+            edge_color: None,
         }
     }
 
@@ -486,6 +490,12 @@ impl RepresentationContext {
     /// (no triangles) also draws nothing because edges are its only geometry.
     pub fn with_body_edges(mut self, enabled: bool) -> Self {
         self.body_edges = enabled;
+        self
+    }
+
+    /// Set the session edge colour for the 3D body edge overlay.
+    pub fn with_edge_color(mut self, color: Option<[u8; 3]>) -> Self {
+        self.edge_color = color;
         self
     }
 }

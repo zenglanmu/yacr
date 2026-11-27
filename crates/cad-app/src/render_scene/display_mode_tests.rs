@@ -296,6 +296,7 @@ fn display_settings_batch_is_one_rebuild_and_a_repeat_is_a_no_op() {
         curve_segments: Some(250),
         body_wireframe: true,
         body_edges: true,
+        edge_color: None,
     };
     assert!(controller.set_display_settings(changed));
     prepare(&mut controller, &db);

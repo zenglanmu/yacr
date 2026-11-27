@@ -303,6 +303,37 @@ fn body_edges_off_keeps_the_fill_without_the_overlay() {
 }
 
 #[test]
+fn an_edge_colour_splits_the_stored_overlay_into_a_coloured_line_fragment() {
+    let display = BodyDisplay {
+        mesh: plane_mesh(),
+        edges: vec![vec![p(0.0, 0.0), p(1.0, 0.0)]],
+        tolerance: None,
+        precision: Precision::Analytic,
+        completeness: Completeness::Complete,
+    };
+    let rep = expanded_body_with(
+        body_entity(
+            103,
+            BodyKind::Sheet,
+            BodyExact::Exact(Box::new(square_brep(false))),
+            display,
+        ),
+        &context().with_edge_color(Some([255, 0, 0])),
+    );
+    assert_eq!(rep.fragments.len(), 2, "fill + coloured edges");
+    assert!(matches!(
+        rep.fragments[0].primitive,
+        DisplayPrimitive::MeshWithoutEdgeOverlay(_)
+    ));
+    match &rep.fragments[1].primitive {
+        DisplayPrimitive::LineSegments(points) => assert_eq!(points.len(), 2),
+        _ => panic!("the overlay is a line fragment"),
+    }
+    assert!((rep.fragments[1].color[0] - 1.0).abs() < 1.0e-6);
+    assert!(rep.fragments[1].color[1].abs() < 1.0e-6);
+}
+
+#[test]
 fn body_edges_off_hides_a_wire_only_body() {
     let display = BodyDisplay {
         mesh: Mesh::default(),

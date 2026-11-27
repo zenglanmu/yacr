@@ -112,7 +112,8 @@
   其它样式名仍由命令层按 `vscurrent.style_not_implemented` 拒绝，界面主题与 SketchUp Style 分开。
   **实体边线**（2026-11-28，ADR-0104）：`EDGES` 是 payload-free 会话开关，关闭后 shaded body
   保留填充但发 `MeshWithoutEdgeOverlay`，wire-only body 画空；独立线实体/尺寸不受影响；Styles
-  托盘有真实开关，`cad_status.bodyEdges` 投影当前值。
+  托盘有真实开关，`cad_status.bodyEdges` 投影当前值；`EDGECOLOR` 设置/重置 body 边线颜色，
+  带存储边线的 body 拆成彩色 line fragment，`cad_status.bodyEdgeColor` 投影当前色。
   **组件面板**（2026-11-27，ADR-0076）：托盘 Components 从只读列表变成可操作面板——每行
   `INSERT <name>`、名称输入 + `BLOCK <name>`（块名经 pending text 在捕获点后自动应用）；命令层
   仍负责未知块/空选择/重名拒绝。
@@ -257,7 +258,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 |---|---|---|
 | Entity Info | full | 属性行来自 `PropertyRow`；网格行有限 |
 | Components | partial | 真实面板：列出块定义（名称 + 成员数）；每行 **Insert** 走 `INSERT <name>`（块名预先交给捕获，点一下就放置），名称输入 + **Create from selection** 走 `BLOCK <name>`（基点点一下即定义）；命令层仍负责未知块/空选择/重名等具名拒绝。**未建模**：组件缩略图、右键替换/重载、嵌套组件的就地编辑、拖放与组件浏览器搜索；面板只列出前 12 个（`cad_status.blocks` 的上限） |
-| Styles | partial | 真实面板：两行 `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`（当前 token 高亮，来自 `cad_status.visualStyle`），另保留界面主题切换与 **实体边线** 开关（`EDGES`，`cad_status.bodyEdges`；保留填充、隐藏 body 边线覆盖层，独立线实体不受影响）。**未建模**：基于材质/贴图的 SketchUp 样式、profiles/深度提示/端点/背景等其它边/面开关、样式库保存/缩略图/水印；界面主题不是 SketchUp Style |
+| Styles | partial | 真实面板：两行 `WIREFRAME`/`SHADED` 走既有 `VSCURRENT <token>`（当前 token 高亮，来自 `cad_status.visualStyle`），另保留界面主题切换、**实体边线** 开关（`EDGES`，`cad_status.bodyEdges`；保留填充、隐藏 body 边线覆盖层，独立线实体不受影响）与 **边线颜色**（`EDGECOLOR DEFAULT|<r> <g> <b>`；带存储边线的 body 拆成彩色 line fragment，`cad_status.bodyEdgeColor`）。**未建模**：基于材质/贴图的 SketchUp 样式、profiles/深度提示/端点/背景等其它边/面开关、样式库保存/缩略图/水印；界面主题不是 SketchUp Style |
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**逐面涂刷**：选中网格面（pick 的 `SubElementId` / `Mesh.face_sources` key）时只涂该面，材质表行的 `faces` 快照（minor 25）；渲染器按材质把网格拆成多个 fragment（未涂面保留实体颜色，透明材质乘实体 alpha），陈旧 face key 不重映射并报 `representation.material_face_inert`。**编辑器**：`MATERIAL <name> RENAME|COLOR|TRANSPARENCY|DELETE` 直接改文档材质行（rename 保 seq/赋值；delete 清实体与面赋值；一步撤销）；面板文档材质行提供 **Edit**（名称/颜色/透明度，按变更字段各发一条命令；多字段保存是多步撤销）与 **Delete**。**未建模**：贴图/纹理、材质库、材质缩略图/拖放；整实体涂刷仍在 |

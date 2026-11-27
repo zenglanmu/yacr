@@ -412,6 +412,13 @@ impl CadSession {
                 .drafting_extras
                 .body_edges(),
         );
+        status.body_edge_color = self
+            .core
+            .controller
+            .borrow()
+            .session
+            .drafting_extras
+            .edge_color();
         // The document's own UNITS settings, projected once for the readouts.
         // `None` without a document; never a UI-side default.
         status.units = self

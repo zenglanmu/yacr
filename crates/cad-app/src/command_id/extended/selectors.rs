@@ -10,6 +10,7 @@ impl ExtendedCommandId {
             Self::Fill => "FILL",
             Self::TFrames => "TFRAMES",
             Self::Edges => "EDGES",
+            Self::EdgeColor => "EDGECOLOR",
             Self::RegenAuto => "REGENAUTO",
             Self::IsoDraft => "ISODRAFT",
             Self::BlockCount => "BCOUNT",
@@ -424,7 +425,6 @@ impl ExtendedCommandId {
         }
     }
 }
-
 impl ExtendedCommandId {
     /// Every variant in declaration order; the vocabulary contract test uses it
     /// to prove the table and the enum cannot drift.
@@ -433,6 +433,7 @@ impl ExtendedCommandId {
         Self::Fill,
         Self::TFrames,
         Self::Edges,
+        Self::EdgeColor,
         Self::RegenAuto,
         Self::IsoDraft,
         Self::BlockCount,
@@ -845,7 +846,6 @@ impl ExtendedCommandId {
         Self::ActManager,
     ];
 }
-
 impl ExtendedCommandId {
     /// Whether the command needs Work mode.
     pub fn requires_work_mode(self) -> bool {

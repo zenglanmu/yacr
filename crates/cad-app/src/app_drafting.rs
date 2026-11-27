@@ -32,6 +32,44 @@ pub(crate) fn toggle_outcome(code: &str, message: String) -> CommandOutcome {
 }
 
 impl Application {
+    /// `EDGECOLOR [DEFAULT|<r> <g> <b>]`: session body edge-overlay colour.
+    pub(crate) fn edge_color_command(
+        &mut self,
+        session: &mut SessionState,
+        command: &Command,
+    ) -> CadResult<CommandOutcome> {
+        let option = match &command.payload {
+            CommandPayload::EdgeColor(option) => *option,
+            CommandPayload::None => EdgeColorCommand::Report,
+            _ => {
+                return Err(CadError::InvalidInput(
+                    "EDGECOLOR takes DEFAULT, <r> <g> <b>, or no argument".into(),
+                ))
+            }
+        };
+        let current = session.drafting_extras.edge_color();
+        let message = match option {
+            EdgeColorCommand::Report => match current {
+                Some([r, g, b]) => {
+                    format!("EDGECOLOR: current body edge colour is #{r:02x}{g:02x}{b:02x}")
+                }
+                None => "EDGECOLOR: body edges use each body's own colour".to_string(),
+            },
+            EdgeColorCommand::Default => {
+                session.drafting_extras.set_edge_color(None);
+                "EDGECOLOR: reset to each body's own colour".to_string()
+            }
+            EdgeColorCommand::Set([r, g, b]) => {
+                session.drafting_extras.set_edge_color(Some([r, g, b]));
+                format!("EDGECOLOR: body edge colour is now #{r:02x}{g:02x}{b:02x}")
+            }
+        };
+        Ok(toggle_outcome(
+            "edgecolor.saved",
+            format!("{message} (session state only; the drawing was not written)"),
+        ))
+    }
+
     /// Toggle one drafting flag (`QTEXT`/`FILL`/`TFRAMES`/`REGENAUTO`/`ISODRAFT`).
     ///
     /// The three display tokens report what the display pipeline now does with the

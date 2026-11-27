@@ -506,6 +506,7 @@ mod tests {
             visual_style: Some("SHADED".into()),
             guide_style: None,
             body_edges: None,
+            body_edge_color: None,
             error: error.map(str::to_string),
             can_new: true,
             can_open: true,

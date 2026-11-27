@@ -41,6 +41,7 @@ pub(crate) fn display_settings(
         )),
         body_wireframe: session.view_extras.visual_style == cad_app::VisualStyleToken::Wireframe,
         body_edges: session.drafting_extras.body_edges(),
+        edge_color: session.drafting_extras.edge_color(),
     }
 }
 
