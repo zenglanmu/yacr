@@ -96,6 +96,7 @@ fn scene_row() -> Value {
         tags: None,
         display: None,
         soften: None,
+        soften_cleared: None,
     }
     .to_json()
 }

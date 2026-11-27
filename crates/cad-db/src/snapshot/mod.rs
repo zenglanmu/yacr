@@ -509,6 +509,17 @@ impl DocumentSnapshot {
             .is_some_and(|rows| !rows.is_empty())
     }
 
+    /// Whether any scene row records bodies to clear soften on (minor 29).
+    pub fn has_scene_soften_cleared(&self) -> bool {
+        self.tables.get(TableKind::Scenes).is_some_and(|rows| {
+            rows.iter().any(|row| {
+                row.get("soften_cleared")
+                    .and_then(|cleared| cleared.as_array())
+                    .is_some_and(|cleared| !cleared.is_empty())
+            })
+        })
+    }
+
     /// Whether any scene row captures explicit soften angles (minor 28).
     ///
     /// The writer omits an empty capture, so a scene without explicit soften

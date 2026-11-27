@@ -67,6 +67,7 @@ fn scene(name: &str) -> Scene {
         tags: None,
         display: None,
         soften: None,
+        soften_cleared: None,
     }
 }
 

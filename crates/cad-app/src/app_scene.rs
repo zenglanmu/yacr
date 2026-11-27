@@ -60,13 +60,15 @@ impl Application {
                     .unwrap_or_default();
                 let tags = capture_visible_tags(self.drawing(command.document)?, session);
                 let display = self.drawing(command.document)?.display_settings();
-                let soften = capture_scene_soften(self.drawing(command.document)?);
+                let (soften, soften_cleared) =
+                    capture_scene_soften(self.drawing(command.document)?);
                 let planned = self.drawing(command.document)?.plan_save_scene(Scene {
                     view: named,
                     style,
                     tags: Some(tags),
                     display: Some(display),
                     soften,
+                    soften_cleared,
                 })?;
                 let Some(planned) = planned else {
                     return Ok(scene_outcome(
@@ -148,7 +150,7 @@ impl Application {
         // The display record is document state. Refuse before touching anything
         // when this session may not write it, instead of a half-applied scene.
         let drawing = self.drawing(command.document)?;
-        let soften_changes: Vec<(EntityId, f64)> = saved
+        let mut soften_changes: Vec<(EntityId, Option<f64>)> = saved
             .soften
             .as_deref()
             .unwrap_or(&[])
@@ -157,8 +159,15 @@ impl Application {
             .filter(|entry| {
                 drawing.entity_render_attributes(entry.entity).soften != Some(entry.angle)
             })
-            .map(|entry| (entry.entity, entry.angle))
+            .map(|entry| (entry.entity, Some(entry.angle)))
             .collect();
+        for entity in saved.soften_cleared.as_deref().unwrap_or(&[]) {
+            if drawing.entity(*entity).is_some()
+                && drawing.entity_render_attributes(*entity).soften.is_some()
+            {
+                soften_changes.push((*entity, None));
+            }
+        }
         if (display_changed || !soften_changes.is_empty()) && session.app_mode() == AppMode::Viewer
         {
             return Err(CadError::PermissionDenied);
@@ -310,24 +319,29 @@ fn resolve_layer_by_name<'a>(
 }
 
 /// Capture the explicit per-entity soften angles (bounded by the scene codec).
-fn capture_scene_soften(drawing: &cad_db::DrawingDatabase) -> Option<Vec<SceneSoften>> {
-    let mut values: Vec<SceneSoften> = drawing
-        .entities()
-        .filter_map(|entity| {
-            drawing
-                .entity_render_attributes(entity.id)
-                .soften
-                .map(|angle| SceneSoften {
-                    entity: entity.id,
-                    angle,
-                })
-        })
-        .collect();
-    if values.is_empty() {
-        return None;
+fn capture_scene_soften(
+    drawing: &cad_db::DrawingDatabase,
+) -> (Option<Vec<SceneSoften>>, Option<Vec<EntityId>>) {
+    let mut values: Vec<SceneSoften> = Vec::new();
+    let mut cleared: Vec<EntityId> = Vec::new();
+    for entity in drawing.entities() {
+        match drawing.entity_render_attributes(entity.id).soften {
+            Some(angle) => values.push(SceneSoften {
+                entity: entity.id,
+                angle,
+            }),
+            None if matches!(entity.geometry, SemanticGeometry::Body3d(_)) => {
+                cleared.push(entity.id);
+            }
+            None => {}
+        }
     }
     values.sort_by_key(|entry| entry.entity.0);
-    Some(values)
+    cleared.sort_by_key(|entity| entity.0);
+    (
+        (!values.is_empty()).then_some(values),
+        (!cleared.is_empty()).then_some(cleared),
+    )
 }
 
 impl Application {
@@ -335,7 +349,7 @@ impl Application {
     fn apply_scene_soften(
         &mut self,
         document: DocumentId,
-        changes: &[(EntityId, f64)],
+        changes: &[(EntityId, Option<f64>)],
         name: &str,
     ) -> CadResult<()> {
         let drawing = self.drawing(document)?.clone();
@@ -345,7 +359,7 @@ impl Application {
             .iter()
             .map(|(id, angle)| {
                 let mut attributes = candidate.entity_render_attributes(*id);
-                attributes.soften = Some(*angle);
+                attributes.soften = *angle;
                 (*id, attributes)
             })
             .collect();

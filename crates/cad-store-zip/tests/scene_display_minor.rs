@@ -111,6 +111,7 @@ fn scene_row(display: Option<DisplaySettings>) -> Value {
         tags: None,
         display,
         soften: None,
+        soften_cleared: None,
     }
     .to_json()
 }
@@ -216,4 +217,27 @@ fn a_scene_soften_snapshot_is_written_at_minor_twenty_eight() {
     assert_eq!(soften.len(), 1);
     assert_eq!(soften[0].entity.0, 1025);
     assert!((soften[0].angle - 30.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_scene_soften_clear_list_is_written_at_minor_twenty_nine() {
+    let mut snapshot = snapshot(None);
+    let mut row = scene_row(None);
+    row["soften_cleared"] = serde_json::json!([1025, 1026]);
+    snapshot.tables.set(TableKind::Scenes, vec![row]);
+    let bytes = write_bytes(&snapshot);
+    assert_eq!(minor_of(&bytes), 29, "the clear list is the minor-29 tier");
+    let loaded = read_bytes(&bytes);
+    assert!(loaded.snapshot.has_scene_soften_cleared());
+    let rows = loaded
+        .snapshot
+        .tables
+        .get(TableKind::Scenes)
+        .expect("the scene table");
+    let table = cad_domain::scene::SceneTable::from_json(rows).expect("decode");
+    let scene = table.scenes().next().expect("one scene");
+    assert_eq!(
+        scene.soften_cleared,
+        Some(vec![cad_domain::EntityId(1025), cad_domain::EntityId(1026)])
+    );
 }

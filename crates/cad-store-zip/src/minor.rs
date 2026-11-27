@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | scene soften-clear lists (`soften_cleared` in `tables/scenes.json`) | `29` | the clear-on-restore ids |
 //! | scene soften snapshots (`soften` in `tables/scenes.json`) | `28` | the per-entity soften rows |
 //! | guide point markers (`point`-only rows in `tables/guides.json`) | `27` | the point rows |
 //! | construction guides (`tables/guides.json`) | `26` | the guide table |
@@ -134,6 +135,9 @@ pub(crate) const FORMAT_MINOR_GUIDE_POINTS: u32 = 27;
 /// A document whose scenes capture explicit soften angles (minor 28).
 pub(crate) const FORMAT_MINOR_SCENE_SOFTEN: u32 = 28;
 
+/// A document whose scenes clear non-explicit soften on restore (minor 29).
+pub(crate) const FORMAT_MINOR_SCENE_SOFTEN_CLEARED: u32 = 29;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order. `16` (constraints)
 // is reserved by another lane, so the top tiers are checked by explicit offsets.
@@ -150,6 +154,7 @@ const _: () = assert!(FORMAT_MINOR_MATERIAL_FACES == FORMAT_MINOR_SCENE_DISPLAY 
 const _: () = assert!(FORMAT_MINOR_GUIDES == FORMAT_MINOR_MATERIAL_FACES + 1);
 const _: () = assert!(FORMAT_MINOR_GUIDE_POINTS == FORMAT_MINOR_GUIDES + 1);
 const _: () = assert!(FORMAT_MINOR_SCENE_SOFTEN == FORMAT_MINOR_GUIDE_POINTS + 1);
+const _: () = assert!(FORMAT_MINOR_SCENE_SOFTEN_CLEARED == FORMAT_MINOR_SCENE_SOFTEN + 1);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -169,7 +174,12 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Scene soften snapshots are the newest tier: a minor-27 reader would refuse
+    // Scene soften-clear lists are the newest tier: a minor-28 reader would
+    // refuse the unknown `soften_cleared` key rather than leave a stale soften.
+    if snapshot.has_scene_soften_cleared() {
+        return FORMAT_MINOR_SCENE_SOFTEN_CLEARED;
+    }
+    // Explicit soften snapshots are the next tier: a minor-27 reader would refuse
     // the unknown `soften` row key rather than drop the snapshot.
     if snapshot.has_scene_soften() {
         return FORMAT_MINOR_SCENE_SOFTEN;
@@ -302,7 +312,14 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_SCENE_SOFTEN, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(
+            FORMAT_MINOR_SCENE_SOFTEN_CLEARED,
+            cad_domain::ymodel::FORMAT_MINOR
+        );
+        assert_eq!(
+            FORMAT_MINOR_SCENE_SOFTEN,
+            FORMAT_MINOR_SCENE_SOFTEN_CLEARED - 1
+        );
         assert_eq!(FORMAT_MINOR_GUIDE_POINTS, FORMAT_MINOR_SCENE_SOFTEN - 1);
         assert_eq!(FORMAT_MINOR_GUIDES, FORMAT_MINOR_GUIDE_POINTS - 1);
         assert_eq!(FORMAT_MINOR_MATERIAL_FACES, FORMAT_MINOR_GUIDES - 1);

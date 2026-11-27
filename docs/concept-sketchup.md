@@ -54,6 +54,9 @@
   **场景阴影/雾快照**（2026-11-27，ADR-0080）：`SCENE SAVE` 把文档 `tables/display.json`
   记录存进场景行的 `display`（minor 24）；`SCENE RESTORE` 在记录有差异时执行一次与
   `SHADOWS`/`FOG` 相同的显示写入（一步撤销），Viewer 下有差异则在改动前拒绝。
+  **场景柔化清除**（2026-11-28，ADR-0094）：`SCENE SAVE` 记录无显式 soften 的 body
+  （`soften_cleared`，≤1024，minor 29），恢复时在同一 display 属性事务里清空；超过上限的保存按
+  `scene.soften_cleared_invalid` 拒绝。
   **场景柔化快照**（2026-11-28，ADR-0090）：`SCENE SAVE` 捕获有显式 `render_attributes.soften`
   的实体（≤1024，行的 `soften`，minor 28），恢复按一次 display 属性事务写回；无显式值的实体不被
   场景改动；Viewer 有差异时在改动前拒绝。
@@ -236,11 +239,11 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
 | Materials | partial | 托盘真实列出**文档自己的**材质（`cad_materials` / `kind:"materials"`：名称、sRGB 色、透明度；来自 `tables/materials.json`）并可直接 `PAINT <name>` 重涂；下方保留内置 12 色调色板（首次涂刷落成文档行），`MATERIALS` 报告仍可用。**逐面涂刷**：选中网格面（pick 的 `SubElementId` / `Mesh.face_sources` key）时只涂该面，材质表行的 `faces` 快照（minor 25）；渲染器按材质把网格拆成多个 fragment（未涂面保留实体颜色，透明材质乘实体 alpha），陈旧 face key 不重映射并报 `representation.material_face_inert`。**未建模**：材质编辑器（改名/改色/删除）、贴图/纹理与材质库；整实体涂刷仍在 |
-| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）、文档 **Shadows/Fog 记录**（行的 `display` 快照，minor 24）与**显式逐实体柔化角度**（行的 `soften` 快照，minor 28）；恢复把标签快照作为会话图层覆盖应用（不写图层表），阴影/雾与柔化有差异时各写一次（柔化为一次 display 属性事务/撤销，Viewer 下有差异的恢复在改动前按 `PermissionDenied` 拒绝）。**未建模**：剖面、场景缩略图、以及保存时没有显式 `soften` 的实体（场景不改变它们的柔化值） |
+| Scenes | partial | 真实面板 + `SCENE SAVE/RESTORE/LIST/DELETE`：场景保存相机、2D/3D、工作平面、空间与 `WIREFRAME`/`SHADED` 样式（`tables/scenes.json`，minor 20），保存每个图层**保存时的有效可见性**（行的 `tags` 快照，minor 23）、文档 **Shadows/Fog 记录**（行的 `display` 快照，minor 24）、**显式逐实体柔化角度**（行的 `soften` 快照，minor 28）与**无显式柔化的 body 列表**（行的 `soften_cleared`，minor 29）；恢复把标签快照作为会话图层覆盖应用（不写图层表），阴影/雾各写一次，柔化按一次 display 属性事务写回显式值并清空 cleared body，Viewer 下有差异的恢复在改动前按 `PermissionDenied` 拒绝。**未建模**：剖面与场景缩略图 |
 | Shadows | partial | 托盘面板（开关 + 方位角/高度角 + 应用）+ `SHADOWS [ON|OFF|SUN <az> <elev>]`：把文档太阳当作方向光替换相机相对 key light，`tables/display.json`（minor 22），一次写入一步撤销；**投射阴影（shadow map）、软化、地面淡出 NOT IMPLEMENTED**，面板与命令报告都写明 |
 | Fog | partial | 托盘面板（开关 + 区间 + 颜色）+ `FOG [ON|OFF|RANGE <start> <end>|COLOR <r> <g> <b>]`：可见颜色 shader 按片元到视点距离向雾色混合（模型单位区间，`tables/display.json` minor 22）；没有天空/背景混合、没有距离百分比表达 |
 | Match Photo | partial | 真实面板 + host read（`cad_match_photo` / `kind:"matchPhoto"`）：明确报告 `modeled:false` 与稳定原因（照片匹配模型未建模：无照片导入/相机求解/照片背景），动作按钮 dispatch `MATCHPHOTO`，命令以 `matchphoto.not_implemented` 具名拒绝；不伪造照片列表 |
-| Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化；场景可捕获/恢复显式 `render_attributes.soften`（ADR-0090，仅显式值） |
+| Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化；场景可捕获/恢复显式 `render_attributes.soften`，并清除保存时无显式值的 body（ADR-0090/0094） |
 | Overlays | partial | 真实面板 + host read（`cad_overlays` / `kind:"overlays"`）：只读列出**渲染器实际拥有**的叠加通道（坐标轴/网格/选中高亮/捕捉提示/选择框/悬停高亮/测量读数/绘制预览）及其当前开关；没有用户管理的叠加定义模型，动作按钮 dispatch `OVERLAYS`，以 `overlays.not_implemented` 具名拒绝 |
 | Outliner | partial | 托盘面板（`cad_outliner` 只读投影：分组 / INSERT / 模型空间实体 / 块成员，前序 + `depth`，本地展开折叠）+ 点名称走既有 `cad_select_entities` 选择（分组发全部成员；块成员行不可选并说明原因）；**分组行可改名**：行内输入 dispatch 既有 `GROUPEDIT "<name>" RENAME "<new>"`（一步撤销；名称含 `"`/换行时按钮不提供）；行可 **Hide**（先 `cad_select_entities` 再 `HIDEOBJECTS`，隐藏态由 `cad_outliner.hidden` 标注）、隐藏行可 **Show**（同一选择后 `SHOWOBJECTS`，只移除选中 refs）并有 **Show all hidden**（`UNISOLATEOBJECTS`）。**多选 + Group selected**：Ctrl/Cmd/Shift 点击行累计选择，名称输入 dispatch 既有 `GROUP CREATE "<name>"`（一步撤销；名称含 `"`/换行时按钮禁用）。重排/拖拽归组仍未实现，只投影模型空间、只展开一层 |
 

@@ -454,21 +454,29 @@ fn a_viewer_restore_with_a_different_soften_value_is_refused() {
 }
 
 #[test]
-fn a_scene_without_a_soften_snapshot_does_not_touch_soften() {
+fn a_scene_without_an_explicit_soften_clears_the_later_value() {
     let (mut app, mut session) = super::soften::app_with(vec![super::soften::body(7)]);
     super::soften::select(&mut app, &mut session, &[7]);
     scene(&mut app, &mut session, SceneCommand::Save("Plain".into())).expect("save");
-    assert!(scenes(&app).resolve("Plain").expect("row").soften.is_none());
+    let saved = scenes(&app);
+    let row = saved.resolve("Plain").expect("row");
+    assert!(row.soften.is_none(), "no explicit value at save");
+    assert_eq!(
+        row.soften_cleared,
+        Some(vec![EntityId(7)]),
+        "the body is recorded for clearing"
+    );
     soften(&mut app, &mut session, 45.0).expect("soften 45");
+    let before = revision(&app);
     scene(
         &mut app,
         &mut session,
         SceneCommand::Restore("Plain".into()),
     )
     .expect("restore");
-    assert_eq!(
-        soften_of(&app, EntityId(7)),
-        Some(45.0),
-        "an old scene does not clear a later soften"
-    );
+    assert_eq!(soften_of(&app, EntityId(7)), None, "restore clears it");
+    assert_eq!(revision(&app), Revision(before.0 + 1));
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    assert_eq!(soften_of(&app, EntityId(7)), Some(45.0));
 }

@@ -51,6 +51,9 @@ pub const SCENE_TAG_CAP: usize = 1024;
 /// How many per-entity soften values one scene may capture.
 pub const SCENE_SOFTEN_CAP: usize = 1024;
 
+/// How many body ids a scene may record as "no explicit soften at save".
+pub const SCENE_SOFTEN_CLEARED_CAP: usize = 1024;
+
 /// The longest captured tag name (layer names are short in practice).
 pub const SCENE_TAG_NAME_MAX_CHARS: usize = 255;
 
@@ -77,6 +80,8 @@ pub mod markers {
     pub const SCENE_DISPLAY_INVALID: &str = "scene.display_invalid";
     /// The captured soften snapshot is malformed, duplicated or over budget.
     pub const SCENE_SOFTEN_INVALID: &str = "scene.soften_invalid";
+    /// The captured "clear these soften values" list is malformed or over budget.
+    pub const SCENE_SOFTEN_CLEARED_INVALID: &str = "scene.soften_cleared_invalid";
 }
 
 /// The visual style a scene restores.
@@ -186,6 +191,12 @@ pub struct Scene {
     /// written before soften capture (minor 20..27). An empty capture is stored
     /// as `None` so a scene with no explicit soften keeps the lower tier.
     pub soften: Option<Vec<SceneSoften>>,
+    /// Body entities that had **no** explicit soften at save time (minor 29).
+    ///
+    /// Restoring the scene clears their `render_attributes.soften`, so a body
+    /// softened after the save goes back to "no explicit value". Bounded like
+    /// the explicit snapshot; absent for older scenes (nothing is cleared).
+    pub soften_cleared: Option<Vec<EntityId>>,
 }
 
 impl Scene {
@@ -200,6 +211,7 @@ impl Scene {
             tags: None,
             display: None,
             soften: None,
+            soften_cleared: None,
         }
     }
 
@@ -223,6 +235,49 @@ impl Scene {
             display.validate().map_err(|error| {
                 SceneError::Invalid(markers::SCENE_DISPLAY_INVALID, error.to_string())
             })?;
+        }
+        if let Some(cleared) = &self.soften_cleared {
+            if cleared.len() > SCENE_SOFTEN_CLEARED_CAP {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_SOFTEN_CLEARED_INVALID,
+                    format!(
+                        "soften_cleared: {} rows, over the {SCENE_SOFTEN_CLEARED_CAP}-row budget",
+                        cleared.len()
+                    ),
+                ));
+            }
+            let mut seen = Vec::with_capacity(cleared.len());
+            for entity in cleared {
+                if entity.0 == 0 || u64::try_from(entity.0).is_err() {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_SOFTEN_CLEARED_INVALID,
+                        format!(
+                            "soften_cleared: entity {} is not a persistable id",
+                            entity.0
+                        ),
+                    ));
+                }
+                if seen.contains(entity) {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_SOFTEN_CLEARED_INVALID,
+                        format!("soften_cleared: entity {} appears twice", entity.0),
+                    ));
+                }
+                if self
+                    .soften
+                    .as_ref()
+                    .is_some_and(|soften| soften.iter().any(|entry| entry.entity == *entity))
+                {
+                    return Err(SceneError::Invalid(
+                        markers::SCENE_SOFTEN_CLEARED_INVALID,
+                        format!(
+                            "entity {} is both explicitly softened and in soften_cleared",
+                            entity.0
+                        ),
+                    ));
+                }
+                seen.push(*entity);
+            }
         }
         if let Some(soften) = &self.soften {
             if soften.len() > SCENE_SOFTEN_CAP {
@@ -352,6 +407,19 @@ impl Scene {
                     })
                     .collect();
                 row.insert("soften".to_string(), Value::Array(rows));
+            }
+        }
+        if let Some(cleared) = &self.soften_cleared {
+            if !cleared.is_empty() {
+                row.insert(
+                    "soften_cleared".to_string(),
+                    Value::Array(
+                        cleared
+                            .iter()
+                            .map(|entity| Value::from(u64::try_from(entity.0).unwrap_or(0)))
+                            .collect(),
+                    ),
+                );
             }
         }
         Value::Object(row)
@@ -492,6 +560,28 @@ impl Scene {
             }
             None => None,
         };
+        let soften_cleared = match map.remove("soften_cleared") {
+            Some(Value::Array(rows)) => {
+                let mut cleared = Vec::with_capacity(rows.len());
+                for (index, row) in rows.iter().enumerate() {
+                    let entity = row.as_u64().filter(|raw| *raw > 0).ok_or_else(|| {
+                        SceneError::Invalid(
+                            markers::SCENE_SOFTEN_CLEARED_INVALID,
+                            format!("soften_cleared[{index}]: expected a positive entity id"),
+                        )
+                    })?;
+                    cleared.push(EntityId(u128::from(entity)));
+                }
+                Some(cleared)
+            }
+            Some(_) => {
+                return Err(SceneError::Invalid(
+                    markers::SCENE_SOFTEN_CLEARED_INVALID,
+                    "soften_cleared: expected an array of entity ids".into(),
+                ))
+            }
+            None => None,
+        };
         let view = NamedView::from_json(&Value::Object(map))?;
         let scene = Scene {
             view,
@@ -499,6 +589,7 @@ impl Scene {
             tags,
             display,
             soften,
+            soften_cleared,
         };
         scene.validate()?;
         Ok(scene)
@@ -560,6 +651,7 @@ impl SceneTable {
                 tags: scene.tags,
                 display: scene.display,
                 soften: scene.soften,
+                soften_cleared: scene.soften_cleared,
             });
             return Ok(true);
         }
@@ -578,6 +670,7 @@ impl SceneTable {
             tags: scene.tags,
             display: scene.display,
             soften: scene.soften,
+            soften_cleared: scene.soften_cleared,
         });
         Ok(false)
     }
