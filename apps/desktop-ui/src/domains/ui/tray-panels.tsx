@@ -7,7 +7,14 @@ import { useI18n, useShell } from '../../context.ts';
 import { invoke } from '../../host/invoke.ts';
 import { readMatchPhoto, readOverlays } from '../concept/panels.ts';
 import { BUILTIN_MATERIALS, paintCommand, readMaterials } from '../concept/materials.ts';
-import { groupRenameCommand, outlinerRowKey, readOutliner, visibleOutlinerRows } from '../concept/outliner.ts';
+import {
+  groupCreateCommand,
+  groupRenameCommand,
+  outlinerRowKey,
+  readOutliner,
+  selectedOutlinerIds,
+  visibleOutlinerRows,
+} from '../concept/outliner.ts';
 import type { OutlinerAnswer, OutlinerRow } from '../concept/outliner.ts';
 import type { MaterialsAnswer } from '../concept/materials.ts';
 import { selectBimEntities } from '../../bim/selection.ts';
@@ -265,6 +272,8 @@ export function OutlinerBody() {
   const [selectionError, setSelectionError] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [groupName, setGroupName] = useState('');
   const [state, setState] = useState<{
     phase: 'ready' | 'loading' | 'error';
     answer: OutlinerAnswer | null;
@@ -303,12 +312,35 @@ export function OutlinerBody() {
       return next;
     });
   };
-  const select = (row: OutlinerRow) => {
+  const select = (row: OutlinerRow, additive: boolean) => {
     if (!row.selectable) return;
     setSelectionError('');
-    void selectBimEntities(invoke, row.selectIds).then(result => {
+    const key = outlinerRowKey(row);
+    const next = new Set(additive ? selected : []);
+    if (additive && next.has(key)) next.delete(key);
+    else next.add(key);
+    setSelected(next);
+    const ids = selectedOutlinerIds(rows, next);
+    if (ids.length === 0) return;
+    void selectBimEntities(invoke, ids).then(result => {
       if (result.kind === 'error') setSelectionError(result.reason);
       else setNonce(value => value + 1);
+    });
+  };
+  const groupSelected = () => {
+    const ids = selectedOutlinerIds(rows, selected);
+    const command = groupCreateCommand(groupName);
+    if (ids.length === 0 || command === null) return;
+    setSelectionError('');
+    void selectBimEntities(invoke, ids).then(result => {
+      if (result.kind === 'error') {
+        setSelectionError(result.reason);
+        return;
+      }
+      shell.runCommand(command);
+      setGroupName('');
+      setSelected(new Set());
+      setNonce(value => value + 1);
     });
   };
   const hide = (row: OutlinerRow) => {
@@ -349,6 +381,26 @@ export function OutlinerBody() {
   return (
     <>
       <p className="concept-panel__hint">{t('concept.outliner.hint')}</p>
+      <div className="concept-scenes__save">
+        <input
+          type="text"
+          className="concept-scenes__name"
+          value={groupName}
+          placeholder={t('concept.outliner.group_name')}
+          aria-label={t('concept.outliner.group_name')}
+          onChange={event => setGroupName(event.currentTarget.value)}
+        />
+        <button
+          type="button"
+          className="concept-panel__action"
+          disabled={selectedOutlinerIds(rows, selected).length === 0
+            || groupCreateCommand(groupName) === null
+            || !shell.canCommand('GROUP')}
+          onClick={groupSelected}
+        >
+          {t('concept.outliner.group_selected')}
+        </button>
+      </div>
       {state.phase === 'error' ? (
         <p className="concept-panel__hint" role="alert">
           {t('concept.outliner.error', { reason: state.reason })}
@@ -417,7 +469,11 @@ export function OutlinerBody() {
                     type="button"
                     className="concept-rows__label concept-outliner__name"
                     title={t('concept.outliner.select', { name: row.label })}
-                    onClick={() => select(row)}
+                    aria-pressed={selected.has(key)}
+                    onClick={event => select(
+                      row,
+                      event.ctrlKey || event.metaKey || event.shiftKey,
+                    )}
                   >
                     {row.label}
                   </button>

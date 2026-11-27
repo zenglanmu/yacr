@@ -7,7 +7,9 @@ import test from 'node:test';
 
 import {
   OUTLINER_COMMAND,
+  groupCreateCommand,
   groupRenameCommand,
+  selectedOutlinerIds,
   outlinerRowKey,
   parseOutlinerAnswer,
   readOutliner,
@@ -109,4 +111,25 @@ test('the host hidden flag is preserved, never inferred', () => {
   });
   assert.equal(answer.rows[0].hidden, true);
   assert.equal(answer.rows[1].hidden, false);
+});
+
+test('multi-selection unions the selected rows and drops duplicates', () => {
+  const rows = parseOutlinerAnswer({ rows: ROWS }).rows;
+  const ids = selectedOutlinerIds(rows, new Set([
+    outlinerRowKey(rows[0]),
+    outlinerRowKey(rows[1]),
+    outlinerRowKey(rows[2]),
+  ]));
+  assert.deepEqual(ids, [10, 11]);
+  assert.deepEqual(selectedOutlinerIds(rows, new Set([
+    outlinerRowKey(rows[4]),
+  ])), [], 'a member row has no selectable ids');
+});
+
+test('group-create uses the quoted GROUP grammar and refuses unsafe names', () => {
+  assert.equal(groupCreateCommand('Walls'), 'GROUP CREATE "Walls"');
+  assert.equal(groupCreateCommand('  My Group  '), 'GROUP CREATE "My Group"');
+  for (const name of ['', '   ', 'a"b', 'a\nb', null, 3]) {
+    assert.equal(groupCreateCommand(name), null, String(name));
+  }
 });

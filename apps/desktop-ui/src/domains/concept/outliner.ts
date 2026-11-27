@@ -79,6 +79,40 @@ export function groupRenameCommand(from: unknown, to: unknown): string | null {
   return `GROUPEDIT "${name}" RENAME "${next}"`;
 }
 
+/** The entity ids of the selected rows, in row order (duplicates dropped). */
+export function selectedOutlinerIds(
+  rows: readonly OutlinerRow[],
+  selectedKeys: ReadonlySet<string>,
+): readonly number[] {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const row of rows) {
+    if (!selectedKeys.has(outlinerRowKey(row)) || !row.selectable) continue;
+    for (const id of row.selectIds) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * `GROUP CREATE "<name>"` for the selected Outliner rows.
+ *
+ * The name grammar quotes names and has no escape; a name containing a quote or
+ * a line break is refused here rather than silently becoming a different name.
+ */
+export function groupCreateCommand(name: unknown): string | null {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  if (trimmed === '' || trimmed.includes('"')
+    || trimmed.includes('\n') || trimmed.includes('\r')) {
+    return null;
+  }
+  return `GROUP CREATE "${trimmed}"`;
+}
+
 /** The stable key for one row (its kind and id are unique in one tree). */
 export function outlinerRowKey(row: Pick<OutlinerRow, 'kind' | 'id'>): string {
   return `${row.kind}:${row.id}`;
