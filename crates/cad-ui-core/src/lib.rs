@@ -20,6 +20,7 @@ pub mod i18n;
 pub mod launch;
 pub mod layout;
 pub mod match_photo;
+pub mod material;
 pub mod mechanical;
 pub mod outliner;
 pub mod overlays;

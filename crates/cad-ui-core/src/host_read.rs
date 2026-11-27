@@ -56,6 +56,7 @@ use crate::action_recorder::{ActionRecorderSnapshot, ACTION_RECORDER_UNSUPPORTED
 use crate::bim::{BimFilterWire, BimQueryResponse, BIM_DEFAULT_LIMIT, BIM_UNSUPPORTED};
 use crate::display::{DisplayResponse, DISPLAY_KIND, DISPLAY_UNSUPPORTED};
 use crate::match_photo::{MatchPhotoResponse, MATCH_PHOTO_KIND, MATCH_PHOTO_UNSUPPORTED};
+use crate::material::{MaterialsResponse, MATERIALS_KIND, MATERIALS_UNSUPPORTED};
 use crate::mechanical::{
     MechanicalTreeResponse, MECHANICAL_TREE_KIND, MECHANICAL_TREE_UNSUPPORTED,
 };
@@ -118,6 +119,8 @@ pub enum HostReadRequest {
     MatchPhoto,
     /// `kind: "overlays"` — the renderer-owned overlay channels.
     Overlays,
+    /// `kind: "materials"` — the open document's material rows.
+    Materials,
 }
 
 impl HostReadRequest {
@@ -133,6 +136,7 @@ impl HostReadRequest {
             Self::Outliner => OUTLINER_KIND,
             Self::MatchPhoto => MATCH_PHOTO_KIND,
             Self::Overlays => OVERLAYS_KIND,
+            Self::Materials => MATERIALS_KIND,
         }
     }
 }
@@ -164,6 +168,8 @@ pub enum HostReadAnswer {
     MatchPhoto(MatchPhotoResponse),
     /// `kind: "overlays"` — the overlay channel list.
     Overlays(OverlaysResponse),
+    /// `kind: "materials"` — the document-material list.
+    Materials(MaterialsResponse),
 }
 
 /// Serialize a request as `{"kind": ..., <fields>}`.
@@ -225,6 +231,11 @@ impl Serialize for HostReadRequest {
                 state.serialize_field("kind", OVERLAYS_KIND)?;
                 state.end()
             }
+            Self::Materials => {
+                let mut state = serializer.serialize_struct("HostReadRequest", 1)?;
+                state.serialize_field("kind", MATERIALS_KIND)?;
+                state.end()
+            }
         }
     }
 }
@@ -268,11 +279,12 @@ impl<'de> Deserialize<'de> for HostReadRequest {
             OUTLINER_KIND => Ok(Self::Outliner),
             MATCH_PHOTO_KIND => Ok(Self::MatchPhoto),
             OVERLAYS_KIND => Ok(Self::Overlays),
+            MATERIALS_KIND => Ok(Self::Materials),
             other => Err(serde::de::Error::custom(format!(
                 "{HOST_READ_UNKNOWN_KIND}: `kind` {other:?} is not one of [{BIM_QUERY_KIND:?}, \
                  {PARAM_LIST_KIND:?}, {MECHANICAL_TREE_KIND:?}, {ACTION_RECORDER_KIND:?}, \
                  {SCENES_KIND:?}, {DISPLAY_KIND:?}, {OUTLINER_KIND:?}, {MATCH_PHOTO_KIND:?}, \
-                 {OVERLAYS_KIND:?}]"
+                 {OVERLAYS_KIND:?}, {MATERIALS_KIND:?}]"
             ))),
         }
     }
@@ -346,6 +358,7 @@ pub fn no_seam_refusal(request: &HostReadRequest) -> String {
         HostReadRequest::Outliner => OUTLINER_UNSUPPORTED.to_string(),
         HostReadRequest::MatchPhoto => MATCH_PHOTO_UNSUPPORTED.to_string(),
         HostReadRequest::Overlays => OVERLAYS_UNSUPPORTED.to_string(),
+        HostReadRequest::Materials => MATERIALS_UNSUPPORTED.to_string(),
     }
 }
 

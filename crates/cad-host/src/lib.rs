@@ -65,6 +65,7 @@ mod domain;
 mod fonts;
 mod input;
 mod match_photo;
+mod material;
 mod mechanical;
 mod open;
 mod orbit_sensitivity;
@@ -92,6 +93,7 @@ pub use command_log::{
 };
 pub(crate) use document_archive::sha256_hex;
 pub use match_photo::{MatchPhotoStatus, MATCH_PHOTO_NOT_MODELED};
+pub use material::{MaterialList, MaterialListRow, MATERIAL_LIST_MAX_ROWS};
 pub use mechanical::{MechanicalTree, MechanicalTreeRow, MECHANICAL_TREE_MAX_ROWS};
 pub use open::PathOpenOutcome;
 pub use outliner::{OutlinerRow, OutlinerTree, OUTLINER_MAX_ROWS};

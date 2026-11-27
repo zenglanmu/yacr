@@ -29,6 +29,7 @@ use crate::host_read::{
     HostReadAnswer, HostReadHost, HostReadRequest, HostReadSeam, HostReads, HOST_READ_UNKNOWN_KIND,
 };
 use crate::match_photo::MatchPhotoResponse;
+use crate::material::MaterialsResponse;
 use crate::mechanical::MechanicalTreeResponse;
 use crate::outliner::OutlinerResponse;
 use crate::overlays::OverlaysResponse;
@@ -64,6 +65,7 @@ impl CadSession {
             HostReadRequest::Outliner => Ok(HostReadAnswer::Outliner(self.outliner())),
             HostReadRequest::MatchPhoto => Ok(HostReadAnswer::MatchPhoto(self.match_photo())),
             HostReadRequest::Overlays => Ok(HostReadAnswer::Overlays(self.overlays())),
+            HostReadRequest::Materials => Ok(HostReadAnswer::Materials(self.materials())),
         }
     }
 }
@@ -104,6 +106,15 @@ impl CadSession {
     /// The renderer-owned overlay channels this build draws.
     pub fn overlays(&self) -> OverlaysResponse {
         OverlaysResponse::from_host(self.core.overlays())
+    }
+
+    /// The open document's material rows.
+    ///
+    /// Host content only: no document answers an empty list (the panel's empty
+    /// state), never an error; a carrier with no lane still reports its own
+    /// refusal at the wire layer.
+    pub fn materials(&self) -> MaterialsResponse {
+        MaterialsResponse::from_host(self.core.materials())
     }
 }
 
@@ -151,7 +162,8 @@ pub fn bim_query(
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a BIM query"
         )),
     }
@@ -173,7 +185,8 @@ pub fn param_list(reads: &dyn HostReads) -> Result<ParamListResponse, String> {
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a parameter list"
         )),
     }
@@ -195,7 +208,8 @@ pub fn action_recorder(reads: &dyn HostReads) -> Result<ActionRecorderSnapshot, 
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an action-recorder read"
         )),
     }
@@ -218,7 +232,8 @@ pub fn scenes(reads: &dyn HostReads) -> Result<ScenesResponse, String> {
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a scenes read"
         )),
     }
@@ -234,7 +249,8 @@ pub fn mechanical_tree(reads: &dyn HostReads) -> Result<MechanicalTreeResponse, 
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a mechanical tree"
         )),
     }
@@ -255,7 +271,8 @@ pub fn display(reads: &dyn HostReads) -> Result<DisplayResponse, String> {
         | HostReadAnswer::Scenes(_)
         | HostReadAnswer::Outliner(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a display read"
         )),
     }
@@ -276,7 +293,8 @@ pub fn outliner(reads: &dyn HostReads) -> Result<OutlinerResponse, String> {
         | HostReadAnswer::Scenes(_)
         | HostReadAnswer::Display(_)
         | HostReadAnswer::MatchPhoto(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an outliner read"
         )),
     }
@@ -297,7 +315,8 @@ pub fn match_photo(reads: &dyn HostReads) -> Result<MatchPhotoResponse, String> 
         | HostReadAnswer::Scenes(_)
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
-        | HostReadAnswer::Overlays(_) => Err(format!(
+        | HostReadAnswer::Overlays(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a match-photo read"
         )),
     }
@@ -318,8 +337,31 @@ pub fn overlays(reads: &dyn HostReads) -> Result<OverlaysResponse, String> {
         | HostReadAnswer::Scenes(_)
         | HostReadAnswer::Display(_)
         | HostReadAnswer::Outliner(_)
-        | HostReadAnswer::MatchPhoto(_) => Err(format!(
+        | HostReadAnswer::MatchPhoto(_)
+        | HostReadAnswer::Materials(_) => Err(format!(
             "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to an overlays read"
+        )),
+    }
+}
+
+/// `cad_materials`: the open document's material rows.
+///
+/// One request-carrying read over the shared seam; the session's handler is
+/// [`CadSession::materials`]. A carrier without a lane answers its own
+/// `unsupported-runtime: materials` refusal, never an empty list.
+pub fn materials(reads: &dyn HostReads) -> Result<MaterialsResponse, String> {
+    match reads.host_read(&HostReadRequest::Materials)? {
+        HostReadAnswer::Materials(response) => Ok(response),
+        HostReadAnswer::BimQuery(_)
+        | HostReadAnswer::ParamList(_)
+        | HostReadAnswer::MechanicalTree(_)
+        | HostReadAnswer::ActionRecorder(_)
+        | HostReadAnswer::Scenes(_)
+        | HostReadAnswer::Display(_)
+        | HostReadAnswer::Outliner(_)
+        | HostReadAnswer::MatchPhoto(_)
+        | HostReadAnswer::Overlays(_) => Err(format!(
+            "{HOST_READ_UNKNOWN_KIND}: the host answered a different kind to a materials read"
         )),
     }
 }

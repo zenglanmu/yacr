@@ -34,8 +34,7 @@ import { useDomainUi } from './use-ui-layout.ts';
 import { bodyKindKey, featureOperationKey, mechanicalStatusKey, readMechanicalTree } from '../mechanical/tree.ts';
 import type { MechanicalTreeAnswer } from '../mechanical/tree.ts';
 import type { TrayPanel } from './slots.ts';
-import { MatchPhotoBody, OverlaysBody } from './tray-panels.tsx';
-import { BUILTIN_MATERIALS, paintCommand } from '../concept/materials.ts';
+import { MatchPhotoBody, MaterialsBody, OverlaysBody } from './tray-panels.tsx';
 import { readScenes } from '../concept/scenes.ts';
 import type { ScenesAnswer } from '../concept/scenes.ts';
 import { readDisplay } from '../concept/display.ts';
@@ -322,42 +321,6 @@ function MechanicalTreeBody() {
  * Document materials are listed by the `MATERIALS` report this panel can open;
  * the swatches are the built-in palette, not a copy of the document table.
  */
-function MaterialsBody() {
-  const { t } = useI18n();
-  const shell = useShell();
-  const available = shell.canCommand('PAINT');
-  return (
-    <>
-      <p className="concept-panel__hint">{t('concept.materials.hint')}</p>
-      <ul className="concept-materials">
-        {BUILTIN_MATERIALS.map(material => (
-          <li key={material.name}>
-            <button
-              type="button"
-              className="concept-materials__swatch"
-              style={{ backgroundColor: material.color, opacity: 1 - (material.transparency ?? 0) }}
-              disabled={!available}
-              title={available ? t('concept.materials.paint', { name: material.name }) : t('concept.materials.no_document')}
-              aria-label={material.name}
-              onClick={() => shell.runCommand(paintCommand(material.name))}
-            >
-              <span>{material.name}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      <button
-        type="button"
-        className="concept-panel__action"
-        disabled={!shell.canCommand('MATERIALS')}
-        onClick={() => shell.runCommand('MATERIALS')}
-      >
-        {t('concept.materials.report')}
-      </button>
-    </>
-  );
-}
-
 /** One scenes read's state; the last good answer survives a failed refresh. */
 type ScenesState =
   | { readonly phase: 'ready'; readonly answer: ScenesAnswer | null; readonly reason: '' }

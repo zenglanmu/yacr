@@ -29,6 +29,7 @@ mod tests_hatch_arguments;
 mod tests_hover;
 mod tests_input;
 mod tests_layers;
+mod tests_materials;
 mod tests_mechanical;
 mod tests_mesh;
 mod tests_native_pinch;

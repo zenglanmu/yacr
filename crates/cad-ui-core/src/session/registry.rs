@@ -191,6 +191,11 @@ macro_rules! cad_wire_registry {
             @row(shared, reads, NoArgs, cad_match_photo, { }, $crate::match_photo::MatchPhotoResponse, { $crate::session::host_read::match_photo(reads) })
             // Overlays: the renderer-owned overlay channels this build draws.
             @row(shared, reads, NoArgs, cad_overlays, { }, $crate::overlays::OverlaysResponse, { $crate::session::host_read::overlays(reads) })
+            // The Materials tray: the open document's own `tables/materials.json`
+            // rows (`kind: "materials"`, no fields). Painting is not this read:
+            // a swatch dispatches `PAINT <name>` through the ordinary command
+            // path. A carrier with no lane answers `unsupported-runtime: materials`.
+            @row(shared, reads, NoArgs, cad_materials, { }, $crate::material::MaterialsResponse, { $crate::session::host_read::materials(reads) })
             // The action-recorder state (ADR-0056): one request-carrying read
             // (`kind: "actionRecorder"`, no fields) over the same seam. A
             // carrier with no named-file bridge answers its own
