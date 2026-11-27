@@ -660,10 +660,13 @@ pub(crate) fn apply_drawing_patches(
     step: &cad_history::DrawingHistoryStep,
     forward: bool,
 ) -> CadResult<ChangeSet> {
-    // A named-view step is replayed through the view-table write path: undo
-    // passes the swapped `before`/`after` sides and the table write is one
-    // revision. The record's entity/table batches are refused with a view step
-    // by `DrawingHistoryStep::validate`, so this branch cannot drop them.
+    // A material step takes the material-table write path.
+    if let Some(result) =
+        super::material_replay::material_step(drawing, transaction, reason, step, forward)
+    {
+        return result;
+    }
+    // A named-view step takes the view-table write path.
     if !step.view_patches.is_empty() {
         return super::view_replay::replay_view_patches(
             drawing,
@@ -673,16 +676,8 @@ pub(crate) fn apply_drawing_patches(
             forward,
         );
     }
-    // A parametric step is replayed through the same merged write path the edit
-    // used: the parameter rows and the binding rows are swapped (redo takes the
-    // stored `before`/`after`, undo swaps them) and `apply_parametric_update`
-    // re-derives every affected element geometry. The record's entity patches are
-    // deliberately **not** replayed: the history validator restricts a parametric
-    // step to entity patches only, and the geometry is derived from the restored
-    // table/bindings, so replaying a stored geometry row as well would be a
-    // second, unvalidated source of truth (D7).
-    // A group-only step replays through the same validated `apply_group_changes`
-    // path the command used; the history validator makes this branch exclusive.
+    // A parametric step replays through `apply_parametric_update` (geometry
+    // derived from the restored table); a group step through `apply_group_changes`.
     if !step.group_patches.is_empty() {
         let patches: Vec<cad_db::GroupPatch> = step
             .group_patches

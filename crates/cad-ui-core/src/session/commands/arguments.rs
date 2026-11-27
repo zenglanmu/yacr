@@ -42,6 +42,9 @@ pub const VIEWGO_SELECTOR: &str = "VIEWGO";
 /// AutoCAD's `VPOINT <x> <y> <z>` or `TOP|BOTTOM|FRONT|BACK|LEFT|RIGHT`.
 pub const VPOINT_SELECTOR: &str = "VPOINT";
 
+/// SketchUp's `PAINT <material>`: apply one material to the current selection.
+pub const PAINT_SELECTOR: &str = "PAINT";
+
 /// One parsed argument of the `VIEW` selector.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewOption {

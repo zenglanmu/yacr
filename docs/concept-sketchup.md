@@ -26,11 +26,11 @@
 | 状态 | 数量 | 占比 |
 |---|---:|---:|
 | `full` | 54 | **78.3%** |
-| `partial` | 5 | 7.2% |
-| `pending` | 10 | 14.5% |
+| `partial` | 6 | 8.7% |
+| `pending` | 9 | 13.0% |
 | 合计 | 69 | 100% |
 
-- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 59/69 = 85.5% 有真实命令。
+- **50% 线已满足**（54/69 = 78.3%）；`full` + `partial` = 60/69 = 87.0% 有真实命令。
 - `full` 的主体仍是二维制图/编辑/导航/文件命令；SketchUp 特有的网格核心已完成布尔/修复：
   `UNION`/`SUBTRACT`/`INTERSECT` 现在同时接受精确 `Body3d{Solid,Exact}` 与闭合网格
   （混合选择按 `boolean.operand_class_mismatch` 拒绝），`MESHREPAIR`/`MESHREBUILD` 修复闭合网格；
@@ -41,6 +41,9 @@
   轮廓/路径都保持原位、一次事务/一步撤销，拐角在角平分面上剪切，结果是单壳、外向、每面有
   `face_sources` 的 `AcDbSubDMesh`。轮廓可以是闭合直线 `LWPOLYLINE`、`LINE` 闭环或 `CIRCLE`
   （圆按 48 边形采样，SketchUp 的圆也是多边形）；弧线/bulge 轮廓、闭合路径与反向路径按名拒绝。
+  **材质**（2026-11-27，ADR-0062）：`tables/materials.json` 存命名扁平材质（颜色 + 透明度）与
+  每个实体一个赋值，`PAINT <名称>` 涂当前选择（内置 12 色首次涂刷落成文档行），渲染在展开时
+  用材质色覆盖实体颜色/透明度；一次表写入 = 一次 revision = 一步撤销，删除实体清掉赋值。
   边身份使用几何派生 `mesh:edge:<bits>` key，`MOVE` 可移动边；wire-only 边/跨多个三角形边的
   stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
 - **矩形→推拉的核心回路已闭环**（2026-11-27）：Push/Pull 在所选是闭合平面轮廓时（闭合直线
@@ -69,7 +72,7 @@
 | Scale | `SCALE` | full | |
 | Mirror | `MIRROR` | partial | 是 CAD 镜像，不是 SketchUp 的 Flip 语义 |
 | Tape Measure | `DIST` | partial | 只有距离；没有 guide line/点 |
-| Paint Bucket | `MATERIALS` | pending | 没有材质/纹理模型（`MATERIALS` 命令是具名拒绝） |
+| Paint Bucket | `MATERIALS` | partial | `MATERIALS` 是只读材质报告（文档材质 + 内置调色板），托盘的 Materials 面板是真实色块调色板，点击 dispatch `PAINT <名称>` 涂**当前选择**；没有“点一个面涂一个面”的拾取、没有纹理材质、没有 INSERT 级联（ADR-0062） |
 | Orbit | `ORBIT` | full | |
 | Pan | `PAN` | full | |
 | Zoom Extents | `FIT` | full | |
@@ -154,7 +157,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Styles | partial | 只有主题切换，不是 SketchUp Style |
 | Tags | full | 走图层面板 |
 | Instructor | full | 工具提示/步骤 |
-| Materials | pending | 无材质/纹理模型 |
+| Materials | partial | 内置 12 色调色板 + `PAINT <name>`（整实体涂刷、文档表持久化、渲染即生效）；文档材质只在 `MATERIALS` 报告里列出，色块不随文档材质生成 |
 | Scenes | pending | 没有场景/页面持久化 |
 | Shadows | pending | 无阴影设置 |
 | Fog | pending | 无雾 |
@@ -186,5 +189,5 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
 - 其余 `pending` 工具（Freehand/Protractor/3D Text/Outer Shell/Trim/Split/Camera/Walk/
-  Look Around/Materials/Scenes/...）保持显式 pending；
+  Look Around/Scenes/...）保持显式 pending；
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

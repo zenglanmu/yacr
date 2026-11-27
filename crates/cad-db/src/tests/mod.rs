@@ -24,6 +24,7 @@ mod layers;
 mod layout_edit;
 mod layout_patch;
 mod locked_layers;
+mod materials;
 mod named_delete;
 mod param;
 mod param_config;

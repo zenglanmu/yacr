@@ -542,6 +542,8 @@ export const HOST_NAMES = [
   // FOLLOWME: the SketchUp Follow Me sweep, a real router selector.
   'FOLLOWME',
   'RECTANGROTATED',
+  'PAINT',
+  'MATERIALS',
   'PIE',
   'REVOLVE',
   'SWEEP',

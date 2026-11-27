@@ -185,6 +185,14 @@ pub enum TableKind {
     /// row, and contribute the minor-18 tier. A `VIEW SAVE`/`DELETE` is one
     /// database revision and one undo step.
     Views,
+    /// Document materials (`tables/materials.json`, SketchUp Paint Bucket):
+    /// named flat materials plus one assignment per painted entity.
+    ///
+    /// Document content like [`TableKind::Views`]: held by
+    /// [`crate::DrawingDatabase`], written only when the table holds a row, and
+    /// contributing the minor-19 tier. A `PAINT` is one revision and one undo
+    /// step.
+    Materials,
 }
 
 /// The set of persisted rows one commit made stale.

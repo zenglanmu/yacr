@@ -89,9 +89,24 @@ impl ProviderRegistry {
         // default.
         let effective_layer = layers.effective_layer(entity.layer);
         let layer = database.layer_attributes(effective_layer);
-        let own_alpha = resolve_alpha(attributes.transparency, parent_alpha, layer.opacity);
-        let (own_color, color_unresolved) =
+        let mut own_alpha = resolve_alpha(attributes.transparency, parent_alpha, layer.opacity);
+        let (mut own_color, mut color_unresolved) =
             resolve_color(attributes.color, parent_color, layer.color.rgb);
+        // A painted entity is drawn in its material's flat colour and alpha: the
+        // paint is a document assignment, so it overrides the entity's own
+        // ByLayer/explicit look without writing the element. The table holds only
+        // flat materials (no texture), so the mesh texture/PBR channels an
+        // importer filled are untouched.
+        if let Some(material) = database.materials().assignment(entity.id) {
+            let look = material.look();
+            own_color = [
+                look.color[0] as f32 / 255.0,
+                look.color[1] as f32 / 255.0,
+                look.color[2] as f32 / 255.0,
+            ];
+            own_alpha *= look.alpha as f32;
+            color_unresolved = false;
+        }
         let (own_lineweight, lineweight_unresolved) =
             resolve_lineweight(attributes.lineweight, parent_lineweight, layer.lineweight);
         // A layer stores a linetype **name**; its pattern comes from the

@@ -1,8 +1,7 @@
 //! The typed input payloads of the command funnel.
 //!
-//! Split out of the crate root to keep `lib.rs` inside the code-size limit. Every
-//! item is re-exported by [`crate`] under its original name, so the public paths
-//! (`cad_app::CommandPayload`, `cad_app::TwoLineCommand`, …) are unchanged.
+//! Split out of the crate root for the code-size limit; every item is re-exported
+//! by [`crate`] under its original name, so public paths are unchanged.
 //!
 //! A payload describes the **input** of exactly one [`crate::CommandId`] and never carries behaviour: the command layer validates it, then writes or refuses.
 
@@ -39,11 +38,11 @@ pub enum CommandPayload {
     None,
     Points(Vec<Point3>),
     Layer(LayerId, bool),
-    /// Distinct layer ids + temporary visibility; empty/duplicate ids are invalid.
+    /// Distinct layer ids + temporary visibility (empty/duplicate ids invalid).
     LayerVisibilities(Vec<(LayerId, bool)>),
     Space(SpaceId),
     StandardView(StandardView),
-    /// Absolute or host-fitted camera placement (`cad_set_view`; view state only).
+    /// Absolute or host-fitted camera placement (`cad_set_view`; view state).
     SetView(ViewPlacement),
     Backend(BackendChoice),
     /// Start (or restart) a measurement tool with an explicit algorithm.
@@ -978,10 +977,9 @@ pub enum CommandPayload {
     /// `cad-ui-core` (`session::scale_arguments`), so a typed line and a direct
     /// IPC caller reach the same handler. Contract: [`crate::app_extended_scale_list`].
     ScaleList(crate::app_extended_scale_list::ScaleListCommand),
-    /// `REFCLOSE SAVE|DISCARD` (Work-only; a bare `REFCLOSE` is `None` and
-    /// refused by name). Contract: [`crate::app_refedit`].
+    /// `REFCLOSE SAVE|DISCARD` (Work-only; bare is refused). See `app_refedit`.
     RefClose(RefCloseOption),
-    /// The solid-edit payloads: exact body + pick seed (`CHAMFEREDGE`/`PRESSPULL`).
+    /// Solid-edit payloads (exact body + pick seed).
     ChamferSolidEdge {
         body: SelectionRef,
         seed: Point3,
@@ -993,8 +991,10 @@ pub enum CommandPayload {
     },
     /// `EXTRUDE`: the selected closed profile rows (the distance is the channel).
     ExtrudeProfile(Vec<SelectionRef>),
-    /// `FOLLOWME`: the selected profile and path rows.
+    /// `FOLLOWME`: the profile and path rows.
     FollowMeProfile(Vec<SelectionRef>),
+    /// `PAINT`: the material name to apply to the current selection.
+    PaintMaterial(String),
     /// 3D primitive option construction; see [`SolidPrimitiveCommand`].
     Solid(SolidPrimitiveCommand),
 }

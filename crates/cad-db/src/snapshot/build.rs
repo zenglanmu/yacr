@@ -166,6 +166,15 @@ impl DrawingDatabase {
         if !self.named_views.is_empty() {
             tables.set(TableKind::Views, views::encode_views(self));
         }
+        // Materials are document content and get the same "no rows, no table"
+        // rule: a document nobody painted stays at the minor its other features
+        // imply.
+        if !self.materials.is_empty() {
+            tables.set(
+                TableKind::Materials,
+                super::material::encode_materials(self)?,
+            );
+        }
         Ok(DocumentSnapshot {
             header,
             revision,
@@ -229,6 +238,7 @@ impl DrawingDatabase {
         // checked by the builder's `finish()` gate, where every entity exists.
         let group_rows = groups::decode_groups(&snapshot.tables)?;
         let named_views = views::decode_views(&snapshot.tables)?;
+        let materials = super::material::decode_materials(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
                 builder.set_parameters(parameters),
@@ -263,6 +273,12 @@ impl DrawingDatabase {
             checked(
                 builder.set_named_views(named_views),
                 table_entry(TableKind::Views),
+            )?;
+        }
+        if !materials.is_empty() || !materials.assignments().is_empty() {
+            checked(
+                builder.set_materials(materials),
+                table_entry(TableKind::Materials),
             )?;
         }
 

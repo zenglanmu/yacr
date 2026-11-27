@@ -1,4 +1,4 @@
-//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (311 AutoCAD 2026
+//! The Wave 17-24 + Wave 27 + Wave 28 named-refusal registry (310 AutoCAD 2026
 //! names: 197 existing + 91 Wave 27 + 39 Wave 28 − 4 graduated to real
 //! commands and ADR-0056 graduated the seven action-recorder names to the real
 //! recorder: `REFEDIT`, `-REFEDIT`, `REFSET` and `REFCLOSE` are now the bounded
@@ -31,7 +31,8 @@ macro_rules! refusal_names {
     ($($variant:ident => $name:literal => $reason:literal),+ $(,)?) => {
         /// One named-refusal command (197 existing + 91 Wave 27 + 39 Wave 28 − 4
         /// in-place refedit names − 3 Parameter Manager names − `XCLIP` −
-        /// `XEDGES` − the seven ADR-0056 action-recorder names = 311).
+        /// `XEDGES` − the seven ADR-0056 action-recorder names − `MATERIALS`
+        /// (now a real report) = 310).
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum RefusalId {
             $($variant),+
@@ -229,7 +230,6 @@ refusal_names! {
     Materialassign => "MATERIALASSIGN" => "materialassign.unsupported: this build has no material/texture model",
     Materialattach => "MATERIALATTACH" => "materialattach.unsupported: this build has no material/texture model",
     Materialmap => "MATERIALMAP" => "materialmap.unsupported: this build has no material/texture model",
-    Materials => "MATERIALS" => "materials.unsupported: this build has no material/texture model",
     Materialsclose => "MATERIALSCLOSE" => "materialsclose.unsupported: this build has no material/texture model",
     Migratematerials => "MIGRATEMATERIALS" => "migratematerials.unsupported: this build has no material/texture model",
     Mkltype => "MKLTYPE" => "mkltype.unsupported: this build has no .lin definition-file writer",

@@ -100,7 +100,7 @@ function validTrayPanel(value: unknown): value is TrayPanel {
   if (!nonEmpty(value['id']) || !nonEmpty(value['titleKey'])) return false;
   const kind = value['kind'];
   if (typeof kind !== 'string') return false;
-  const kinds = ['entityInfo', 'components', 'styles', 'tags', 'scenes', 'instructor', 'bimQuery', 'mechanicalTree', 'pending'];
+  const kinds = ['entityInfo', 'components', 'styles', 'tags', 'scenes', 'instructor', 'bimQuery', 'mechanicalTree', 'materials', 'pending'];
   if (!kinds.includes(kind)) return false;
   if (value['title'] !== undefined && !nonEmpty(value['title'])) return false;
   if (value['pendingText'] !== undefined && !nonEmpty(value['pendingText'])) return false;

@@ -351,41 +351,27 @@ impl DrawingUndoRecord {
 /// One retained history step: the drawing record plus the batches committed
 /// with it.
 ///
-/// Every other named table is a field of [`DrawingUndoRecord`]. The linetype
-/// table is the one symbol table with a **rename but no create/delete API**, so
-/// exactly one command writes it; carrying its row here keeps the record's
-/// exhaustive batch list (which every command's record literal names) unchanged.
-/// If a second linetype write ever lands, promote this to a record field.
+/// Table batches that are not [`DrawingUndoRecord`] fields live here: linetype
+/// (one writer, rename-only), BIM element patches (a replace-only `bim` block),
+/// parameters/bindings, groups, named views and the material document. They are
+/// side lanes because every command's record literal would otherwise have to
+/// name them, while only one command writes each.
 ///
-/// A second side batch has since been added the same way: BIM element patches
-/// ([`Self::bim_patches`]) are a **replace-only** rewrite of a `bim` block that
-/// already exists, written by its own database path. It is still not a
-/// [`DrawingUndoRecord`] field, because every command's record literal would
-/// have to name it and no command besides the BIM property edit writes one.
-///
-/// The step is the unit undo and redo move: the record's entity/table rows and
-/// the linetype row are applied through the database's combined write path, the
-/// BIM patches through [`cad_db::DrawingDatabase::apply_bim_updates`], each as
-/// one revision. Parameter rows and binding rows are applied through
-/// [`cad_db::DrawingDatabase::apply_parametric_update`], also one revision.
-///
-/// A step carries at most one kind of write (see `validate`): a BIM step is
-/// exclusive, and a parametric step must carry an **empty** `record.patches` as
-/// well. ADR-0043 D8's "one command" intent is satisfied by carrying the derived
-/// geometry on [`cad_db::ParamBindingPatch`] (`before_geometry`/`after_geometry`),
-/// not by duplicating entity rows in the record — a mixed step would be silently
-/// dropped by the parametric replay branch, so it is refused instead.
+/// The step is the unit undo and redo move: the record's rows go through the
+/// database's combined write path, BIM through `apply_bim_updates`, parameters
+/// through `apply_parametric_update`, and each table lane through its own apply
+/// method — each as one revision. A step carries at most one kind of write (see
+/// `validate`); a parametric step must also carry an empty `record.patches`,
+/// because its geometry is derived/carried on the binding patch and a mixed
+/// step would be silently dropped by the replay branch.
 ///
 /// # Replay contract
 ///
-/// A step with param patches is replayed by calling
-/// [`cad_db::DrawingDatabase::apply_parametric_update`] with the direction's
-/// before/after sides: redo passes the stored `before`/`after`, undo passes the
-/// swapped pair (the `after` row as `before` and vice versa), and the matching
-/// `before_geometry`/`after_geometry` travels with each binding patch. The
-/// record's entity patches are **not** replayed on that branch (geometry is
-/// derived, or restored from the binding patch's geometry) — which is exactly
-/// why `validate` requires them to be empty.
+/// A parametric step is replayed by `apply_parametric_update` with the
+/// direction's before/after sides (redo stored, undo swapped); the binding
+/// patch's `before_geometry`/`after_geometry` travel with it. The record's
+/// entity patches are not replayed on that branch, which is why `validate`
+/// requires them empty.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawingHistoryStep {
     pub record: DrawingUndoRecord,
@@ -407,6 +393,9 @@ pub struct DrawingHistoryStep {
     pub group_patches: Vec<cad_db::GroupPatch>,
     /// Reversible named-view rows (`tables/views.json`).
     pub view_patches: Vec<cad_db::ViewPatch>,
+    /// Reversible document-material writes (`tables/materials.json`): the whole
+    /// material document before and after.
+    pub material_patches: Vec<cad_db::MaterialPatch>,
 }
 
 impl DrawingHistoryStep {
@@ -429,12 +418,14 @@ impl DrawingHistoryStep {
     fn validate(&self) -> CadResult<()> {
         let parametric = !self.param_patches.is_empty() || !self.param_binding_patches.is_empty();
         let view_step = !self.view_patches.is_empty();
+        let material_step = !self.material_patches.is_empty();
         if self.record.is_empty()
             && self.linetype_patches.is_empty()
             && self.bim_patches.is_empty()
             && self.group_patches.is_empty()
             && !parametric
             && !view_step
+            && !material_step
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo step needs at least one entity, block, layer, layout, style, \
@@ -443,6 +434,20 @@ impl DrawingHistoryStep {
             ));
         }
         self.record.validate_batches()?;
+        if material_step
+            && (!self.record.is_empty()
+                || !self.linetype_patches.is_empty()
+                || !self.bim_patches.is_empty()
+                || !self.group_patches.is_empty()
+                || !self.view_patches.is_empty()
+                || parametric)
+        {
+            return Err(CadError::InvalidInput(
+                "a material undo step cannot also carry entity, table, linetype, BIM, group, view \
+                 or parameter rows"
+                    .into(),
+            ));
+        }
         if !self.group_patches.is_empty()
             && (!self.record.is_empty()
                 || !self.linetype_patches.is_empty()
@@ -679,6 +684,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -696,6 +702,7 @@ impl History {
         self.record_drawing_step(
             record,
             linetype_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -721,6 +728,7 @@ impl History {
             record,
             Vec::new(),
             bim_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -753,6 +761,7 @@ impl History {
             param_binding_patches,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -769,6 +778,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             group_patches,
+            Vec::new(),
             Vec::new(),
         )
     }
@@ -787,6 +797,25 @@ impl History {
             Vec::new(),
             Vec::new(),
             view_patches,
+            Vec::new(),
+        )
+    }
+
+    /// Record a committed material write (`PAINT`).
+    pub fn record_drawing_with_materials(
+        &mut self,
+        record: DrawingUndoRecord,
+        material_patches: Vec<cad_db::MaterialPatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            material_patches,
         )
     }
 
@@ -804,6 +833,7 @@ impl History {
         param_binding_patches: Vec<cad_db::ParamBindingPatch>,
         group_patches: Vec<cad_db::GroupPatch>,
         view_patches: Vec<cad_db::ViewPatch>,
+        material_patches: Vec<cad_db::MaterialPatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
@@ -814,6 +844,7 @@ impl History {
             param_binding_patches,
             group_patches,
             view_patches,
+            material_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {

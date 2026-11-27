@@ -39,6 +39,7 @@ mod layout_edit;
 mod linetype_edit;
 mod linetype_scale;
 mod lock;
+mod material;
 mod named_delete;
 pub(crate) mod param;
 pub(crate) mod param_build;
@@ -53,6 +54,7 @@ mod views;
 mod test_support;
 
 pub use self::bim::BimPatch;
+pub(crate) use crate::snapshot::material::validate_materials;
 pub use access::{EntityDisplayState, VisibilityMembership, VisibilityStateMembership};
 pub use block_edit::{BlockPatch, BlockRow};
 pub use document_metadata::{DocumentMetadata, DocumentMetadataField};
@@ -65,6 +67,7 @@ pub use layer_inherit::LayerScope;
 pub use layer_patch::{LayerPatch, LayerRow};
 pub use layout_edit::{LayoutPatch, LayoutRow, ILLEGAL_LAYOUT_NAME_CHARS, MAX_LAYOUT_NAME_CHARS};
 pub use linetype_edit::LinetypePatch;
+pub use material::MaterialPatch;
 pub use param::{
     ParamBindingPatch, ParamDiagnostic, ParamPatch, ParametricOutcome, PARAM_MAX_CONFIGS,
     PARAM_MAX_CONFIG_BYTES, PARAM_MAX_TABLE_BYTES,
@@ -455,6 +458,9 @@ pub struct DrawingDatabase {
     /// Persisted named views (`tables/views.json`, minor 18). Empty for a
     /// document without saved views.
     pub(crate) named_views: cad_domain::NamedViewTable,
+    /// Document materials (`tables/materials.json`, minor 19). Empty for a
+    /// document nobody painted.
+    pub(crate) materials: cad_domain::material::MaterialDocument,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

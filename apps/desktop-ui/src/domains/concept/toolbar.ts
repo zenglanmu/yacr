@@ -42,7 +42,7 @@ const GETTING_STARTED = group('concept.getting_started', 'concept.toolbar.gettin
   { id: 'SCALE', labelKey: 'draw.kind.scale', icon: 'scale', command: 'SCALE' },
   { id: 'MIRROR', labelKey: 'draw.kind.mirror', icon: 'mirror', command: 'MIRROR' },
   { id: 'DIST', labelKey: 'measure.kind.distance', icon: 'distance', command: 'DIST' },
-  pending('MATERIALS', 'concept.tool.paint_bucket', 'palette'),
+  { id: 'MATERIALS', labelKey: 'concept.tool.paint_bucket', icon: 'palette', command: 'MATERIALS', hintKey: 'concept.tool.paint_bucket.hint' },
   { id: 'ORBIT', labelKey: 'view.orbit_label', icon: 'orbit', command: 'ORBIT' },
   { id: 'PAN', labelKey: 'toolbar.pan', icon: 'pan', command: 'PAN' },
   { id: 'FIT', labelKey: 'toolbar.zoom_extents', icon: 'fit', command: 'FIT' },

@@ -316,6 +316,7 @@ fn the_snapunit_grammar_is_the_documented_one_and_reuses_the_argument_machinery(
             // The 2026-11-07 view batch.
             "VIEW",
             "VIEWGO",
+            "PAINT",
             "VPOINT",
             "NEWVIEW",
             "CVPORT",

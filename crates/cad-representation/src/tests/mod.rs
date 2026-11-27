@@ -30,6 +30,7 @@ mod kernel_mesh;
 mod layer_zero_inheritance;
 mod linetype;
 mod mask;
+mod material_paint;
 mod polyline_width;
 mod table_appearance;
 mod xclip;

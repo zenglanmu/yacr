@@ -184,7 +184,6 @@ pub const REFUSAL_TABLE: &[(&str, CommandId)] = &[
     ("MATERIALASSIGN", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Materialassign))),
     ("MATERIALATTACH", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Materialattach))),
     ("MATERIALMAP", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Materialmap))),
-    ("MATERIALS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Materials))),
     ("MATERIALSCLOSE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Materialsclose))),
     ("MIGRATEMATERIALS", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Migratematerials))),
     ("MKLTYPE", CommandId::Extended(ExtendedCommandId::Refusal(RefusalId::Mkltype))),

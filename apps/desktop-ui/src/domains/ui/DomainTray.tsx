@@ -32,6 +32,7 @@ import { useDomainUi } from './use-ui-layout.ts';
 import { bodyKindKey, featureOperationKey, mechanicalStatusKey, readMechanicalTree } from '../mechanical/tree.ts';
 import type { MechanicalTreeAnswer } from '../mechanical/tree.ts';
 import type { TrayPanel } from './slots.ts';
+import { BUILTIN_MATERIALS, paintCommand } from '../concept/materials.ts';
 
 function EntityInfoBody() {
   const { t } = useI18n();
@@ -232,6 +233,50 @@ function MechanicalTreeBody() {
   );
 }
 
+/**
+ * The built-in material palette: one swatch per flat material.
+ *
+ * A click dispatches `PAINT <name>` through the ordinary command path, so the
+ * paint applies to the **current selection** (the command owns every refusal).
+ * Document materials are listed by the `MATERIALS` report this panel can open;
+ * the swatches are the built-in palette, not a copy of the document table.
+ */
+function MaterialsBody() {
+  const { t } = useI18n();
+  const shell = useShell();
+  const available = shell.canCommand('PAINT');
+  return (
+    <>
+      <p className="concept-panel__hint">{t('concept.materials.hint')}</p>
+      <ul className="concept-materials">
+        {BUILTIN_MATERIALS.map(material => (
+          <li key={material.name}>
+            <button
+              type="button"
+              className="concept-materials__swatch"
+              style={{ backgroundColor: material.color, opacity: 1 - (material.transparency ?? 0) }}
+              disabled={!available}
+              title={available ? t('concept.materials.paint', { name: material.name }) : t('concept.materials.no_document')}
+              aria-label={material.name}
+              onClick={() => shell.runCommand(paintCommand(material.name))}
+            >
+              <span>{material.name}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        className="concept-panel__action"
+        disabled={!shell.canCommand('MATERIALS')}
+        onClick={() => shell.runCommand('MATERIALS')}
+      >
+        {t('concept.materials.report')}
+      </button>
+    </>
+  );
+}
+
 function PendingBody({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
   return <p className="concept-panel__hint">{panel.pendingText ?? t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
@@ -246,6 +291,7 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'instructor': return <InstructorBody />;
     case 'bimQuery': return <BimQueryBody />;
     case 'mechanicalTree': return <MechanicalTreeBody />;
+    case 'materials': return <MaterialsBody />;
     case 'scenes':
     case 'pending':
     default: return <PendingBody panel={panel} />;

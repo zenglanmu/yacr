@@ -1,42 +1,31 @@
 //! `FOLLOWME`: sweep one closed planar profile along an open straight path.
 //!
-//! This is SketchUp's Follow Me: select a closed profile loop **and** an open
-//! path, run the tool, and one new mesh body appears. The profile is placed on
-//! the path's start perpendicular to the first segment; at every bend the
-//! profile is projected into the angle-bisecting plane, which is exactly the
-//! mitre a SketchUp user sees; the two ends are capped.
+//! SketchUp's Follow Me: select a closed profile loop **and** an open path, run
+//! the tool, and one new mesh body appears. The profile is placed at the path's
+//! start perpendicular to the first segment, projected into the angle-bisecting
+//! plane at every bend (the mitre a SketchUp user sees), and both ends capped.
 //!
 //! # Why a mesh, not an exact B-rep
 //!
-//! The result is stored as `AcDbSubDMesh` (a closed triangle mesh with per-face
-//! identity), not as an exact `AcDb3dSolid`. Two reasons, both measured:
-//!
-//! * the pinned kernel's `loft` cannot skin a **sheared** mitre section without
-//!   producing an invalid shell ("inside out" / pointer check) and a rigid
-//!   section pair pinches the joint (a 90° bend integrates to 6 instead of 8 for
-//!   a 1×1 section over two 4-long runs), so an exact mitred elbow is not
-//!   expressible through this seam at this pin;
-//! * SketchUp's own Follow Me result is a face soup, and a mesh with
-//!   `face_sources` keeps `PRESSPULL`/`MOVE` working on each wall and cap.
-//!
-//! The command therefore needs no kernel: it works on every carrier, including
-//! the `dom-canvas` ones. The mesh is watertight (every edge shared by two
-//! triangles), outward-oriented (the signed volume is positive) and reports the
-//! exact limits below.
+//! The result is an `AcDbSubDMesh` with per-face identity, not an exact
+//! `AcDb3dSolid`: the pinned kernel cannot skin a sheared mitre section (it
+//! returns an invalid shell) and a rigid section pair pinches a 90° bend to
+//! volume 6 instead of 8, so an exact mitred elbow is not expressible through
+//! this seam. SketchUp's own result is a face soup, and `face_sources` keeps
+//! `PRESSPULL`/`MOVE` working on each wall and cap. The command needs no kernel,
+//! so it works on every carrier; the mesh is watertight and outward-oriented.
 //!
 //! # Inputs
 //!
-//! * **Profile**: exactly one closed straight `LWPOLYLINE`, or a ring of `LINE`
-//!   rows. It must be planar, non-degenerate and non-self-intersecting. A
-//!   `CIRCLE`/`ARC`/bulged segment is refused by name (a projected circle is an
-//!   ellipse, which this seam cannot represent exactly).
-//! * **Path**: exactly one open straight `LWPOLYLINE`, or an open `LINE` chain.
-//!   At least two distinct points, no zero-length segment, and not closed.
+//! * **Profile**: one closed straight `LWPOLYLINE`, a `LINE` ring, or a `CIRCLE`
+//!   (sampled as a 48-gon). It must be planar, non-degenerate and
+//!   non-self-intersecting; arcs/bulged segments are refused.
+//! * **Path**: one open straight `LWPOLYLINE` or an open `LINE` chain, at least
+//!   two distinct points, no zero-length segment, not closed.
 //!
-//! Both rows stay exactly as they were: this command inserts, never mutates or
-//! deletes, and the whole insert is one transaction / one undo step.
+//! Both rows stay exactly as they were: one insert, one transaction, one undo.
 //!
-//! # Refusals (stable, never approximated)
+//! # Refusals
 //!
 //! `followme.requires_payload`, `followme.selection_required`,
 //! `followme.not_addressable`, `followme.not_model_space`,
@@ -282,11 +271,8 @@ impl Application {
     }
 }
 
-/// How many segments one CIRCLE profile is sampled into.
-///
-/// The mesh is faceted regardless (a wall is a quad), and a SketchUp circle is
-/// itself a polygon; 48 segments is finer than SketchUp's default 24 and keeps a
-/// swept tube's silhouette smooth.
+/// How many segments one CIRCLE profile is sampled into (a SketchUp circle is
+/// itself a polygon; 48 is finer than its default 24).
 const CIRCLE_SEGMENTS: usize = 48;
 
 /// One CIRCLE as a polygonal ring in its own plane, wound counter-clockwise about
@@ -367,7 +353,7 @@ fn order_chain(lines: &[(Point3, Point3)]) -> Option<Vec<Point3>> {
     Some(chain)
 }
 
-/// The closed triangle mesh of one sweep, outward-oriented and watertight.
+/// The closed, outward-oriented triangle mesh of one sweep.
 fn sweep_mesh(profile: &[Point3], path: &[Point3]) -> CadResult<Mesh> {
     // A self-crossing loop has a cancelling Newell normal, so the crossing check
     // runs first on the loop's dominant-axis projection.
@@ -653,10 +639,8 @@ fn plane_basis(normal: Point3) -> (Point3, Point3) {
     (u, v)
 }
 
-/// The minimal rotation taking unit vector `from` to unit vector `to`.
-///
-/// The antiparallel case has no unique axis: it turns a half turn about a stable
-/// perpendicular, which keeps the profile plane defined.
+/// The minimal rotation taking `from` to `to`; the antiparallel case turns a
+/// half turn about a stable perpendicular.
 fn align(from: Point3, to: Point3) -> [[f64; 3]; 3] {
     let axis = cross(from, to);
     let sine = length(axis);
@@ -755,7 +739,7 @@ impl MeshBuilder {
         }
     }
 
-    /// Triangulate one planar ring as a cap whose outward side is `outward`.
+    /// Triangulate one planar ring as a cap.
     fn cap(&mut self, ring: &[Point3], outward: Point3, source: &str) -> CadResult<()> {
         let (normal, origin) = profile_plane(ring)?;
         let (u, v) = plane_basis(normal);
@@ -882,7 +866,7 @@ fn point_in_triangle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool
     !(negative && positive)
 }
 
-/// The coordinate pair a loop is projected on: the two axes that span the most.
+/// The two axes a loop is projected on (the widest extent pair).
 fn flat_axis(profile: &[Point3]) -> (usize, usize) {
     let mut min = [f64::INFINITY; 3];
     let mut max = [f64::NEG_INFINITY; 3];
@@ -948,7 +932,7 @@ fn flipped(mut mesh: Mesh) -> Mesh {
     mesh
 }
 
-/// Facts a diagnostic can state without inspecting the mesh again.
+/// What a diagnostic states about the result.
 struct MeshSummary {
     triangles: usize,
 }

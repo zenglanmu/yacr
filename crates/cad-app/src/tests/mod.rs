@@ -291,6 +291,7 @@ mod layout_paper_scale;
 mod layout_vports;
 mod layout_wizard;
 mod locked_layers;
+mod materials;
 mod measure_extra;
 mod measure_massprop;
 mod model_space;

@@ -792,6 +792,8 @@ export const SELECTION_REQUIREMENTS: Readonly<Record<string, SelectionRequiremen
   // FOLLOWME needs one closed profile **and** one open path, so two rows is the
   // real minimum; the host names the role-specific refusals.
   FOLLOWME: Object.freeze({ count: 2, reasonKey: 'draw.kind.followme.hint' }),
+  // PAINT applies one material to the current selection.
+  PAINT: Object.freeze({ count: 1, reasonKey: 'draw.kind.paint.hint' }),
   // MEASUREGEOM itself takes no selection up front: its tool options capture
   // their own points and only RADIUS reads the selection, so pre-gating the
   // command would disable the tool entries with an unrelated sentence. The host

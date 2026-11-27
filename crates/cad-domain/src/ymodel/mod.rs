@@ -162,7 +162,12 @@ pub const FORMAT_WRITE: u32 = 2;
 /// mode, work plane and active space of every saved view. A document without a
 /// row keeps the lower tier; a reader below `18` refuses the table path instead
 /// of dropping the views.
-pub const FORMAT_MINOR: u32 = 18;
+///
+/// `19` adds document materials (`tables/materials.json`, SketchUp Paint
+/// Bucket): named flat materials plus one assignment per painted entity, inline
+/// in the row. A document nobody painted keeps the lower tier; a pre-19 reader
+/// refuses the table path instead of dropping the paint.
+pub const FORMAT_MINOR: u32 = 19;
 
 /// Stable failure markers.
 ///

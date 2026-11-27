@@ -27,6 +27,7 @@ pub(crate) mod configurations;
 pub(crate) mod elements;
 pub(crate) mod features;
 pub(crate) mod groups;
+pub(crate) mod material;
 pub(crate) mod parameters;
 pub(crate) mod relations;
 pub(crate) mod relations_in_context;
@@ -204,6 +205,9 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         // Persisted named views (AutoCAD `VIEW` table). Written only when the
         // document holds a row; minor-18 tier.
         TableKind::Views => "tables/views.json",
+        // Document materials (SketchUp Paint Bucket). Written only when the
+        // document holds a row; minor-19 tier.
+        TableKind::Materials => "tables/materials.json",
     }
 }
 
@@ -470,6 +474,17 @@ impl DocumentSnapshot {
     pub fn has_named_views(&self) -> bool {
         self.tables
             .get(TableKind::Views)
+            .is_some_and(|rows| !rows.is_empty())
+    }
+
+    /// Whether this document carries document materials (`tables/materials.json`,
+    /// minor 19).
+    ///
+    /// The writer emits the table only when the document holds a material, so a
+    /// present table is evidence of at least one row.
+    pub fn has_materials(&self) -> bool {
+        self.tables
+            .get(TableKind::Materials)
             .is_some_and(|rows| !rows.is_empty())
     }
 }

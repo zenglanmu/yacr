@@ -74,6 +74,7 @@ mod app_chamfer_edge;
 mod app_concept_shapes;
 mod app_extrude;
 mod app_follow_me;
+mod app_materials;
 mod app_press_pull;
 // The extended-command wrapper: dispatch, session toggles and reports.
 mod app_dispatch;

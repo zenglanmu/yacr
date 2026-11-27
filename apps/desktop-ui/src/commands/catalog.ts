@@ -1,6 +1,5 @@
-// The chrome's declarative command catalog: every command name the app exposes,
-// in AutoCAD-style listing order. A plain sibling module (not a barrel): the
-// functions that read it live in `commands.ts`.
+// The chrome's declarative command catalog, in AutoCAD-style listing order: a
+// plain sibling module (not a barrel) whose readers live in `commands.ts`.
 
 /** One entry of the chrome's display catalog. */
 export interface CommandCatalogEntry {
@@ -917,6 +916,8 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'POLYSOLID', labelKey: 'draw.kind.polysolid', icon: 'polyline', group: 'draw' },
   { id: 'EXTRUDE', labelKey: 'draw.kind.extrude', icon: 'pushPull', group: 'modify' },
   { id: 'FOLLOWME', labelKey: 'draw.kind.followme', icon: 'spline', group: 'modify' },
+  { id: 'PAINT', labelKey: 'draw.kind.paint', icon: 'palette', group: 'modify' },
+  { id: 'MATERIALS', labelKey: 'draw.kind.materials', icon: 'palette', group: 'modify' },
   { id: 'REVOLVE', labelKey: 'draw.kind.revolve', icon: 'dot', group: 'modify' },
   { id: 'SWEEP', labelKey: 'draw.kind.sweep', icon: 'dot', group: 'modify' },
   { id: 'LOFT', labelKey: 'draw.kind.loft', icon: 'dot', group: 'modify' },

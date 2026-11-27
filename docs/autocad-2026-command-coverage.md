@@ -1846,7 +1846,7 @@
 | 526 | `MATERIALASSIGN` | 部分实现 | Assigns the material defined in the CMATERIAL system variable to the objects you select. | 具名拒绝（`materialassign.unsupported: this build has no material/texture model`）。 |
 | 527 | `MATERIALATTACH` | 部分实现 | Associates materials with layers. | 具名拒绝（`materialattach.unsupported: this build has no material/texture model`）。 |
 | 528 | `MATERIALMAP` | 部分实现 | Adjusts how a texture is mapped to a face or an object. | 具名拒绝（`materialmap.unsupported: this build has no material/texture model`）。 |
-| 529 | `MATERIALS` | 部分实现 | Opens the Materials Browser. | 具名拒绝（`materials.unsupported: this build has no material/texture model`）。 |
+| 529 | `MATERIALS` | 部分实现 | Opens the Materials Browser. | 只读报告：文档材质（名称/颜色/涂刷数量）+ 内置调色板名称；涂刷用 `PAINT <名称>`（ADR-0062），没有浏览器面板/纹理/面级材质 |
 | 530 | `MATERIALSCLOSE` | 部分实现 | Closes the Materials Browser. | 具名拒绝（`materialsclose.unsupported: this build has no material/texture model`）。 |
 | 531 | `MEASURE` | 未实现（同名不同义） | Creates point objects or blocks at measured intervals along the length or perimeter of an object. | 本项目 MEASURE 是测量入口（默认 DIST），不是沿对象放置点/块；**不计入覆盖** |
 | 532 | `MEASUREGEOM` | 完整实现 | Measures the distance, radius, angle, area, and volume of selected objects, a sequence of points, or dynamically. | `MEASUREGEOM DISTANCE\|ANGLE\|AREA\|POLYLINE` 复用既有工具；`RADIUS` 报告单个 ARC/CIRCLE；`VOLUME` 走单一体精确 MASSPROP body 路径（多体/非实体按名拒绝）；裸名/未知选项按名拒绝；只读 |

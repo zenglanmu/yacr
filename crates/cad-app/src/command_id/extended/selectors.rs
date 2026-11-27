@@ -1,14 +1,11 @@
-//! The extended command selector and enumeration tables.
+//! The extended command selector and `ALL` tables.
 //!
-//! Split out of `command_id/extended.rs` for the 1000-line gate; the enum and
-//! its Work-mode declaration stay in the parent. This file owns the exhaustive
-//! selector spelling and the declaration-order `ALL` set.
+//! Split out of `command_id/extended.rs` for the gate: selector spelling + `ALL`.
 
 use super::ExtendedCommandId;
 
 impl ExtendedCommandId {
-    /// The stable uppercase selector (the name in `cad-ui-core`'s
-    /// `COMMAND_TABLE`).
+    /// The stable uppercase selector (the `COMMAND_TABLE` name).
     pub fn selector(self) -> &'static str {
         match self {
             Self::QText => "QTEXT",
@@ -344,6 +341,8 @@ impl ExtendedCommandId {
             Self::FollowMe => "FOLLOWME",
             Self::RectangRotated => "RECTANGROTATED",
             Self::Pie => "PIE",
+            Self::Paint => "PAINT",
+            Self::Materials => "MATERIALS",
             Self::Revolve => "REVOLVE",
             Self::Sweep => "SWEEP",
             Self::Loft => "LOFT",
@@ -764,6 +763,8 @@ impl ExtendedCommandId {
         Self::FollowMe,
         Self::RectangRotated,
         Self::Pie,
+        Self::Paint,
+        Self::Materials,
         Self::Revolve,
         Self::Sweep,
         Self::Loft,
@@ -846,8 +847,7 @@ impl ExtendedCommandId {
 }
 
 impl ExtendedCommandId {
-    /// Whether the command needs Work mode (session toggles and reports do not;
-    /// every command that writes the drawing declares itself here).
+    /// Whether the command needs Work mode.
     pub fn requires_work_mode(self) -> bool {
         matches!(
             self,
@@ -968,11 +968,11 @@ impl ExtendedCommandId {
                 | Self::PressPull
                 // EXTRUDE inserts one new exact body from the selected profile.
                 | Self::Extrude
-                // FOLLOWME inserts one closed mesh body from the selected
-                // profile and path; RECTANGROTATED/PIE insert one closed
-                // polyline (one transaction / one undo step each).
+                // FOLLOWME/RECTANGROTATED/PIE insert drawing rows.
                 | Self::FollowMe
                 | Self::RectangRotated | Self::Pie
+                // PAINT writes the table; MATERIALS is read-only.
+                | Self::Paint
                 // XEDGES inserts one LINE per stored display-edge segment (one
                 // transaction / one undo step), so it is a drawing write.
                 | Self::Xedges

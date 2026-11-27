@@ -491,6 +491,10 @@ impl Application {
             // three captured points (kernel-free).
             ExtendedCommandId::RectangRotated => self.rotated_rectangle(session, command)?,
             ExtendedCommandId::Pie => self.pie(session, command)?,
+            // SketchUp Paint Bucket: one material assigned to the selection (one
+            // table write / one undo step), plus the read-only materials report.
+            ExtendedCommandId::Paint => self.paint_selection(session, command)?,
+            ExtendedCommandId::Materials => self.list_materials(command)?,
             // `XEDGES` extracts the selected bodies' stored display edges as
             // LINE rows (one transaction / one undo step; the body stays).
             ExtendedCommandId::Xedges => self.extract_body_edges(session, command)?,

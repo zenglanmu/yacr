@@ -70,6 +70,7 @@ mod select_entities;
 mod select_filter;
 mod settings;
 // SHAPE/MINSERT/ADDSELECTED typed dispatch (grammar in `commands::shape_block`).
+mod paint_arguments;
 mod set_view;
 mod shape_block_arguments;
 mod shell_settings;
@@ -723,13 +724,12 @@ impl CadSession {
         )
     }
 
-    /// Dispatch one non-interactive command through the ordinary host funnel.
+    /// Dispatch one non-interactive command through the host funnel.
     fn dispatch_command(&self, id: CommandId) -> Result<(), String> {
         self.dispatch_payload(id, CommandPayload::None)
     }
 
-    /// Dispatch one command and its typed payload through the ordinary host
-    /// funnel, recording the real refusal for `cad_status.error`.
+    /// Dispatch one command and payload, recording the refusal for `cad_status`.
     fn dispatch_payload(&self, id: CommandId, payload: CommandPayload) -> Result<(), String> {
         match self.core.command(id, payload) {
             Ok(()) => {

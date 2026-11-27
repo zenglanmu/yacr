@@ -162,7 +162,7 @@ const WINDOW_PREFERENCES = panel('concept.window.preferences', 'concept.section.
 ]);
 
 const WINDOW_PANELS = panel('concept.window.panels', 'concept.section.panels', [
-  pending('MATERIALS', 'concept.tool.materials', 'palette'),
+  { id: 'MATERIALS', labelKey: 'concept.tool.materials', icon: 'palette', command: 'MATERIALS', hintKey: 'concept.tool.materials.hint' },
   pending('OUTLINER', 'concept.tool.outliner', 'layers'),
 ]);
 

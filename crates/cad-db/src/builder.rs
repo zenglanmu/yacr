@@ -30,16 +30,12 @@ fn next_construction_nonce() -> u64 {
 
 /// The only sanctioned way to construct a [`DrawingDatabase`].
 ///
-/// Validation is deferred to [`Self::finish`], which rejects dangling layer,
-/// block and layout references so a partially-built database never escapes.
+/// [`Self::finish`] rejects dangling layer/block/layout references.
 pub struct DrawingDatabaseBuilder {
-    /// Crate-visible so the BIM builder methods live in `crate::bim` (ADR-0042
-    /// new code stays in a new module; `builder.rs` only wires the field and the
-    /// `finish()` gate).
+    /// Crate-visible so `crate::bim` owns the BIM builder methods.
     pub(crate) database: DrawingDatabase,
     pub(crate) errors: Vec<String>,
-    /// Persisted counters a load path supplied, or `None` on the import path
-    /// (which has no counters yet and rebuilds them from row maxima).
+    /// Persisted counters a load path supplied (`None` on the import path).
     seeded_counters: Option<IdCounters>,
 }
 
@@ -68,6 +64,7 @@ impl DrawingDatabaseBuilder {
                 layer_attributes: BTreeMap::new(),
                 scales: BTreeMap::new(),
                 insertion_base: None,
+                materials: cad_domain::material::MaterialDocument::new(),
                 limits_min: None,
                 limits_max: None,
                 dim_styles: BTreeMap::new(),
@@ -906,6 +903,9 @@ impl DrawingDatabaseBuilder {
             self.errors.push(error.to_string());
         }
         if let Err(error) = crate::drawing::validate_groups(&self.database) {
+            self.errors.push(error.to_string());
+        }
+        if let Err(error) = crate::drawing::validate_materials(&self.database) {
             self.errors.push(error.to_string());
         }
         if !self.errors.is_empty() {

@@ -223,8 +223,8 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   **4/5/7**，minor 6 为只读档）；参数化 ADR-0043 P0–P3 再升到 **11**（P0 参数表 + 元素 `params` 块 →
   8；P1 `neg/pow/fn/if` + `tables/configurations.json` → 9；P2 `tables/features.json` → 10；
   P3 `tables/relations.json` → 11；ADR-0030 D7 host-owned `tables/vendor.json` → 12；
-  ADR-0053 应用域 `document.json` `application_domain` → 13；ADR-0055 块属性（14）、`Text.mirrored`（15）、ADR-0054 二维约束（16，取 mirrored text 之后的下一档）、GROUP 持久化（17）、VIEW 持久化（18）；写入按文档取
-  **4/5/7/8/9/10/11/12/13/14/15/16/17/18**，未产生的档位不抬高普通文档）。条目压缩自 ADR-0046 起是
+  ADR-0053 应用域 `document.json` `application_domain` → 13；ADR-0055 块属性（14）、`Text.mirrored`（15）、ADR-0054 二维约束（16，取 mirrored text 之后的下一档）、GROUP 持久化（17）、VIEW 持久化（18）、文档材质 `tables/materials.json`（19，ADR-0062）；写入按文档取
+  **4/5/7/8/9/10/11/12/13/14/15/16/17/18/19**，未产生的档位不抬高普通文档）。条目压缩自 ADR-0046 起是
   标准 zstd 帧（zip `Stored` + `structured-zstd =0.4.3`，level 6），`FORMAT_READ/WRITE = 2`；
   `read != 2` 的归档以 `unsupported_version` 拒绝，`sha256_c`/`len_c` 已写入并在解压前校验。`PARAM` 的 create/delete/
   rename/bind/unbind/config 与 `SETENTITYPROPERTY param.<name>` 是**命令层**实现（尚无 payload producer /

@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | document materials (`tables/materials.json`) | `19` | the paint table |
 //! | persisted named views (`tables/views.json`) | `18` | the `VIEW` table |
 //! | persisted entity groups (`tables/groups.json`) | `17` | the whole group table |
 //! | block attributes (ADR-0055) | `14` | `cad:AttributeDefinition`, `cad:Insert.attributes` |
@@ -94,12 +95,16 @@ pub(crate) const FORMAT_MINOR_GROUPS: u32 = 17;
 /// A document that persists named views (`tables/views.json`).
 pub(crate) const FORMAT_MINOR_NAMED_VIEWS: u32 = 18;
 
+/// A document that carries document materials (`tables/materials.json`).
+pub(crate) const FORMAT_MINOR_MATERIALS: u32 = 19;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order. `16` (constraints)
 // is reserved by another lane, so the top tiers are checked by explicit offsets.
 const _: () = assert!(FORMAT_MINOR_BLOCK_ATTRIBUTES + 1 == FORMAT_MINOR_TEXT_MIRROR);
 const _: () = assert!(FORMAT_MINOR_GROUPS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
 const _: () = assert!(FORMAT_MINOR_NAMED_VIEWS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 4);
+const _: () = assert!(FORMAT_MINOR_MATERIALS == FORMAT_MINOR_NAMED_VIEWS + 1);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -119,8 +124,14 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Named views are the newest tier and can coexist with any other feature, so
-    // they decide first: a minor-17 reader refuses the `tables/views.json` path
+    // Materials are the newest tier and can coexist with any other feature, so
+    // they decide first: a minor-18 reader refuses the `tables/materials.json`
+    // path (`unsupported_minor`) rather than dropping the paint.
+    if snapshot.has_materials() {
+        return FORMAT_MINOR_MATERIALS;
+    }
+    // Named views are the next tier and can coexist with any other feature, so
+    // they decide next: a minor-17 reader refuses the `tables/views.json` path
     // (`unsupported_minor`) rather than dropping the user's saved views.
     if snapshot.has_named_views() {
         return FORMAT_MINOR_NAMED_VIEWS;
@@ -203,7 +214,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_NAMED_VIEWS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_MATERIALS, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_MATERIALS, FORMAT_MINOR_NAMED_VIEWS + 1);
         assert_eq!(FORMAT_MINOR_NAMED_VIEWS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 4);
         assert_eq!(FORMAT_MINOR_GROUPS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
         assert_eq!(FORMAT_MINOR_TEXT_MIRROR, FORMAT_MINOR_BLOCK_ATTRIBUTES + 1);

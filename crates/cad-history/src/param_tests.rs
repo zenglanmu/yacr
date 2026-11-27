@@ -113,6 +113,7 @@ fn step() -> DrawingHistoryStep {
         param_binding_patches: Vec::new(),
         group_patches: Vec::new(),
         view_patches: Vec::new(),
+        material_patches: Vec::new(),
     }
 }
 

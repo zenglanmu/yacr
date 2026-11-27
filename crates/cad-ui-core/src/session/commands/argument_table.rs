@@ -165,6 +165,8 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     TABLEEXPORT_SELECTOR,
     VIEW_SELECTOR,
     VIEWGO_SELECTOR,
+    // `PAINT <name>`: the SketchUp paint bucket over the current selection.
+    PAINT_SELECTOR,
     VPOINT_SELECTOR,
     // `NEWVIEW <name>` / `NEWVIEW WINDOW <name> <x1> <y1> <x2> <y2>`: the typed
     // form of the extended command; a bare NEWVIEW keeps its report.

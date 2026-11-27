@@ -5,7 +5,7 @@ mod selectors;
 
 pub use refusal_names::RefusalId;
 
-/// One payload-free command in the extended wrapper batches.
+/// One extended command (payload-free or host-built).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtendedCommandId {
     /// `QTEXT`: toggle the session quick-text display mode.
@@ -783,20 +783,13 @@ pub enum ExtendedCommandId {
     /// `WEDGE`: creates one exact `Body3d` from two base corners and a height
     /// point, or from the same `Center`/`Cube`/`Length` set as `BOX` (Work-only).
     Wedge,
-    /// `PYRAMID`: creates one exact `Body3d` from two base corners and an apex,
-    /// or from the typed regular n-gon base
-    /// (`PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> <cx> <cy> <radius> <height>
-    /// [<top_radius>]`, Work-only). The n-gon ring reuses the `POLYGON`
-    /// construction math and the seam's `PyramidNgon` spec; a non-zero
-    /// `top_radius` smaller than the base radius builds the truncated body through
-    /// the same authored planar B-rep (`PyramidNgonFrustum`). AutoCAD's `Edge`
-    /// (interactive pick) and base-from-existing-polygon prompts are interactive
-    /// (ADR global scope).
+    /// `PYRAMID`: an exact `Body3d` from two base corners and an apex, or from the
+    /// typed n-gon base (`PYRAMID [INSCRIBED|CIRCUMSCRIBED] <sides> …`), reusing
+    /// the `POLYGON` ring; `Edge` and base-from-polygon prompts stay interactive.
     Pyramid,
     /// `POLYSOLID`: 3D solid primitives are not implemented.
     PolySolid,
-    /// `EXTRUDE`: extrude one closed planar profile into a new exact solid
-    /// (Work-only; the host builds the profile payload from the selection).
+    /// `EXTRUDE`: one closed planar profile into a new exact solid (Work-only).
     Extrude,
     /// `FOLLOWME`: sweep a closed profile along an open path (Work-only).
     FollowMe,
@@ -804,6 +797,10 @@ pub enum ExtendedCommandId {
     RectangRotated,
     /// `PIE`: a centre plus a sampled arc as one closed polyline (Work-only).
     Pie,
+    /// `PAINT`: one material on the selection (Work-only, one table write).
+    Paint,
+    /// `MATERIALS`: the read-only material report (the command-level browser).
+    Materials,
     /// `REVOLVE`: 3D revolution is not implemented.
     Revolve,
     /// `SWEEP`: 3D sweep is not implemented.

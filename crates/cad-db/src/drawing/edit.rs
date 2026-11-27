@@ -343,6 +343,7 @@ impl DrawingDatabase {
         // (`ensure_delete_allowed`), so there is nothing to prune in those
         // tables.
         self.param_bindings.remove(&id);
+        self.materials.clear(id);
         self.param_diagnostics
             .retain(|diagnostic| diagnostic.entity != Some(id));
         self.detach_block_membership(id);

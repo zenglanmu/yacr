@@ -33,6 +33,7 @@ mod layout_status;
 mod mleader_arguments;
 mod modify_arguments;
 mod orbit;
+mod paint_arguments;
 mod paper_arguments;
 mod payload_options;
 mod payload_reachability;

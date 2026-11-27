@@ -907,6 +907,7 @@ fn a_step_with_bim_patches_and_other_batches_is_refused() {
         param_binding_patches: Vec::new(),
         group_patches: Vec::new(),
         view_patches: Vec::new(),
+        material_patches: Vec::new(),
     };
     assert!(matches!(mixed.validate(), Err(CadError::InvalidInput(_))));
 
@@ -963,6 +964,7 @@ fn a_large_bim_patch_counts_towards_the_history_budget() {
         param_binding_patches: Vec::new(),
         group_patches: Vec::new(),
         view_patches: Vec::new(),
+        material_patches: Vec::new(),
     };
     // Both sides are retained, so both are counted.
     assert!(

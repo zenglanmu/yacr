@@ -11,6 +11,7 @@ mod dimension;
 mod dimension_synthesis;
 pub mod hatch;
 pub mod hatch_entity;
+pub mod material;
 mod multileader;
 // The MULTILEADER text angle type (`174`/`175`) and the creation override bits,
 // split out for the code-size gate.

@@ -167,6 +167,9 @@ fn every_extended_variant_has_one_table_row_and_normalizes() {
                 | ExtendedCommandId::FollowMe
                 | ExtendedCommandId::RectangRotated
                 | ExtendedCommandId::Pie
+                // PAINT writes the material table (one transaction / one undo);
+                // MATERIALS is a read-only report and stays Viewer-legal.
+                | ExtendedCommandId::Paint
         );
         assert_eq!(
             variant.requires_work_mode(),

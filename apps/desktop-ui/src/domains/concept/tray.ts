@@ -15,7 +15,7 @@ const pending = (id: string, titleKey: string): TrayPanel => ({
 
 export const CONCEPT_TRAY: readonly TrayPanel[] = Object.freeze<TrayPanel[]>([
   { id: 'concept.entity_info', titleKey: 'concept.panel.entity_info', kind: 'entityInfo' },
-  pending('concept.materials', 'concept.panel.materials'),
+  { id: 'concept.materials', titleKey: 'concept.panel.materials', kind: 'materials' },
   { id: 'concept.components', titleKey: 'concept.panel.components', kind: 'components' },
   { id: 'concept.styles', titleKey: 'concept.panel.styles', kind: 'styles' },
   { id: 'concept.tags', titleKey: 'concept.panel.tags', kind: 'tags' },
