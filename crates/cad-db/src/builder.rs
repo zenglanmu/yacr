@@ -1,10 +1,9 @@
 //! The sanctioned construction path for a [`DrawingDatabase`].
+use cad_domain::ymodel::IdCounters;
+use cad_domain::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-use cad_domain::ymodel::IdCounters;
-use cad_domain::*;
 
 use crate::dim_style::DimStyle;
 use crate::drawing::DrawingDatabase;
@@ -66,6 +65,7 @@ impl DrawingDatabaseBuilder {
                 materials: cad_domain::material::MaterialDocument::new(),
                 scenes: cad_domain::scene::SceneTable::new(),
                 display: cad_domain::display::DisplaySettings::default(),
+                guides: cad_domain::guide::GuideTable::new(),
                 limits_min: None,
                 limits_max: None,
                 dim_styles: BTreeMap::new(),

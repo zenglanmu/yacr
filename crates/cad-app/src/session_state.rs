@@ -223,6 +223,11 @@ pub struct SessionState {
     last_measurement: Option<MeasurementRecord>,
     /// Last measurement choice retained even while no measurement is active.
     selected_measurement_kind: MeasurementToolKind,
+    /// The guide a guide-mode measurement writes on completion, or `None`.
+    ///
+    /// Cleared by every tool lifecycle transition; consumed by the measurement
+    /// commit before `complete_tool` clears the capture.
+    guide_mode: Option<crate::GuideMode>,
     /// In-process entity clipboard (Phase 8).
     ///
     /// Holds clones of the selected entities (with their display state); it is
@@ -327,6 +332,7 @@ impl SessionState {
             hover_dwell_ms: 20,
             last_measurement: None,
             selected_measurement_kind: MeasurementToolKind::Distance,
+            guide_mode: None,
             clipboard: Vec::new(),
             clipboard_base: None,
             last_erase: None,
@@ -576,6 +582,7 @@ impl SessionState {
         if !matches!(self.tool, ToolState::Idle) {
             self.tool = ToolState::Idle;
             self.pending_tool_text = None;
+            self.guide_mode = None;
             self.bump_tool_generation();
         }
         // A pointer release ends the continuous pan/orbit run; the next one
@@ -628,10 +635,40 @@ impl SessionState {
     /// Start or restart the selected measurement algorithm.
     pub fn begin_measurement(&mut self, kind: MeasurementToolKind) -> CadResult<()> {
         self.authorize(CommandId::Measure)?;
+        self.guide_mode = None;
         self.selected_measurement_kind = kind;
         self.tool = ToolState::Measuring(MeasurementTool::new(kind));
         self.bump_tool_generation();
         Ok(())
+    }
+
+    /// Start a measurement that also writes one guide on completion.
+    ///
+    /// Work-only: a guide is a document table write, so Viewer refuses before
+    /// the capture starts. The ordinary `DIST`/`PROTRACTOR` measurement stays
+    /// read-only and legal in Viewer.
+    pub fn begin_guide_measurement(&mut self, mode: crate::GuideMode) -> CadResult<()> {
+        if self.mode == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
+        self.begin_measurement(mode.measurement_kind())?;
+        self.guide_mode = Some(mode);
+        Ok(())
+    }
+
+    /// Set the guide mode after a typed guide capture started.
+    pub fn set_guide_mode(&mut self, mode: crate::GuideMode) {
+        self.guide_mode = Some(mode);
+    }
+
+    /// The pending guide mode, if the active capture came from a guide mode.
+    pub fn guide_mode(&self) -> Option<crate::GuideMode> {
+        self.guide_mode
+    }
+
+    /// Consume the pending guide mode (the commit path writes the guide).
+    pub fn take_guide_mode(&mut self) -> Option<crate::GuideMode> {
+        self.guide_mode.take()
     }
 
     /// Change the retained measurement choice, restarting capture if active.
@@ -918,6 +955,7 @@ impl SessionState {
         if !matches!(self.tool, ToolState::Idle) {
             self.tool = ToolState::Idle;
             self.pending_tool_text = None;
+            self.guide_mode = None;
             self.bump_tool_generation();
         }
     }

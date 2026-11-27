@@ -77,6 +77,7 @@ mod app_display;
 mod app_extrude;
 mod app_flip;
 mod app_follow_me;
+mod app_guide;
 mod app_materials;
 mod app_panels;
 mod app_press_pull;
@@ -219,7 +220,7 @@ pub use input::{
 };
 pub use layer_history::{LayerOverrideHistory, LayerPreviousState, LAYER_OVERRIDE_HISTORY_CAP};
 pub use layer_states::{LayerStates, NamedLayerState, LAYER_STATE_CAP};
-pub use measure_tool::{MeasurementPreview, MeasurementTool, MeasurementToolKind};
+pub use measure_tool::{GuideMode, MeasurementPreview, MeasurementTool, MeasurementToolKind};
 pub use ortho::{ortho_constrain, ortho_constrain_point};
 pub use persistence::PersistenceState;
 pub use picking::{
@@ -531,27 +532,27 @@ pub use command_payload::{
     DashLayerOps, DeclaredUnits, DimEditCommand, DimJogLineCommand, DimOverrideCommand,
     DimStyleCommand, DimTextEditCommand, DimensionBatchPayload, DimensionChainCommand,
     DisplayCommand, DwgPropsCommand, EntityPropertyWrite, FilterExpression, FilterLogic,
-    FilterRequest, FlipAxis, GripStretchCommand, GroupCommand, GroupEditCommand, HatchDrawOrder,
-    HatchEditOption, HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand, ImageClipCommand,
-    JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand, LinetypeCommand,
-    LookAroundCommand, MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode, MLeaderAttachment,
-    MLeaderContentSpec, MLeaderEditAction, MLeaderEditCommand, MLeaderLineOverrideField,
-    MatchPropSettings, MeasureGeomOption, MirrorOptions, MlEditCommand, MlEditMode, MocoroCommand,
-    NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode, OffsetOptions, OrdinateAxis,
-    OrdinateDimensionCommand, ParamOp, PatternFileText, PeditEditCommand, PeditEditOption,
-    PeditOption, PeditVertexAction, PeditVertexCommand, PlanCircle, PlanLength, PurgeTarget,
-    QDimCommand, QDimMode, QDimSnap, QSelectRequest, RadialDimensionCommand, RefCloseOption,
-    RefSetOption, RenameCommand, RevCloudStyle, RevisionCloudMode, RevisionCloudOptions,
-    RotatedLinearDimensionCommand, SceneCommand, SelectSimilarSettings, SelectionApply,
-    SelectionOperator, SelectionPredicate, SelectionProperty, SelectionScope, SelectionToolPayload,
-    SetByLayerSettings, ShapeCommand, SolidPrimitiveCommand, StretchPolygonCommand,
-    StyleTableCommand, StyleTableKind, StyleTableOp, SysVarAssignment, SysVarDialogCommand,
-    SysVarMonitorAction, TCircleCommand, TCircleSizeMode, TCountCommand, TableCreateCommand,
-    TableEditCommand, Text3dInput, TextAlignAxis, TextAlignCommand, TextAlignEdge,
-    TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape, TextCaseMode, TextFitCommand,
-    TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand, ToleranceCommand, TwoLineCommand,
-    Txt2MTextOptions, UnitsCommand, UtilityPayload, VPointInput, ViewCommand, WalkCommand,
-    WipeoutPayload, XClipCommand, XPlodeSettings,
+    FilterRequest, FlipAxis, GripStretchCommand, GroupCommand, GroupEditCommand, GuideCommand,
+    HatchDrawOrder, HatchEditOption, HatchOriginCommand, ImageAdjustCommand, ImageAttachCommand,
+    ImageClipCommand, JoinMode, JoinOptions, JustifyTextCommand, LayerStateCommand, LeaderCommand,
+    LinetypeCommand, LookAroundCommand, MInsertCommand, MLeaderAlignCommand, MLeaderAlignMode,
+    MLeaderAttachment, MLeaderContentSpec, MLeaderEditAction, MLeaderEditCommand,
+    MLeaderLineOverrideField, MatchPropSettings, MeasureGeomOption, MirrorOptions, MlEditCommand,
+    MlEditMode, MocoroCommand, NamedObjectKind, OffsetGapType, OffsetLayer, OffsetMode,
+    OffsetOptions, OrdinateAxis, OrdinateDimensionCommand, ParamOp, PatternFileText,
+    PeditEditCommand, PeditEditOption, PeditOption, PeditVertexAction, PeditVertexCommand,
+    PlanCircle, PlanLength, PurgeTarget, QDimCommand, QDimMode, QDimSnap, QSelectRequest,
+    RadialDimensionCommand, RefCloseOption, RefSetOption, RenameCommand, RevCloudStyle,
+    RevisionCloudMode, RevisionCloudOptions, RotatedLinearDimensionCommand, SceneCommand,
+    SelectSimilarSettings, SelectionApply, SelectionOperator, SelectionPredicate,
+    SelectionProperty, SelectionScope, SelectionToolPayload, SetByLayerSettings, ShapeCommand,
+    SolidPrimitiveCommand, StretchPolygonCommand, StyleTableCommand, StyleTableKind, StyleTableOp,
+    SysVarAssignment, SysVarDialogCommand, SysVarMonitorAction, TCircleCommand, TCircleSizeMode,
+    TCountCommand, TableCreateCommand, TableEditCommand, Text3dInput, TextAlignAxis,
+    TextAlignCommand, TextAlignEdge, TextAlignSpacing, TextAlignSpacingCommand, TextBoundaryShape,
+    TextCaseMode, TextFitCommand, TextMaskKind, TextMaskOptions, TextOrder, TextScaleCommand,
+    ToleranceCommand, TwoLineCommand, Txt2MTextOptions, UnitsCommand, UtilityPayload, VPointInput,
+    ViewCommand, WalkCommand, WipeoutPayload, XClipCommand, XPlodeSettings,
 };
 
 pub use app_audit::AuditRequest;

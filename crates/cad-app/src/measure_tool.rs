@@ -179,6 +179,25 @@ impl MeasurementToolKind {
     }
 }
 
+/// The guide a guide-mode measurement writes when it completes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuideMode {
+    /// `DIST GUIDE`: an infinite line through the two captured points.
+    DistanceLine,
+    /// `PROTRACTOR GUIDE`: an infinite line from the vertex along the second ray.
+    ProtractorLine,
+}
+
+impl GuideMode {
+    /// The measurement kind this mode starts.
+    pub fn measurement_kind(self) -> MeasurementToolKind {
+        match self {
+            Self::DistanceLine => MeasurementToolKind::Distance,
+            Self::ProtractorLine => MeasurementToolKind::Protractor,
+        }
+    }
+}
+
 /// Snapshot of an in-progress measurement for the UI preview layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MeasurementPreview {

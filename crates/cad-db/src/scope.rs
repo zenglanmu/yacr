@@ -204,6 +204,11 @@ pub enum TableKind {
     ///
     /// Contributes the minor-22 tier; a write is one revision and one undo step.
     Display,
+    /// Persisted construction guides (`tables/guides.json`): non-entity
+    /// infinite lines created by `DIST GUIDE` / `PROTRACTOR GUIDE`.
+    ///
+    /// Contributes the minor-26 tier; a write is one revision and one undo step.
+    Guides,
 }
 
 /// The set of persisted rows one commit made stale.

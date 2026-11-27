@@ -1,9 +1,10 @@
-//! The `PROTRACTOR` selector and its `GUIDE` refusal.
+//! The `PROTRACTOR` selector and its `GUIDE` mode.
 //!
 //! The bare selector is an interaction-only measurement selector: it starts
 //! `BeginMeasurement(Protractor)` (vertex, then one point on each ray) and never
-//! carries a `CommandId`. `PROTRACTOR GUIDE` is admitted only to be refused by
-//! name, because this build has no guide model. Contract level: no GUI, no GPU.
+//! carries a `CommandId`. `PROTRACTOR GUIDE` starts the same capture with guide
+//! mode, so completion writes a guide along the second ray. Contract level: no
+//! GUI, no GPU.
 
 use super::super::*;
 use super::test_support::*;
@@ -38,21 +39,21 @@ fn the_protractor_selector_starts_the_vertex_first_angle_measurement() {
 }
 
 #[test]
-fn protractor_guide_is_admitted_and_refused_by_name() {
+fn protractor_guide_starts_the_guide_capture() {
     let session = fresh_session();
     assert_eq!(
         typed_command_argument("PROTRACTOR GUIDE"),
         Some(("PROTRACTOR", "GUIDE"))
     );
-    let error = session
+    session
         .command("PROTRACTOR GUIDE")
-        .expect_err("guide-line creation is not modeled");
-    assert!(
-        error.contains("protractor.guide_not_implemented"),
-        "the refusal is named: {error}"
-    );
-    // The refusal started no capture and wrote nothing.
-    assert!(session.snapshot(None, None, 0).tool.is_none());
+        .expect("guide mode is admitted");
+    let tool = session
+        .snapshot(None, None, 0)
+        .tool
+        .expect("the protractor capture starts");
+    assert_eq!(tool.key, "measure.protractor");
+    assert_eq!(tool.points, 0);
 }
 
 #[test]

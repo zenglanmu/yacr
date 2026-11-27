@@ -9,7 +9,6 @@ macro_rules! command_selector_contract {
             const ALL_COMMAND_IDS: &[CommandId] = &[$(CommandId::$variant),+];
             const EXPECTED_LEN: usize =
                 EXPECTED_COMMAND_COUNT + ExtendedCommandId::ALL.len() + RefusalId::ALL.len();
-
             fn canonical_selector(id: CommandId) -> &'static str {
                 match id {
                     $(CommandId::$variant => $selector,)+
@@ -141,6 +140,7 @@ command_selector_contract! {
     ScaleEntities => "SCALE",
     MirrorEntities => "MIRROR",
     Flip => "FLIP",
+    Guide => "GUIDE",
     CopyToClipboard => "COPYCLIP",
     CutToClipboard => "CUTCLIP",
     PasteFromClipboard => "PASTECLIP",
@@ -279,7 +279,7 @@ fn command_normalization_covers_every_variant() {
     // without a selector here. Each variant must then appear in
     // `COMMAND_TABLE` exactly once (no missing row, no duplicate mapping).
     assert_eq!(
-        EXPECTED_COMMAND_COUNT, 261,
+        EXPECTED_COMMAND_COUNT, 262,
         "the cad_app CommandId set changed; update COMMAND_TABLE and this contract"
     );
     assert_eq!(ALL_COMMAND_IDS.len(), EXPECTED_COMMAND_COUNT);

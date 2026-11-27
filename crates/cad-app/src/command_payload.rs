@@ -1,14 +1,12 @@
 //! The typed input payloads of the command funnel; one [`crate::CommandId`] each.
-use cad_domain::{
-    LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
-    TextAlignV,
-};
-
 use crate::{
     AppMode, BackendChoice, MeasurementToolKind, SelectionMode, StandardView, ViewPlacement,
     WipeoutFrames,
 };
-
+use cad_domain::{
+    LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
+    TextAlignV,
+};
 mod text_batch;
 pub use text_batch::*;
 mod clip;
@@ -841,6 +839,8 @@ pub enum CommandPayload {
     /// `FLIP <axis>`: mirror the selection **in place** about the plane through
     /// its bounds centre perpendicular to the chosen axis.
     Flip(FlipAxis),
+    /// `GUIDE [LIST|CLEAR]`: construction-guide management.
+    Guide(GuideCommand),
     Walk(WalkCommand),
     LookAround(LookAroundCommand),
     SoftenEdges(f64),

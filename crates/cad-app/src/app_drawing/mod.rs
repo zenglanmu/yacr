@@ -110,6 +110,7 @@ mod hatch_utilities;
 // The per-space draw-order scope model (`HATCHTOBACK`, reused by `CDORDER`).
 pub(crate) use hatch_utilities::DrawOrderScope;
 mod display_replay;
+mod guide_replay;
 mod helpers;
 mod image_edit;
 mod material_replay;

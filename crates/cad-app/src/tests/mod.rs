@@ -214,6 +214,7 @@ mod find_include;
 mod find_match_case;
 mod find_mtext;
 mod flip;
+mod guides;
 // Run-time lookup for the third-party SHX faces (never `include_bytes!`).
 mod font_fixture;
 // The 2026-11-09 Wave 2 extended-command contracts.

@@ -27,7 +27,9 @@ mod command_log;
 mod command_overrides;
 mod commands;
 mod diagnostics;
+mod dist_arguments;
 mod flip_arguments;
+mod guide_arguments;
 mod param;
 mod walk_arguments;
 // The Options > Files directory-picker vocabulary (name + carrier refusals).
@@ -251,7 +253,6 @@ pub use self::ymodel_resources::{
 use cad_app::interaction::{InteractionRequest, SelectionMode};
 #[allow(unused_imports)]
 use cad_app::CommandId;
-
 /// Completions drained per poll. The queue's absolute capacity is 256, so this
 /// always frees every outstanding completion (no quota leak).
 const COMPLETION_DRAIN: usize = 256;
@@ -989,7 +990,6 @@ impl CadSession {
         self.core.render.set_images(None);
         self.resource_guard.set(Some(generation));
     }
-
     /// The host's current canvas metrics revision, for tagging canvas-local
     /// interaction coordinates.
     fn metrics_revision(&self) -> u64 {

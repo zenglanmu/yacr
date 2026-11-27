@@ -91,6 +91,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `SCALE` | 编辑 | 是 | `SC` |
 | `MIRROR` | 编辑（保留原件） | 是 | `MI` |
 | `FLIP` | 编辑（SketchUp Flip Along：`FLIP X\|Y\|Z` / `RED\|GREEN\|BLUE` 绕选择包围盒中心垂直于该轴的平面**原地**反射；源删除 + 镜像副本，一条事务/一步撤销；副本为新 entity id） | 是 | — |
+| `GUIDE` | 构造参考线管理（裸/`LIST` 只读报告；`CLEAR` 一次 `tables/guides.json` 写入/一步撤销，Viewer 拒绝） | 是 | — |
 | `OFFSET` | 编辑（LINE / CIRCLE / **ARC** / **LWPOLYLINE**：直线段与**含弧段**；`Ellipse` 按名拒绝） | 是 | `O` |
 | `MATCHPROP` | 编辑（**选择式**特性匹配：首个选中实体为源，其余为目标；转移 `layer`/`color`/`linetype`/`lineweight`/`transparency` 五项） | 是 | `MA` |
 | `JOIN` | 编辑（合并选择为**一个**实体：共线 `LINE` 或同心相续 `ARC`；一条事务、一步撤销，仅这两种几何） | 是 | — |
@@ -113,7 +114,7 @@ canonical 选择子（`work-only` 表示仅在工作模式可用，Viewer 模式
 | `PASTECLIP` | 粘贴到**插入点**：平移 `插入点 − 基点`（无基点时基点为世界原点；与 COPY 同一个 `cad_db` 变换） | 是 | — |
 | `PASTEORIG` | 粘贴到**原坐标**（忽略基点；等价改动前的 `PASTECLIP`） | 是 | — |
 | `MEASURE` | 测量入口（默认 `DIST`＝距离） | 是 | — |
-| `DIST` | 测量：2 点距离 + 角度 + Δx/Δy/Δz | 是 | — |
+| `DIST` | 测量：2 点距离 + 角度 + Δx/Δy/Δz；`DIST GUIDE` 在两点后写一条持久构造参考线 | 是 | — |
 | `MEASUREANGLE` | 测量：3 点顶点角（纸空间显式拒绝） | 是 | — |
 | `AREA` | 测量：**用户选点**闭合多边形面积（自交/非共面/少于 3 点拒绝） | 是 | — |
 | `MEASUREPOLYLINE` | 测量：N 点开放链长度（需 `CONFIRM` 收尾） | 是 | — |

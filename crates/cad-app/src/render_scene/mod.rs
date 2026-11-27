@@ -18,6 +18,8 @@ pub use edit::{BaseAppend, DrawingEditReceipt};
 #[cfg(test)]
 mod edit_tests;
 mod entity_index;
+#[cfg(test)]
+mod guide_tests;
 mod overlay;
 mod prepared;
 mod release;

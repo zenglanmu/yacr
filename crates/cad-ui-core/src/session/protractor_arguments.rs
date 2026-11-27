@@ -1,10 +1,11 @@
-//! `PROTRACTOR GUIDE`: the one argument form of the Protractor selector.
+//! `PROTRACTOR GUIDE`: start the angle capture with guide mode.
 //!
 //! The bare `PROTRACTOR` is an interaction-only measurement selector (no
 //! `CommandId`) and starts `BeginMeasurement(Protractor)` in the session's typed
-//! funnel. The `GUIDE` argument exists so the reference tool's second mode is a
-//! **named refusal** rather than an unsupported line: this build has no guide
-//! model, so it says so and writes nothing.
+//! funnel. `PROTRACTOR GUIDE` starts the same capture and writes a guide line
+//! from the vertex along the second ray when the three points complete.
+
+use cad_app::{GuideMode, MeasurementToolKind};
 
 use super::commands::{invalid_protractor_argument_reason, parse_protractor_argument};
 
@@ -14,10 +15,6 @@ impl super::CadSession {
         let Some(()) = parse_protractor_argument(argument) else {
             return self.refuse_argument(invalid_protractor_argument_reason(text));
         };
-        self.refuse_argument(
-            "protractor.guide_not_implemented: guide-line creation is not modeled; the protractor \
-             measures the angle only"
-                .into(),
-        )
+        self.start_guide_measurement(GuideMode::ProtractorLine, MeasurementToolKind::Protractor)
     }
 }

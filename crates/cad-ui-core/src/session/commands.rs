@@ -1,6 +1,4 @@
 //! Canonical command vocabulary and name normalization.
-use cad_app::{CommandId, ExtendedCommandId, MeasurementToolKind};
-
 use super::annot_arguments::{
     GROUPEDIT_SELECTOR, GROUP_SELECTOR, HATCHSETORIGIN_SELECTOR, LEADER_SELECTOR, QLEADER_SELECTOR,
     TEXTFIT_SELECTOR, UNGROUP_SELECTOR,
@@ -13,6 +11,7 @@ use super::text_batch::{
     JUSTIFYTEXT_SELECTOR, TCIRCLE_SELECTOR, TCOUNT_SELECTOR, TEXTALIGN_SELECTOR, TSCALE_SELECTOR,
 };
 use super::text_commands::{TCASE_SELECTOR, TORIENT_SELECTOR};
+use cad_app::{CommandId, ExtendedCommandId, MeasurementToolKind};
 
 /// The canonical command vocabulary: every [`CommandId`] variant with the stable
 /// uppercase selector a frontend uses to name it.
@@ -220,6 +219,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("SCALE", CommandId::ScaleEntities),
     ("MIRROR", CommandId::MirrorEntities),
     ("FLIP", CommandId::Flip),
+    ("GUIDE", CommandId::Guide),
     ("COPYCLIP", CommandId::CopyToClipboard),
     ("CUTCLIP", CommandId::CutToClipboard),
     // `PASTECLIP` is the **insertion-point** paste: it starts the one-point `PasteClip` capture (the clipboard is the input, so a selection is not required) and translates every clipboard entry by `insertion − base`. `PASTEORIG` is the other half of the AutoCAD pair: it takes no point and inserts at the original coordinates, ignoring the base.
@@ -893,7 +893,9 @@ pub use scene_grammar::*;
 mod block_grammar;
 mod camera_grammar;
 mod display_grammar;
+mod dist_grammar;
 mod flip_grammar;
+mod guide_grammar;
 mod protractor_grammar;
 mod soften_grammar;
 mod text3d_grammar;
@@ -901,7 +903,9 @@ mod walk_grammar;
 pub use block_grammar::*;
 pub use camera_grammar::*;
 pub use display_grammar::*;
+pub use dist_grammar::*;
 pub use flip_grammar::*;
+pub use guide_grammar::*;
 pub use protractor_grammar::*;
 pub use soften_grammar::*;
 pub use text3d_grammar::*;
@@ -979,19 +983,15 @@ pub use payload_options::*;
 // `APERTURE`, `PTYPE`, `REVCLOUDPROPERTIES`).
 mod paper_arguments;
 pub use paper_arguments::*;
-
 // The named style-table grammars (`STYLE`, `-STYLE`, `MLEADERSTYLE`).
 mod style;
 pub use style::*;
-
 // Interactive modify grammars (JOIN/OFFSET/MIRROR/CHAMFER/FILLET/PEDIT).
 mod modify;
 pub use modify::*;
-
 // The 2026-11-12 MULTILEADER/MLEDIT/TOLERANCE grammars.
 mod mleader;
 pub use mleader::*;
-
 // The `-PARAMETERS` command-line Parameter Manager grammar (ADR-0043 D9/D14).
 mod param_arguments;
 pub use param_arguments::*;

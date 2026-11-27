@@ -176,6 +176,10 @@ pub const ARGUMENT_SELECTORS: &[&str] = &[
     BLOCK_SELECTOR,
     // `FLIP X|Y|Z`: the SketchUp in-place axis flip.
     FLIP_SELECTOR,
+    // `GUIDE [LIST|CLEAR]`: report or clear construction guides.
+    GUIDE_SELECTOR,
+    // `DIST GUIDE`: the Tape Measure's guide mode (the bare selector measures).
+    DIST_SELECTOR,
     // `CAMERA TWO-POINT|WALK`: the reference camera modes, refused by name (the
     // bare selector starts the two-point placement capture).
     CAMERA_SELECTOR,

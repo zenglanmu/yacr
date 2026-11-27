@@ -67,6 +67,8 @@ impl Application {
         };
 
         if let Some((kind, captured, snaps)) = auto_complete {
+            let guide_mode = session.take_guide_mode();
+            let raw_points = captured.clone();
             let algorithm = kind.algorithm().ok_or_else(|| {
                 CadError::InvalidInput(
                     "this tool has no measurement algorithm; it is not evaluated".into(),
@@ -79,6 +81,9 @@ impl Application {
                 kind.engine_points(captured),
                 &snaps,
             )?;
+            if let Some(mode) = guide_mode {
+                self.add_measurement_guide(command.document, mode, &raw_points)?;
+            }
             if let Some(record) = &outcome.measurement {
                 session.set_last_measurement(record.clone());
             }

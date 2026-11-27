@@ -531,3 +531,12 @@ impl FlipAxis {
         }
     }
 }
+
+/// The typed `GUIDE` management forms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuideCommand {
+    /// Bare `GUIDE` / `GUIDE LIST`: report the table (read-only).
+    List,
+    /// `GUIDE CLEAR`: remove every guide in one table write.
+    Clear,
+}

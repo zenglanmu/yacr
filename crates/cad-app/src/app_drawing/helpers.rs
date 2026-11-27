@@ -130,7 +130,6 @@ pub(super) fn offset_tolerance() -> f64 {
 pub(super) fn corner_tolerance() -> f64 {
     offset_tolerance()
 }
-
 /// The two endpoints of a straight LINE pick, or an explicit `Unsupported` when
 /// the picked entity is any other geometry kind.
 pub(super) fn straight_line(
@@ -665,6 +664,12 @@ pub(crate) fn apply_drawing_patches(
     {
         return result;
     }
+    // A construction-guide step takes the whole-table guide path.
+    if let Some(result) =
+        super::guide_replay::guide_step(drawing, transaction, reason, step, forward)
+    {
+        return result;
+    }
     // A scene step takes the scene-table path.
     if let Some(result) =
         super::scene_replay::scene_step(drawing, transaction, reason, step, forward)
@@ -921,7 +926,6 @@ mod tests {
     fn p(x: f64, y: f64) -> Point3 {
         Point3 { x, y, z: 0.0 }
     }
-
     /// The L corner: L1 the +x axis, L2 the +y axis, picked on the +x/+y arms.
     fn corner_input() -> TwoLineInput {
         TwoLineInput {
@@ -931,7 +935,6 @@ mod tests {
             pick_second: p(0.0, 8.0),
         }
     }
-
     /// The plan-level refusals the session typed channel cannot carry (it refuses
     /// a negative/non-finite value before it can reach the command), so they are
     /// pinned directly on the pure helpers.
@@ -953,7 +956,6 @@ mod tests {
             );
         }
     }
-
     #[test]
     fn plan_refuses_a_degenerate_line_and_a_collinear_pair() {
         // A zero-length first line has no direction.
@@ -973,7 +975,6 @@ mod tests {
         };
         assert!(plan_fillet(&collinear, 1.0, 1e-9).is_err());
     }
-
     #[test]
     fn fillet_zero_radius_equals_chamfer_zero_zero_at_the_plan_level() {
         let input = corner_input();
@@ -983,7 +984,6 @@ mod tests {
         assert_eq!(chamfer.second, fillet.second);
         assert!(chamfer.inserted.is_none() && fillet.inserted.is_none());
     }
-
     #[test]
     fn fillet_centre_is_at_the_radius_from_both_lines() {
         let edit = plan_fillet(&corner_input(), 2.0, 1e-9).unwrap();

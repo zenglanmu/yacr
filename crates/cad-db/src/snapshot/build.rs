@@ -29,7 +29,6 @@
 //! [`SnapshotError::invalid`] instead of dropping the row. `finish()` is the last
 //! word on referential integrity; the header variables are applied after it
 //! because they are document scalars, not rows.
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use cad_domain::ymodel::{shard_of, DocumentHeader, ModelKey, PersistentIdOf, Shard};
@@ -179,6 +178,10 @@ impl DrawingDatabase {
         if !self.scenes.is_empty() {
             tables.set(TableKind::Scenes, super::scene::encode_scenes(self));
         }
+        // Construction guides follow the same "no rows, no table" rule.
+        if !self.guides.is_empty() {
+            tables.set(TableKind::Guides, super::guide::encode_guides(self));
+        }
         // The display record is written only when it differs from the default.
         let display = super::display::encode_display(self);
         if !display.is_empty() {
@@ -250,6 +253,7 @@ impl DrawingDatabase {
         let materials = super::material::decode_materials(&snapshot.tables)?;
         let scenes = super::scene::decode_scenes(&snapshot.tables)?;
         let display = super::display::decode_display(&snapshot.tables)?;
+        let guides = super::guide::decode_guides(&snapshot.tables)?;
         if !parameters.is_empty() {
             checked(
                 builder.set_parameters(parameters),
@@ -300,6 +304,9 @@ impl DrawingDatabase {
                 builder.set_display_settings(display),
                 table_entry(TableKind::Display),
             )?;
+        }
+        if !guides.is_empty() {
+            checked(builder.set_guides(guides), table_entry(TableKind::Guides))?;
         }
 
         for layer in tables.layers.values() {
@@ -944,17 +951,14 @@ mod tests {
             "the order is state: last-duplicate-wins depends on it"
         );
     }
-
     #[test]
     fn header_variables_are_strict_in_both_directions() {
         let a = snapshot_of(&fixture(), Revision(7));
-
         let mut unknown = a.clone();
         unknown.header.variables["future_variable"] = Value::from(1);
         let error = DrawingDatabase::from_snapshot(&unknown).expect_err("unknown variable");
         assert_eq!(error.marker, cad_domain::ymodel::markers::INVALID_DOCUMENT);
         assert!(error.detail.contains("future_variable"), "{}", error.detail);
-
         let mut missing = a.clone();
         missing.header.variables = match &missing.header.variables {
             Value::Object(map) => {
@@ -966,13 +970,11 @@ mod tests {
         };
         let error = DrawingDatabase::from_snapshot(&missing).expect_err("missing variable");
         assert!(error.detail.contains("code_page"), "{}", error.detail);
-
         let mut wrong_type = a.clone();
         wrong_type.header.variables["linetype_scale"] = Value::from("2.5");
         let error = DrawingDatabase::from_snapshot(&wrong_type).expect_err("wrong type");
         assert!(error.detail.contains("linetype_scale"), "{}", error.detail);
     }
-
     #[test]
     fn a_bare_sequence_identifier_is_refused() {
         let mut a = snapshot_of(&fixture(), Revision(7));

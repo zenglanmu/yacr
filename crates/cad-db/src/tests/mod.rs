@@ -15,6 +15,7 @@ mod domain;
 mod drawing;
 mod drawing_clip;
 mod drawing_display;
+mod guides;
 mod header_geometry;
 mod history_replay;
 mod identity;

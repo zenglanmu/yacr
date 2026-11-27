@@ -28,6 +28,7 @@ pub(crate) mod display;
 pub(crate) mod elements;
 pub(crate) mod features;
 pub(crate) mod groups;
+mod guide;
 pub(crate) mod material;
 pub(crate) mod parameters;
 pub(crate) mod relations;
@@ -212,6 +213,7 @@ pub const fn table_entry(kind: TableKind) -> &'static str {
         TableKind::Materials => "tables/materials.json",
         TableKind::Scenes => "tables/scenes.json",
         TableKind::Display => "tables/display.json",
+        TableKind::Guides => "tables/guides.json",
     }
 }
 
@@ -504,6 +506,14 @@ impl DocumentSnapshot {
     pub fn has_scenes(&self) -> bool {
         self.tables
             .get(TableKind::Scenes)
+            .is_some_and(|rows| !rows.is_empty())
+    }
+
+    /// Whether this document carries construction guides (`tables/guides.json`,
+    /// minor 26).
+    pub fn has_guides(&self) -> bool {
+        self.tables
+            .get(TableKind::Guides)
             .is_some_and(|rows| !rows.is_empty())
     }
 

@@ -410,7 +410,7 @@ fn parse_tables(
 /// `cad-db`, and `check-architecture.py` forbids this crate from editing it), so
 /// the reverse map is written out and a table missing from it is refused by
 /// [`unknown_live_entry`] rather than silently dropped.
-const TABLE_ENTRIES: [(TableKind, &str); 25] = [
+const TABLE_ENTRIES: [(TableKind, &str); 26] = [
     (TableKind::Layers, "tables/layers.json"),
     (TableKind::Layouts, "tables/layouts.json"),
     (TableKind::Styles, "tables/styles.json"),
@@ -458,6 +458,9 @@ const TABLE_ENTRIES: [(TableKind, &str); 25] = [
     (TableKind::Materials, "tables/materials.json"),
     (TableKind::Scenes, "tables/scenes.json"),
     (TableKind::Display, "tables/display.json"),
+    // Persisted construction guides (minor 26). Opaque rows: the snapshot codec
+    // owns the point/direction shape and the cap.
+    (TableKind::Guides, "tables/guides.json"),
 ];
 
 /// The table kind one entry path holds, if this build models it.
@@ -871,6 +874,7 @@ mod tests {
             TableKind::Materials,
             TableKind::Scenes,
             TableKind::Display,
+            TableKind::Guides,
         ];
         let mut paths = std::collections::BTreeSet::new();
         for kind in kinds {
@@ -903,6 +907,7 @@ mod tests {
                 TableKind::Materials => "Materials",
                 TableKind::Scenes => "Scenes",
                 TableKind::Display => "Display",
+                TableKind::Guides => "Guides",
             };
             assert_eq!(name, format!("{kind:?}"));
             let path = table_entry(kind);

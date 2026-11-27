@@ -441,6 +441,7 @@ impl Application {
             CommandId::SplitSolid => self.split_solid(session, &command),
             CommandId::PositionCamera => self.position_camera(session, &command),
             CommandId::Flip => self.flip_selection(session, &command),
+            CommandId::Guide => self.guide_command(session, &command),
             CommandId::Walk => self.walk(session, &command),
             CommandId::LookAround => self.look_around(session, &command),
             CommandId::MatchPhoto => self.match_photo(session, &command),

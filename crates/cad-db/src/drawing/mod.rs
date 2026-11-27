@@ -29,6 +29,7 @@ mod document_metadata;
 mod document_times;
 mod edit;
 mod group;
+mod guide;
 mod header_geometry;
 mod header_meta;
 mod header_values;
@@ -64,6 +65,7 @@ pub use document_metadata::{DocumentMetadata, DocumentMetadataField};
 pub use document_times::DocumentTimes;
 pub(crate) use group::validate_groups;
 pub use group::{GroupPatch, GroupRow, GroupSeq};
+pub use guide::GuidePatch;
 pub use header_values::HeaderValuesPatch;
 pub use layer_edit::{DEFAULT_LAYER_NAME, ILLEGAL_LAYER_NAME_CHARS};
 pub use layer_inherit::LayerScope;
@@ -470,6 +472,9 @@ pub struct DrawingDatabase {
     pub(crate) scenes: cad_domain::scene::SceneTable,
     /// Per-document display settings (`tables/display.json`, minor 22).
     pub(crate) display: cad_domain::display::DisplaySettings,
+    /// Persisted construction guides (`tables/guides.json`, minor 26). Empty for
+    /// a document without guides.
+    pub(crate) guides: cad_domain::guide::GuideTable,
     /// Cache of [`Self::bounds`] tagged with the [`Revision`] it was computed
     /// at. Interior mutability is required because `bounds` takes `&self` (the
     /// scene-preparation worker shares one `Arc<DrawingDatabase>` across

@@ -386,6 +386,8 @@ pub enum CommandId {
     MirrorEntities,
     /// `FLIP X|Y|Z`: mirror the selection **in place** about the plane through its bounds centre perpendicular to the chosen axis (SketchUp's Flip Along). One transaction and one undo step. Work-only.
     Flip,
+    /// `GUIDE [LIST|CLEAR]`: report or clear persisted construction guides. `LIST` is read-only; `CLEAR` is one table write/undo step and Work-only.
+    Guide,
     /// Capture the current selection into the in-process clipboard. Read-only (the drawing and history are untouched), so it is allowed in Viewer too.
     CopyToClipboard,
     /// Capture the current selection into the clipboard, then delete it in one transaction and one undo step. Work-only.

@@ -243,6 +243,10 @@ impl CadSession {
             super::commands::BLOCK_SELECTOR => self.block_argument(argument, text),
             // `FLIP X|Y|Z`: the SketchUp in-place axis flip.
             super::commands::FLIP_SELECTOR => self.flip_argument(argument, text),
+            // `GUIDE [LIST|CLEAR]`: construction-guide management.
+            super::commands::GUIDE_SELECTOR => self.guide_argument(argument, text),
+            // `DIST GUIDE`: the Tape Measure's guide mode.
+            super::commands::DIST_SELECTOR => self.dist_argument(argument, text),
             // `CAMERA TWO-POINT|WALK`: named refusals (the bare selector is a
             // capture and never reaches this arm).
             super::commands::CAMERA_SELECTOR => self.camera_argument(argument, text),

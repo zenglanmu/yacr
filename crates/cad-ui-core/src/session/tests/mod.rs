@@ -25,6 +25,7 @@ mod tests_display;
 mod tests_explode;
 mod tests_flip;
 mod tests_fonts;
+mod tests_guides;
 mod tests_hatch;
 mod tests_hatch_arguments;
 mod tests_hover;

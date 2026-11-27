@@ -402,6 +402,9 @@ pub struct DrawingHistoryStep {
     /// Reversible document display settings (`tables/display.json`, minor 22):
     /// the whole Shadows/Fog record before and after a `SHADOWS`/`FOG` write.
     pub display_patches: Vec<cad_db::DisplayPatch>,
+    /// Reversible construction-guide writes (`tables/guides.json`, minor 26):
+    /// the whole guide table before and after one measurement-guide/`GUIDE` write.
+    pub guide_patches: Vec<cad_db::GuidePatch>,
 }
 
 impl DrawingHistoryStep {
@@ -427,6 +430,7 @@ impl DrawingHistoryStep {
         let material_step = !self.material_patches.is_empty();
         let scene_step = !self.scene_patches.is_empty();
         let display_step = !self.display_patches.is_empty();
+        let guide_step = !self.guide_patches.is_empty();
         if self.record.is_empty()
             && self.linetype_patches.is_empty()
             && self.bim_patches.is_empty()
@@ -436,6 +440,7 @@ impl DrawingHistoryStep {
             && !material_step
             && !scene_step
             && !display_step
+            && !guide_step
         {
             return Err(CadError::InvalidInput(
                 "a drawing undo step needs at least one entity, block, layer, layout, style, \
@@ -452,6 +457,7 @@ impl DrawingHistoryStep {
                 || !self.view_patches.is_empty()
                 || !self.material_patches.is_empty()
                 || !self.scene_patches.is_empty()
+                || !self.guide_patches.is_empty()
                 || parametric)
         {
             return Err(CadError::InvalidInput(
@@ -480,6 +486,41 @@ impl DrawingHistoryStep {
                 ));
             }
         }
+        if guide_step
+            && (!self.record.is_empty()
+                || !self.linetype_patches.is_empty()
+                || !self.bim_patches.is_empty()
+                || !self.group_patches.is_empty()
+                || !self.view_patches.is_empty()
+                || !self.material_patches.is_empty()
+                || !self.scene_patches.is_empty()
+                || display_step
+                || parametric)
+        {
+            return Err(CadError::InvalidInput(
+                "a guide undo step cannot also carry entity, table, linetype, BIM, group, view, \
+                 material, scene or parameter rows"
+                    .into(),
+            ));
+        }
+        if guide_step {
+            if self.guide_patches.len() != 1 {
+                return Err(CadError::InvalidInput(
+                    "a guide undo step carries exactly one whole-table patch".into(),
+                ));
+            }
+            if self.record.merge_key.is_some() {
+                return Err(CadError::InvalidInput(
+                    "a drawing undo record with guide patches cannot be merged".into(),
+                ));
+            }
+            let patch = &self.guide_patches[0];
+            if patch.before == patch.after {
+                return Err(CadError::InvalidInput(
+                    "a guide patch needs two different tables".into(),
+                ));
+            }
+        }
         if scene_step
             && (!self.record.is_empty()
                 || !self.linetype_patches.is_empty()
@@ -488,6 +529,7 @@ impl DrawingHistoryStep {
                 || !self.view_patches.is_empty()
                 || !self.material_patches.is_empty()
                 || display_step
+                || guide_step
                 || parametric)
         {
             return Err(CadError::InvalidInput(

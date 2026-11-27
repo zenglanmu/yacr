@@ -29,6 +29,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -46,6 +47,7 @@ impl History {
         self.record_drawing_step(
             record,
             linetype_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -74,6 +76,7 @@ impl History {
             record,
             Vec::new(),
             bim_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -112,6 +115,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -128,6 +132,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             group_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -152,6 +157,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -170,6 +176,7 @@ impl History {
             Vec::new(),
             Vec::new(),
             material_patches,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         )
@@ -192,6 +199,7 @@ impl History {
             Vec::new(),
             scene_patches,
             Vec::new(),
+            Vec::new(),
         )
     }
 
@@ -212,6 +220,28 @@ impl History {
             Vec::new(),
             Vec::new(),
             display_patches,
+            Vec::new(),
+        )
+    }
+
+    /// Record a committed construction-guide write (`GUIDE`/measurement guide).
+    pub fn record_drawing_with_guides(
+        &mut self,
+        record: DrawingUndoRecord,
+        guide_patches: Vec<cad_db::GuidePatch>,
+    ) -> CadResult<()> {
+        self.record_drawing_step(
+            record,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            guide_patches,
         )
     }
 
@@ -232,6 +262,7 @@ impl History {
         material_patches: Vec<cad_db::MaterialPatch>,
         scene_patches: Vec<cad_db::ScenePatch>,
         display_patches: Vec<cad_db::DisplayPatch>,
+        guide_patches: Vec<cad_db::GuidePatch>,
     ) -> CadResult<()> {
         self.ensure_no_pending_drawing()?;
         let mut step = DrawingHistoryStep {
@@ -245,6 +276,7 @@ impl History {
             material_patches,
             scene_patches,
             display_patches,
+            guide_patches,
         };
         step.validate()?;
         if let Some(key) = step.record.merge_key.clone() {
