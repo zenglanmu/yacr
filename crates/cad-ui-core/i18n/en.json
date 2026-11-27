@@ -3617,7 +3617,7 @@
   "concept.materials.paint": "Paint the selection with {name}",
   "concept.materials.no_document": "Open a drawing before painting",
   "concept.materials.report": "Material report",
-  "concept.scenes.hint": "A scene stores the camera, 2D/3D mode, space and visual style; click a name to restore it, × to delete it.",
+  "concept.scenes.hint": "A scene stores the camera, 2D/3D mode, space, visual style, visible tags and the Shadows/Fog record; click a name to restore it, × to delete it.",
   "concept.scenes.name": "New scene name",
   "concept.scenes.save": "Save scene",
   "concept.scenes.empty": "This document has no scenes yet",

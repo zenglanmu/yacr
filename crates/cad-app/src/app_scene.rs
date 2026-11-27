@@ -2,13 +2,16 @@
 //!
 //! A scene captures **presentation state**: the camera, 2D/3D mode, saved 2D
 //! camera, work plane and active space (the same payload a named view stores),
-//! the visual-style token this build implements (`WIREFRAME`/`SHADED`) and the
-//! **visible tags/layers** at save time. Saving and deleting write
-//! `tables/scenes.json` as one revision and one undo step; restoring is a session
-//! apply (camera/space/style/tag visibility), exactly like `VIEW RESTORE`, and
-//! records a `ZOOM PREVIOUS` snapshot so `VIEWBACK` undoes the view part. Tag
-//! visibility lives in the same session-only override set as `LAYEROFF`, so a
-//! restore never rewrites the layer table.
+//! the visual-style token this build implements (`WIREFRAME`/`SHADED`), the
+//! **visible tags/layers** at save time and the document **Shadows/Fog record**.
+//! Saving and deleting write `tables/scenes.json` as one revision and one undo
+//! step; restoring is a session apply (camera/space/style/tag visibility), exactly
+//! like `VIEW RESTORE`, and records a `ZOOM PREVIOUS` snapshot so `VIEWBACK`
+//! undoes the view part. Tag visibility lives in the same session-only override
+//! set as `LAYEROFF`, so a restore never rewrites the layer table. A saved
+//! Shadows/Fog record that differs from the current one **is** document state:
+//! restoring it is the same one-revision display write `SHADOWS`/`FOG` use, so a
+//! Viewer restore with a differing record is refused before anything changes.
 //!
 //! Refusals: `scene.name_required`, `scene.unknown`, `scene.invalid_view`,
 //! `scene.style_invalid`, plus the database's cap/duplicate markers. `SAVE` and
@@ -55,10 +58,12 @@ impl Application {
                 let style = SceneVisualStyle::from_token(session.view_extras.visual_style.name())
                     .unwrap_or_default();
                 let tags = capture_visible_tags(self.drawing(command.document)?, session);
+                let display = self.drawing(command.document)?.display_settings();
                 let planned = self.drawing(command.document)?.plan_save_scene(Scene {
                     view: named,
                     style,
                     tags: Some(tags),
+                    display: Some(display),
                 })?;
                 let Some(planned) = planned else {
                     return Ok(scene_outcome(
@@ -77,7 +82,7 @@ impl Application {
                     "scene.saved",
                     format!(
                         "SCENE SAVE: {} scene `{name}` with its camera, mode, work plane, space, \
-                         style and {} visible tag(s) ({count} scene(s) in the drawing)",
+                         style, {} visible tag(s) and shadows/fog ({count} scene(s) in the drawing)",
                         if replaced { "replaced" } else { "created" },
                         capture_visible_tags(self.drawing(command.document)?, session).len()
                     ),
@@ -133,6 +138,15 @@ impl Application {
         };
         let snapshot = ViewSnapshot::from_named_view(&saved.view)?;
         crate::space::validate_space_id(self.drawing(command.document)?, &saved.view.space)?;
+        let current_display = self.drawing(command.document)?.display_settings();
+        let display_changed = saved
+            .display
+            .is_some_and(|display| display != current_display);
+        // The display record is document state. Refuse before touching anything
+        // when this session may not write it, instead of a half-applied scene.
+        if display_changed && session.app_mode() == AppMode::Viewer {
+            return Err(CadError::PermissionDenied);
+        }
         let viewport = self
             .workspace
             .viewports
@@ -143,6 +157,17 @@ impl Application {
         if changed {
             self.push_view_snapshot(&command.viewport)?;
         }
+        if display_changed {
+            let after = saved.display.expect("display_changed implies a record");
+            self.write_display(
+                command.document,
+                cad_db::DisplayPatch {
+                    before: current_display,
+                    after,
+                },
+                &format!("SCENE RESTORE {name}"),
+            )?;
+        }
         session.active_space = saved.view.space.clone();
         snapshot.restore(self.viewport_mut(command)?);
         session.view_extras.set_visual_style(saved.style.token())?;
@@ -150,11 +175,16 @@ impl Application {
         if let Some(tags) = &saved.tags {
             apply_visible_tags(self.drawing(command.document)?, session, tags);
         }
+        let display_note = if display_changed {
+            " and shadows/fog"
+        } else {
+            ""
+        };
         Ok(scene_outcome(
             "scene.restored",
             format!(
                 "SCENE RESTORE: applied scene `{name}` (camera, mode, work plane, space, \
-                 style {} and {tag_count} tag(s))",
+                 style {} and {tag_count} tag(s){display_note})",
                 saved.style.token()
             ),
         ))

@@ -92,6 +92,7 @@ fn scene_row(tags: Option<Vec<SceneTag>>) -> Value {
         },
         style: SceneVisualStyle::Shaded,
         tags,
+        display: None,
     }
     .to_json()
 }

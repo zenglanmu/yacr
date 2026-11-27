@@ -507,6 +507,16 @@ impl DocumentSnapshot {
             .is_some_and(|rows| !rows.is_empty())
     }
 
+    /// Whether any scene row captures the Shadows/Fog record (minor 24).
+    ///
+    /// A missing key is a scene written before display capture and never costs
+    /// the newer tier.
+    pub fn has_scene_display(&self) -> bool {
+        self.tables
+            .get(TableKind::Scenes)
+            .is_some_and(|rows| rows.iter().any(|row| row.get("display").is_some()))
+    }
+
     /// Whether any scene row captures visible tags/layers (minor 23).
     ///
     /// The writer emits `tags` only for scenes saved by a build that captures

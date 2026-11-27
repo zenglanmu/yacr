@@ -1,5 +1,6 @@
 //! Persisted scenes (`tables/scenes.json`, `.ymodel` minor 20; a row with the
-//! `tags` snapshot makes the writer stamp minor 23).
+//! `tags` snapshot makes the writer stamp minor 23, a row with `display` minor
+//! 24).
 //!
 //! A scene is SketchUp's page: a named snapshot of **presentation state** that a
 //! click restores. This cut captures exactly the state this build can restore
@@ -11,15 +12,18 @@
 //!   style this build implements (`VSCURRENT`);
 //! * the **visible tags/layers** at save time (name + effective visibility,
 //!   applied on restore as session overrides; the layer table itself is never
-//!   rewritten by a scene).
+//!   rewritten by a scene);
+//! * the document **Shadows/Fog record** (`tables/display.json`), applied on
+//!   restore as the same one-revision display write the `SHADOWS`/`FOG`
+//!   commands use when the saved record differs from the current one.
 //!
-//! It deliberately does **not** capture shadows, fog, sections or soft edges:
-//! those either have no scene application path or need a document write, and
-//! storing a flag the renderer ignores would be a lie. The scene row is a named
-//! view plus the style key and an optional tag snapshot, so it reuses the view's
-//! strict codec and camera validation. A row whose `tags` key is present makes
-//! the writer stamp the archive at minor 23; a row without it stays a minor-20
-//! row and restores no tag visibility.
+//! It deliberately does **not** capture sections or soft edges: those have no
+//! scene application path yet, and storing a flag the renderer ignores would be
+//! a lie. The scene row is a named view plus the style key and optional tag and
+//! display snapshots, so it reuses the view's strict codec and camera
+//! validation. A row whose `tags` key is present makes the writer stamp the
+//! archive at minor 23, a row with `display` at minor 24; a row without either
+//! stays a minor-20 row and restores only the view/style.
 //!
 //! # Bounds and names
 //!
@@ -34,6 +38,7 @@ use std::fmt;
 
 use serde_json::{Map, Value};
 
+use crate::display::DisplaySettings;
 use crate::view::{NamedView, NamedViewError};
 
 /// How many scenes one document retains.
@@ -64,6 +69,8 @@ pub mod markers {
     pub const SCENE_INVALID_VIEW: &str = "scene.invalid_view";
     /// The captured tag snapshot is malformed or over budget.
     pub const SCENE_TAGS_INVALID: &str = "scene.tags_invalid";
+    /// The captured Shadows/Fog record is malformed or out of range.
+    pub const SCENE_DISPLAY_INVALID: &str = "scene.display_invalid";
 }
 
 /// The visual style a scene restores.
@@ -153,6 +160,9 @@ pub struct Scene {
     /// The visible tags/layers captured at save time, or `None` for a scene
     /// written by a build without tag capture (minor 20..22).
     pub tags: Option<Vec<SceneTag>>,
+    /// The document Shadows/Fog record at save time, or `None` for a scene
+    /// written before scene display capture (minor 20..23).
+    pub display: Option<DisplaySettings>,
 }
 
 impl Scene {
@@ -165,6 +175,7 @@ impl Scene {
             },
             style: SceneVisualStyle::default(),
             tags: None,
+            display: None,
         }
     }
 
@@ -184,6 +195,11 @@ impl Scene {
         self.view
             .validate()
             .map_err(|error| SceneError::Invalid(markers::SCENE_INVALID_VIEW, error.to_string()))?;
+        if let Some(display) = &self.display {
+            display.validate().map_err(|error| {
+                SceneError::Invalid(markers::SCENE_DISPLAY_INVALID, error.to_string())
+            })?;
+        }
         if let Some(tags) = &self.tags {
             if tags.len() > SCENE_TAG_CAP {
                 return Err(SceneError::Invalid(
@@ -257,6 +273,9 @@ impl Scene {
                 })
                 .collect();
             row.insert("tags".to_string(), Value::Array(rows));
+        }
+        if let Some(display) = &self.display {
+            row.insert("display".to_string(), display.to_json());
         }
         Value::Object(row)
     }
@@ -339,8 +358,19 @@ impl Scene {
             }
             None => None,
         };
+        let display = match map.remove("display") {
+            Some(value) => Some(DisplaySettings::from_json(&value).map_err(|error| {
+                SceneError::Invalid(markers::SCENE_DISPLAY_INVALID, error.to_string())
+            })?),
+            None => None,
+        };
         let view = NamedView::from_json(&Value::Object(map))?;
-        let scene = Scene { view, style, tags };
+        let scene = Scene {
+            view,
+            style,
+            tags,
+            display,
+        };
         scene.validate()?;
         Ok(scene)
     }
@@ -399,6 +429,7 @@ impl SceneTable {
                 view: NamedView { name, ..scene.view },
                 style: scene.style,
                 tags: scene.tags,
+                display: scene.display,
             });
             return Ok(true);
         }
@@ -415,6 +446,7 @@ impl SceneTable {
             view: NamedView { name, ..scene.view },
             style: scene.style,
             tags: scene.tags,
+            display: scene.display,
         });
         Ok(false)
     }

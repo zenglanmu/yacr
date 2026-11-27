@@ -296,3 +296,96 @@ fn a_scene_saved_without_a_session_override_still_captures_the_database_flag() {
         database_visible
     );
 }
+
+fn set_display(
+    app: &mut Application,
+    session: &mut SessionState,
+    option: DisplayCommand,
+) -> CadResult<CommandOutcome> {
+    app.execute(
+        session,
+        command(CommandId::Shadows, CommandPayload::Display(option)),
+    )
+}
+
+fn display_settings(app: &Application) -> cad_domain::display::DisplaySettings {
+    app.workspace.documents[&DocumentId(1)]
+        .drawing
+        .display_settings()
+}
+
+#[test]
+fn a_save_captures_the_document_shadows_and_fog_record() {
+    let (mut app, mut session) = application_with_document();
+    set_display(&mut app, &mut session, DisplayCommand::Shadows(true)).expect("shadows");
+    set_display(
+        &mut app,
+        &mut session,
+        DisplayCommand::Sun {
+            azimuth: 210.0,
+            elevation: 30.0,
+        },
+    )
+    .expect("sun");
+    set_display(
+        &mut app,
+        &mut session,
+        DisplayCommand::FogRange {
+            start: 50.0,
+            end: 900.0,
+        },
+    )
+    .expect("fog");
+    let current = display_settings(&app);
+    scene(&mut app, &mut session, SceneCommand::Save("Look".into())).expect("save");
+    let table = scenes(&app);
+    let saved = table.resolve("Look").expect("the row");
+    assert_eq!(saved.display, Some(current));
+}
+
+#[test]
+fn restoring_a_scene_reapplies_a_changed_display_record_as_one_step() {
+    let (mut app, mut session) = application_with_document();
+    scene(&mut app, &mut session, SceneCommand::Save("Look".into())).expect("save");
+    let saved_display = display_settings(&app);
+    set_display(&mut app, &mut session, DisplayCommand::Shadows(true)).expect("shadows");
+    assert!(display_settings(&app).shadows.enabled);
+    let before = revision(&app);
+    let depth = app.history[&DocumentId(1)].undo_depth();
+    let outcome =
+        scene(&mut app, &mut session, SceneCommand::Restore("Look".into())).expect("restore");
+    assert_eq!(display_settings(&app), saved_display, "the record is back");
+    assert_eq!(revision(&app), Revision(before.0 + 1), "one display write");
+    assert_eq!(app.history[&DocumentId(1)].undo_depth(), depth + 1);
+    let report = outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "scene.restored")
+        .expect("the report is named");
+    assert!(report.message.contains("shadows/fog"), "{}", report.message);
+
+    // The display write is its own undo step and restores the pre-restore record.
+    app.execute(&mut session, command(CommandId::Undo, CommandPayload::None))
+        .expect("undo");
+    assert!(display_settings(&app).shadows.enabled);
+}
+
+#[test]
+fn a_viewer_restore_with_a_differing_display_record_changes_nothing() {
+    let (mut app, mut session) = application_with_document();
+    scene(&mut app, &mut session, SceneCommand::Save("Look".into())).expect("save");
+    set_display(&mut app, &mut session, DisplayCommand::Shadows(true)).expect("shadows");
+    let display = display_settings(&app);
+    let camera = camera_eye(&app);
+    let before = revision(&app);
+    session
+        .switch_mode(AppMode::Viewer)
+        .expect("Viewer is legal");
+    assert!(matches!(
+        scene(&mut app, &mut session, SceneCommand::Restore("Look".into())).unwrap_err(),
+        CadError::PermissionDenied
+    ));
+    assert_eq!(display_settings(&app), display, "the display is untouched");
+    assert_eq!(camera_eye(&app), camera, "the camera is untouched");
+    assert_eq!(revision(&app), before, "nothing was written");
+}

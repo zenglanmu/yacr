@@ -3617,7 +3617,7 @@
   "concept.materials.paint": "给所选对象涂上 {name}",
   "concept.materials.no_document": "打开图纸后才能涂刷",
   "concept.materials.report": "材质报告",
-  "concept.scenes.hint": "场景保存当前相机、2D/3D 模式、空间与显示样式；点名称恢复，× 删除。",
+  "concept.scenes.hint": "场景保存当前相机、2D/3D 模式、空间、显示样式、可见标签与 Shadows/Fog 记录；点名称恢复，× 删除。",
   "concept.scenes.name": "新场景名称",
   "concept.scenes.save": "保存场景",
   "concept.scenes.empty": "这个文档还没有场景",

@@ -137,7 +137,7 @@ impl Application {
     }
 
     /// Commit one whole-record display patch and record it as one undo step.
-    fn write_display(
+    pub(crate) fn write_display(
         &mut self,
         document: DocumentId,
         patch: DisplayPatch,
