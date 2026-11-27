@@ -1262,8 +1262,9 @@ Windows/macOS 的人工验收（本轮 **NOT VERIFIED**，无真机）：在真�
 **网格内核注入（2026-11-27）**：四个 `native-below` 载体（Linux/Windows/macOS/Android）都在
 创建原生 `CadSession` 后注入 `ManifoldMeshModeler`；Linux 有真实内核命令/契约证据，
 Windows/macOS/Android 只有跨目标编译/类型检查 + Android 源码契约，运行时 **NOT VERIFIED**。
-`dom-canvas`（Web、X11/XWayland）不注入，网格布尔/修复按 `unsupported-runtime: mesh-modeler`
-拒绝（wasm 无线程，ADR-0061 D7）；纯面编辑/细分/平滑/补洞在共享层 `cad-mesh-edit`，不依赖内核。
+`dom-canvas`（Web、X11/XWayland）也注入同一内核，但走**同步例外**：布尔/修复在会话线程
+inline 执行，阻塞页面、无 worker、无中途取消/进度；总操作数三角面超过 200,000 时在调用
+内核前按 `mesh.sync_budget` 拒绝。纯面编辑/细分/平滑/补洞在共享层 `cad-mesh-edit`，不依赖内核。
 
 ### ymodel 原生文档格式（2026-11-18，ADR-0037）
 

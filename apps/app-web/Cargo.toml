@@ -138,6 +138,13 @@ web-sys = { workspace = true, features = [
 # session untouched.
 cad-scene.workspace = true
 cad-render-wgpu.workspace = true
+# ADR-0061 P-MESH-1a/1b + the dom-canvas synchronous exception: the mesh kernel
+# is carrier-owned composition like the `.ymodel` archive. This carrier is the
+# wasm session, so the kernel is linked **only** for the wasm target; the
+# host-side session tests keep it out of their graph. The kernel compiles to
+# `wasm32-unknown-unknown` and runs inline on the session thread, bounded by
+# `cad-app`'s `mesh.sync_budget` refusal (there is no worker thread here).
+cad-kernel-manifold.workspace = true
 # `serde_json` moved to `[dependencies]`: it now serializes the shell status on
 # every target (see above), not only the wasm session status.
 # `std::time::Instant::now()` panics on wasm32-unknown-unknown ("time not

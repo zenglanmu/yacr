@@ -196,9 +196,12 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
   已接线：四个 `native-below` 载体（Linux、Windows、macOS、Android）都注入 `ManifoldMeshModeler`，
   worker + 取消 + 陈旧检查 + 一条事务/撤销，结果写 `AcDbSubDMesh`（无 `face_sources`/UV/材质）；
   **Linux 有真实运行/契约证据，其余三个只有跨目标编译/契约证据，运行时 NOT VERIFIED**。
-  `dom-canvas`（Web、X11/XWayland）不注入，网格布尔/修复按 `unsupported-runtime: mesh-modeler`
-  显式拒绝（wasm 无线程，ADR-0061 D7；纯面编辑/细分/平滑/补洞在共享层 `cad-mesh-edit`，
-  不依赖该内核）。P-MESH-2/3 已实现于无内核共享层 `cad-mesh-edit`：面区域 `MOVE`/`PRESSPULL`
+  `dom-canvas`（Web、X11/XWayland）是**同步例外**：wasm 会话注入同一个 `ManifoldMeshModeler`，
+  但布尔/修复在会话线程 inline 执行（无 worker、无中途取消、阻塞页面），总操作数三角面
+  **≤ 200,000**（`cad-app` 内部的 `MESH_SYNC_MAX_TRIANGLES = 200_000`），超出按稳定标记
+  `mesh.sync_budget` 拒绝；未注入 modeler 的其它 wasm/宿主仍按
+  `unsupported-runtime: mesh-modeler` 拒绝（ADR-0061 dom-canvas 例外；纯面编辑/细分/平滑/补洞
+  在共享层 `cad-mesh-edit`，不依赖该内核）。P-MESH-2/3 已实现于无内核共享层 `cad-mesh-edit`：面区域 `MOVE`/`PRESSPULL`
   （依赖 `Mesh.face_sources`）、`MESHREFINE` 细分、`MESHSMOOTH` 平滑、`MESHCAP` 边界环补洞；
   边身份为几何派生 `mesh:edge:<bits>` key，`MOVE` 可平移边两端点；wire-only 边/跨多三角形边
   polyline 仍不可编辑。补洞支持平面环、非平面投影环、多个独立环，以及共面嵌套环的外环-内环环带
@@ -314,11 +317,11 @@ ui-migration-guards/host-smoke-check）也是门禁的一部分，清单以 work
 
 | 载体 / 平台 | 实现与证据边界 |
 |---|---|
-| Linux `app-linux`（`yacr`） | **主开发目标 / 运行证据最完整**。原生 Wayland = `native-below` 生产路径；X11/XWayland = `dom-canvas`。只有 GNOME/Mutter + P620 + `scale=1` 的有界运行证据 |
+| Linux `app-linux`（`yacr`） | **主开发目标 / 运行证据最完整**。原生 Wayland = `native-below` 生产路径；X11/XWayland = `dom-canvas`（网格布尔/修复同步执行，受 `mesh.sync_budget` 限制）。只有 GNOME/Mutter + P620 + `scale=1` 的有界运行证据 |
 | Windows `app-windows`（`yacr-windows`） | 真实 Tauri/WebView2 + Win32 child HWND，`native-below`；`.ymodel` 保存/打开已接线（COM `IFileSaveDialog` + 临时文件→`ReplaceFileW` 原子替换 + `.bak` + `%APPDATA%\yacr\recovery` 恢复快照）；**当前证据**为编译门禁（含 `--target x86_64-pc-windows-msvc` 类型检查）+ Wine 拒绝合同（缺 WebView2 → 退出码 5）；真实 Windows 运行/对话框/NTFS `.bak` **NOT VERIFIED**（PENDING user real-Windows spike）；网格内核已注入，仅跨目标编译证据、运行时 **NOT VERIFIED** |
 | macOS `app-macos`（`yacr-macos`） | 真实 Tauri/WKWebView + CAD 子 `NSView`（Metal），`native-below`；`.ymodel` 保存/打开已接线（`NSSavePanel` + 临时文件→`rename` 原子替换 + `.bak` + `~/Library/Application Support/yacr/recovery`）；**当前证据**为编译/类型检查（mac target，AppKit 调用经桩编译器校验）；真实 macOS 运行/面板点击/APFS `.bak`/层序/DPI/像素一律 **NOT VERIFIED**；网格内核已注入，仅跨目标编译证据、运行时 **NOT VERIFIED** |
 | Android `app-android` | 真实 Tauri WebView + 原生 `CadSession` + Vulkan `SurfaceView`，`native-below`，wasm 会话**不实例化**。SAF 打开 + **`.ymodel` 保存/打开已接线**（SAF 写非原子；`.bak` 仅在 provider 支持时创建，否则 `save.no_backup`），其它格式走 `EXPORT`；恢复快照装在 `filesDir/recovery`。维护者已侧载 APK 并运行成功（2026-11-08，非 CI 验收）；上述新链路只有编译/契约证据，设备运行 NOT VERIFIED；设备/真实 GPU/像素的正式验收仍 **NOT VERIFIED**；网格内核已注入，仅跨目标编译/契约证据、设备运行时 **NOT VERIFIED** |
-| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传（`.ymodel` 由 wasm 侧 `ZipArchive` over `cad-store-zip` 解码，不经过 importer）；**`SAVE` 已在 wasm 会话内编码 `.ymodel` 并作为浏览器下载（`Blob` + `<a download>`）落盘**，每次保存都是新下载（`download://<seq>/<name>` 句柄，不做原地覆盖、无 `.bak`/恢复快照）；`EXPORT`/`PLOT` 走同一下载通道（**浏览器 bundle 只编了 DWG/DXF 连接器：裸 `EXPORT` 的实际落盘仍是 `.dxf`（源为 `.dwg` 也回退 `.dxf`），显式 `EXPORT DWG` 写实验性 DWG；其它格式按 `unsupported-runtime: export.<id>` 拒绝**）；外部资源嵌入问题在 Web/X11 `dom-canvas` 不提供（`unsupported-runtime: embed_resources`，页面读不到本地目录），但已打开归档里的内嵌资源仍随文档存在；**连接器按载体编译**（`cad-app` 的 `formats-*`）：该 bundle 其余格式按 `unsupported-runtime: import.<id>` / `export.<id>` 显式拒绝，不静默回退；Linux X11/XWayland 的 `dom-canvas` 走 `app-web` 的 `full-formats`，格式集不受此裁剪；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳 |
+| Web `app-web` | wasm `CadSession` + DOM canvas（`dom-canvas`）。OPEN 走页面上传（`.ymodel` 由 wasm 侧 `ZipArchive` over `cad-store-zip` 解码，不经过 importer）；**`SAVE` 已在 wasm 会话内编码 `.ymodel` 并作为浏览器下载（`Blob` + `<a download>`）落盘**，每次保存都是新下载（`download://<seq>/<name>` 句柄，不做原地覆盖、无 `.bak`/恢复快照）；`EXPORT`/`PLOT` 走同一下载通道（**浏览器 bundle 只编了 DWG/DXF 连接器：裸 `EXPORT` 的实际落盘仍是 `.dxf`（源为 `.dwg` 也回退 `.dxf`），显式 `EXPORT DWG` 写实验性 DWG；其它格式按 `unsupported-runtime: export.<id>` 拒绝**）；外部资源嵌入问题在 Web/X11 `dom-canvas` 不提供（`unsupported-runtime: embed_resources`，页面读不到本地目录），但已打开归档里的内嵌资源仍随文档存在；**连接器按载体编译**（`cad-app` 的 `formats-*`）：该 bundle 其余格式按 `unsupported-runtime: import.<id>` / `export.<id>` 显式拒绝，不静默回退；Linux X11/XWayland 的 `dom-canvas` 走 `app-web` 的 `full-formats`，格式集不受此裁剪；CI `web-smoke` 是 SwiftShader 冒烟，非 GPU/像素；native host target 是显式 NOT IMPLEMENTED 空壳；**网格内核已注入**：布尔/修复同步执行（阻塞 UI、无中途取消），总三角面 ≤ 200,000，超出按 `mesh.sync_budget` 拒绝，运行时 **NOT VERIFIED** |
 | CLI `cad-cli-tools` | 保留，headless 开图/出图（PNG/SVG/PDF） |
 
 `ymodel` 原生读写的载体状态：**Linux、Android、Windows、macOS、Web 已接线**（Linux：`apps/app-linux/src/ymodel_archive.rs`

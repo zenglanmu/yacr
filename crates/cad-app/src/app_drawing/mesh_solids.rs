@@ -33,6 +33,19 @@ pub(crate) const MESH_TYPE_KEY: &str = "AcDbSubDMesh";
 /// The stable refusal a carrier without a mesh modeler reports.
 pub const MESH_MODELER_UNSUPPORTED: &str = "unsupported-runtime: mesh-modeler";
 
+/// What actually happened when the command returned, per carrier.
+///
+/// Native hosts freeze a plan and start a worker, so the drawing settles later
+/// and the message must not imply the result is already visible. `dom-canvas`
+/// has no thread and runs the kernel inline: the command returns only after the
+/// computation, and the next owner tick commits it, so saying "background"
+/// there would be false (ADR-0061).
+const MESH_JOB_SETTLEMENT: &str = if cfg!(target_arch = "wasm32") {
+    "computed synchronously on the dom-canvas thread; the drawing changes on the next tick"
+} else {
+    "started in the background; the drawing changes when the job settles"
+};
+
 /// The operand classes a boolean can accept.
 pub(crate) enum BooleanOperand {
     /// One exact `Body3d { Solid, Exact }` stored as `AcDb3dSolid`.
@@ -110,8 +123,7 @@ impl Application {
             object: None,
             code: "mesh.boolean_started".into(),
             message: format!(
-                "{}: started in the background for {operand_count} meshes; the drawing changes \
-                 when the job settles",
+                "{}: {MESH_JOB_SETTLEMENT} ({operand_count} meshes)",
                 op_label(op)
             ),
         });
@@ -211,10 +223,7 @@ impl Application {
         diagnostics.push(Diagnostic {
             object: None,
             code: "mesh.repair_started".into(),
-            message: format!(
-                "{}: started in the background; the drawing changes when the job settles",
-                mode.as_str()
-            ),
+            message: format!("{}: {MESH_JOB_SETTLEMENT}", mode.as_str()),
         });
         Ok(CommandOutcome {
             objects: Vec::new(),

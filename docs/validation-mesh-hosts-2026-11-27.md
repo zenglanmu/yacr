@@ -1,8 +1,9 @@
-# 网格内核注入四个 native-below 载体（2026-11-27）
+# 网格内核注入四个 native-below 载体 + dom-canvas 同步例外（2026-11-27）
 
 本轮把 ADR-0061 的 `MeshModeler` 注入从 Linux 原生宿主扩展到全部 `native-below` 载体：
-Linux、Windows、macOS、Android。`dom-canvas`（Web、X11/XWayland）**不注入**，仍按
-`unsupported-runtime: mesh-modeler` 显式拒绝（wasm 无线程，ADR-0061 D7）。
+Linux、Windows、macOS、Android。`dom-canvas`（Web、X11/XWayland）随后也在同一轮改为
+**同步例外**（`app-web` 注入、会话线程 inline、`mesh.sync_budget` 上限），见文末
+“dom-canvas 同步例外”；它不是 `native-below` 的 worker/取消模型。
 
 ## 改动
 
@@ -42,8 +43,19 @@ Android 另加源码契约 `contract::the_native_session_installs_the_mesh_kerne
   不证明 AppKit/Tauri/WebView/面板/层序可用。
 - **NOT RUN**：各非 Linux 载体的 clippy、完整测试、宿主 smoke；Android 设备安装；Windows
   Wine/真机；macOS 真机。
-- `dom-canvas`（Web、X11/XWayland）本轮未改，仍无 `MeshModeler`；纯面编辑/细分/平滑/补洞是
+- `dom-canvas`（Web、X11/XWayland）本轮已改为同步例外，见下一节；纯面编辑/细分/平滑/补洞是
   `cad-mesh-edit` 共享层逻辑，不依赖该内核。
+
+## 同轮后续：dom-canvas 同步例外
+
+- `apps/app-web` 在 wasm target 依赖 `cad-kernel-manifold`，`Live::install` /
+  `Live::install_empty` 创建会话后调用 `install_mesh_modeler`；宿主测试编译为 no-op。
+- `cad-app::tasks::mesh::MeshJobManager::start` 在 `target_arch = "wasm32"` 下不 spawn：
+  同步 `run_job`，结果放进同一个 `mpsc`，下一次 `HostCore::tick` 的
+  `poll_mesh_job` 照常提交（一条事务/一步撤销）。
+- 同步预算在调用内核前检查：`MESH_SYNC_MAX_TRIANGLES = 200_000` 总操作数三角面，
+  超出返回稳定标记 `mesh.sync_budget`；没有中途取消/进度，页面在调用期间阻塞。
+- 详细命令与证据见 [`docs/validation-web-mesh-sync-2026-11-27.md`](validation-web-mesh-sync-2026-11-27.md)。
 
 ## 同轮：网格 plan 内存优化
 

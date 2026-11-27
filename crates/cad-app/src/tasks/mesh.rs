@@ -1,9 +1,9 @@
-//! P-MESH-1a/1b: one background job for mesh booleans and mesh repair.
+//! P-MESH-1a/1b: one mesh job for mesh booleans and mesh repair.
 //!
 //! The shape mirrors [`super::solid::SolidBooleanManager`] exactly: one current
-//! job per controller, a frozen plan, a worker thread, a live cancellation
-//! token, and a terminal value that only publishes when its [`TaskStamp`] is
-//! still current. The difference is what crosses the worker:
+//! job per controller, a frozen plan, a live cancellation token, and a terminal
+//! value that only publishes when its [`TaskStamp`] is still current. The
+//! difference is what crosses the execution boundary:
 //!
 //! * the kernel seam is [`cad_kernel_adapter::MeshModeler`] (never
 //!   `SolidModeler`), so the result is always a triangle mesh;
@@ -12,10 +12,17 @@
 //! * a boolean and a repair share this one slot, so the two mesh operations can
 //!   never run at once and a document replacement/close aborts both.
 //!
-//! The worker owns an immutable snapshot of every operand. The host re-checks
-//! the exact rows (revision **and** full entity) before committing, so an edit
-//! made while the job ran discards the result instead of deleting newer
-//! geometry. A cancelled or superseded result never touches `cad-db`.
+//! Native hosts run the frozen plan on a worker thread. `dom-canvas` has no OS
+//! thread, so its wasm build runs the same plan **inline on the session thread**
+//! (the deliberate ADR-0061 exception): the UI is blocked for the call, there is
+//! no mid-call cancellation, and oversized operands are refused by
+//! [`sync_budget_refusal`] before the kernel starts.
+//!
+//! The worker (or the synchronous wasm call) owns an immutable snapshot of every
+//! operand. The host re-checks the exact rows (revision **and** full entity)
+//! before committing, so an edit made while the job ran discards the result
+//! instead of deleting newer geometry. A cancelled or superseded result never
+//! touches `cad-db`.
 
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
@@ -66,6 +73,17 @@ impl MeshJobOperand {
     /// never a silent success.
     pub(crate) fn mesh(&self) -> Option<MeshData> {
         mesh_operand_data(&self.snapshot)
+    }
+
+    /// Vertex/triangle counts without copying the buffers.
+    ///
+    /// Used by the dom-canvas synchronous budget, which runs on the command
+    /// thread and must not clone a whole mesh just to size it.
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn geometry_counts(&self) -> (usize, usize) {
+        mesh_geometry(&self.snapshot)
+            .map(|mesh| (mesh.vertices.len(), mesh.triangles.len()))
+            .unwrap_or((0, 0))
     }
 }
 
@@ -150,6 +168,48 @@ pub(crate) struct MeshJobPlan {
     pub(crate) draw_order: i64,
     /// A boolean carries two or more; a repair carries exactly one.
     pub(crate) operands: Vec<MeshJobOperand>,
+}
+
+/// The largest total operand triangle count a **synchronous** dom-canvas mesh
+/// job may carry.
+///
+/// `dom-canvas` has no worker thread, so the kernel runs inline on the session
+/// thread and blocks the page for the whole call. This cap is a **liveness
+/// guard**, not a performance target or a claim that a job at the limit is
+/// fast: it refuses inputs that are obviously too large to finish inside an
+/// interactive stall, with the stable `mesh.sync_budget` marker. The number is
+/// deliberately conservative and may be raised only with measured browser
+/// evidence (ADR-0061, dom-canvas exception).
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) const MESH_SYNC_MAX_TRIANGLES: usize = 200_000;
+
+/// The stable refusal when a synchronous dom-canvas mesh job is over budget.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) const MESH_SYNC_BUDGET: &str = "mesh.sync_budget";
+
+/// Refuse a dom-canvas mesh job whose frozen operands exceed the synchronous
+/// budget.
+///
+/// Reads the rows in place (`geometry_counts` does not clone) because this runs
+/// on the command thread. Oversized work is a named refusal before the kernel
+/// is called, never a page that hangs until the browser kills it.
+#[cfg(any(target_arch = "wasm32", test))]
+fn sync_budget_refusal(plan: &MeshJobPlan) -> Option<CadError> {
+    let mut vertices = 0usize;
+    let mut triangles = 0usize;
+    for operand in &plan.operands {
+        let (operand_vertices, operand_triangles) = operand.geometry_counts();
+        vertices = vertices.saturating_add(operand_vertices);
+        triangles = triangles.saturating_add(operand_triangles);
+    }
+    if triangles <= MESH_SYNC_MAX_TRIANGLES {
+        return None;
+    }
+    Some(CadError::Unsupported(format!(
+        "{MESH_SYNC_BUDGET}: the selected meshes total {triangles} triangles \
+         ({vertices} vertices); the synchronous dom-canvas kernel accepts at most \
+         {MESH_SYNC_MAX_TRIANGLES} triangles. Split the operands or use a native carrier."
+    )))
 }
 
 /// How the worker reached its terminal state.
@@ -289,7 +349,82 @@ impl MeshJobManager {
     }
 
     /// Start a mesh job, superseding any running one.
+    ///
+    /// Native hosts run the frozen plan on a worker thread and keep the owner
+    /// tick responsive. `dom-canvas` has no thread: the wasm build runs the same
+    /// plan **inline** on the session thread, bounded by
+    /// [`MESH_SYNC_MAX_TRIANGLES`] and the stable `mesh.sync_budget` refusal.
+    /// That exception is deliberate (ADR-0061): there is no mid-call cancel and
+    /// the page is blocked while the kernel runs.
     pub(crate) fn start(
+        &mut self,
+        plan: MeshJobPlan,
+        modeler: Arc<dyn MeshModeler>,
+    ) -> CadResult<TaskStamp> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Before superseding anything: an oversized synchronous job is
+            // refused by name, leaving the previous job (if any) untouched.
+            if let Some(error) = sync_budget_refusal(&plan) {
+                return Err(error);
+            }
+            self.start_inline(plan, modeler)
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.cancel_current();
+            self.document = plan.document;
+            self.generation = next_generation();
+            let stamp = self.current_stamp();
+
+            let cancel = CancellationToken::default();
+            let (result_tx, result_rx) = mpsc::channel();
+            let worker_plan = Arc::new(plan);
+            let worker_cancel = cancel.clone();
+            let worker_stamp = stamp.clone();
+            let spawned = std::thread::Builder::new()
+                .name(format!("yacr-mesh-job-{}", stamp.generation))
+                .spawn({
+                    let plan = worker_plan.clone();
+                    move || {
+                        let cancelled = {
+                            let token = worker_cancel.clone();
+                            move || token.is_cancelled()
+                        };
+                        let terminal = run_job(&plan, modeler.as_ref(), &worker_stamp, &cancelled);
+                        let _ = result_tx.send(terminal);
+                    }
+                });
+            let handle = match spawned {
+                Ok(handle) => Some(handle),
+                Err(error) => {
+                    return Err(CadError::ResourceMissing(format!(
+                        "mesh.worker_spawn_failed: could not start the mesh worker: {error}"
+                    )));
+                }
+            };
+
+            self.current = Some(MeshJob {
+                stamp,
+                cancel,
+                plan: worker_plan,
+                result: result_rx,
+                handle,
+                consumed: false,
+            });
+            Ok(self.current_stamp())
+        }
+    }
+
+    /// Run one frozen plan on the current thread (`dom-canvas` / contract test).
+    ///
+    /// The terminal value goes into the same channel the worker path uses, so
+    /// `poll` keeps the existing cancellation/staleness checks and the host keeps
+    /// the one-transaction commit. There is no watcher thread: the kernel sees a
+    /// cancellation token only before and after the call.
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn start_inline(
         &mut self,
         plan: MeshJobPlan,
         modeler: Arc<dyn MeshModeler>,
@@ -301,38 +436,21 @@ impl MeshJobManager {
 
         let cancel = CancellationToken::default();
         let (result_tx, result_rx) = mpsc::channel();
-        let worker_cancel = cancel.clone();
-        let worker_stamp = stamp.clone();
         let worker_plan = Arc::new(plan);
-
-        let handle = std::thread::Builder::new()
-            .name(format!("yacr-mesh-job-{}", stamp.generation))
-            .spawn({
-                let plan = worker_plan.clone();
-                move || {
-                    let cancelled = {
-                        let token = worker_cancel.clone();
-                        move || token.is_cancelled()
-                    };
-                    let terminal = run_job(&plan, modeler.as_ref(), &worker_stamp, &cancelled);
-                    let _ = result_tx.send(terminal);
-                }
-            });
-        let handle = match handle {
-            Ok(handle) => handle,
-            Err(error) => {
-                return Err(CadError::ResourceMissing(format!(
-                    "mesh.worker_spawn_failed: could not start the mesh worker: {error}"
-                )));
-            }
-        };
+        let worker_cancel = cancel.clone();
+        let cancelled = move || worker_cancel.is_cancelled();
+        let terminal = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_job(&worker_plan, modeler.as_ref(), &stamp, &cancelled)
+        }))
+        .unwrap_or_else(|_| Terminal::Failed(worker_panicked()));
+        let _ = result_tx.send(terminal);
 
         self.current = Some(MeshJob {
             stamp,
             cancel,
             plan: worker_plan,
             result: result_rx,
-            handle: Some(handle),
+            handle: None,
             consumed: false,
         });
         Ok(self.current_stamp())
@@ -585,4 +703,114 @@ fn failure_message(diagnostics: &[Diagnostic]) -> String {
         .first()
         .map(|diagnostic| diagnostic.message.clone())
         .unwrap_or_else(|| "the modeler produced no mesh".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cad_db::DbObject;
+    use cad_domain::{Mesh, ObjectId, Point3};
+
+    fn plan_with_triangles(triangles: usize) -> MeshJobPlan {
+        let entity = DbEntity {
+            object: DbObject {
+                id: ObjectId(1),
+                type_key: "AcDbSubDMesh".into(),
+                revision: Revision(0),
+                source_handle: None,
+            },
+            id: EntityId(1),
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            geometry: SemanticGeometry::Mesh(Mesh {
+                vertices: vec![Point3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }],
+                triangles: vec![[0, 0, 0]; triangles],
+                ..Default::default()
+            }),
+            draw_order: 0,
+        };
+        MeshJobPlan {
+            document: DocumentId(1),
+            kind: MeshJobKind::Repair {
+                mode: MeshRepairMode::Orientation,
+                rule: MeshWindingRule::Positive,
+            },
+            layer: LayerId(0),
+            space: SpaceId::Model,
+            draw_order: 0,
+            operands: vec![MeshJobOperand::new(entity)],
+        }
+    }
+
+    #[test]
+    fn the_sync_budget_refuses_only_above_its_triangle_limit() {
+        assert!(sync_budget_refusal(&plan_with_triangles(MESH_SYNC_MAX_TRIANGLES)).is_none());
+
+        let over = plan_with_triangles(MESH_SYNC_MAX_TRIANGLES + 1);
+        match sync_budget_refusal(&over) {
+            Some(CadError::Unsupported(text)) => {
+                assert!(text.contains(MESH_SYNC_BUDGET), "{text}");
+                assert!(text.contains(&(MESH_SYNC_MAX_TRIANGLES + 1).to_string()));
+                assert!(text.contains(&MESH_SYNC_MAX_TRIANGLES.to_string()));
+            }
+            other => panic!("expected a named sync-budget refusal, got {other:?}"),
+        }
+    }
+
+    /// A modeler that always refuses, so the inline path can be exercised
+    /// without a kernel (the terminal mapping is the contract under test).
+    struct RefusingModeler;
+
+    impl MeshModeler for RefusingModeler {
+        fn registration(&self) -> cad_domain::Registration {
+            cad_domain::Registration {
+                type_key: "test.refusing-mesh".into(),
+                version: 1,
+                priority: 1,
+                entity_types: Vec::new(),
+                capabilities: Vec::new(),
+            }
+        }
+
+        fn capabilities(&self) -> cad_kernel_adapter::MeshModelerCapabilities {
+            cad_kernel_adapter::MeshModelerCapabilities::all()
+        }
+
+        fn execute(
+            &self,
+            request: &MeshRequest<'_>,
+            _cancelled: &(dyn Fn() -> bool + Sync),
+        ) -> CadResult<cad_kernel_adapter::MeshResult> {
+            Ok(cad_kernel_adapter::MeshResult {
+                stamp: request.stamp.clone(),
+                outcome: MeshOutcome::Unsupported {
+                    reason: cad_kernel_adapter::MeshUnsupportedReason {
+                        code: "mesh.test_refusal",
+                        operation: request.operation.family(),
+                        detail: "the refusing modeler never computes".into(),
+                    },
+                },
+            })
+        }
+    }
+
+    #[test]
+    fn the_inline_path_feeds_the_existing_poll_contract() {
+        let mut manager = MeshJobManager::new(DocumentId(1));
+        let stamp = manager
+            .start_inline(plan_with_triangles(1), Arc::new(RefusingModeler))
+            .expect("the inline path must accept a valid plan");
+        assert_eq!(stamp, manager.current_stamp());
+
+        match manager.poll() {
+            MeshJobTake::Failed(CadError::Unsupported(text)) => {
+                assert!(text.contains("mesh.test_refusal"), "{text}");
+            }
+            other => panic!("expected the modeler refusal through poll, got {other:?}"),
+        }
+    }
 }

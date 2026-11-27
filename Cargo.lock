@@ -239,6 +239,7 @@ dependencies = [
  "cad-domain",
  "cad-engine",
  "cad-host",
+ "cad-kernel-manifold",
  "cad-platform",
  "cad-render-wgpu",
  "cad-representation",

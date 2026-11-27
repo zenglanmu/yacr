@@ -110,6 +110,28 @@ pub const SYNTHETIC_DWG: &[u8] = include_bytes!("../../../fixtures/dwg/synthetic
 /// The label `start` reports as the open document.
 pub const SYNTHETIC_LABEL: &str = "synthetic-four-lines.dwg";
 
+/// Install the mesh kernel on the page session (ADR-0061 P-MESH-1a/1b).
+///
+/// `dom-canvas` has no worker thread, so the kernel is the **synchronous
+/// exception** to the native worker contract: `cad-app` runs the job inline on
+/// this session thread and refuses oversized operands with `mesh.sync_budget`
+/// before calling it. The native hosts keep their worker + cancellation path.
+///
+/// Only wasm links the kernel (`apps/app-web/Cargo.toml`); the host-side session
+/// tests compile this helper as a no-op so the real `CadSession` contracts stay
+/// testable on a plain Linux host.
+#[cfg(target_arch = "wasm32")]
+fn install_mesh_modeler(session: &CadSession) {
+    session.set_mesh_modeler(Some(std::sync::Arc::new(
+        cad_kernel_manifold::ManifoldMeshModeler::new(),
+    )));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_mesh_modeler(session: &CadSession) {
+    let _ = session;
+}
+
 // ---------------------------------------------------------------------------
 // The stable failure vocabulary
 // ---------------------------------------------------------------------------
@@ -340,6 +362,7 @@ impl Live {
             BytesDocument::new(label, bytes).with_archive(crate::ymodel_archive::ZipArchive::new()),
         )
         .map_err(|error| Failure::new(STEP_IMPORT, error.to_string()))?;
+        install_mesh_modeler(&session);
         let import_ms = (clock() - started).max(0.0);
         session
             .set_canvas_metrics(metrics.css, metrics.dpr)
@@ -406,6 +429,7 @@ impl Live {
             Some(crate::ymodel_archive::ZipArchive::new()),
         )
         .map_err(|error| Failure::new(STEP_STATE, error.to_string()))?;
+        install_mesh_modeler(&session);
         let import_ms = (clock() - started).max(0.0);
         session
             .set_canvas_metrics(metrics.css, metrics.dpr)

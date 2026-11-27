@@ -50,9 +50,10 @@
     **P-MESH-0 已实现（2026-11-26）：接缝 + `cad-kernel-manifold` + 门禁 + 真实内核测试；
     P-MESH-1a/1b 也已实现（2026-11-26）：网格 `UNION`/`SUBTRACT`/`INTERSECT` 与
     `MESHREPAIR`/`MESHREBUILD` 由 `native-below` 载体（Linux/Windows/macOS/Android）注入
-    `ManifoldMeshModeler`；`dom-canvas`（Web、X11/XWayland）按
-    `unsupported-runtime: mesh-modeler` 拒绝**。Linux 之外只有跨目标编译/契约证据，运行时
-    **NOT VERIFIED**。
+    `ManifoldMeshModeler`；`dom-canvas`（Web、X11/XWayland）也注入，但走**同步例外**：
+    在会话线程 inline 执行、阻塞 UI、无中途取消，总三角面 ≤ 200,000，超出按
+    `mesh.sync_budget` 拒绝**。Linux 之外只有跨目标编译/契约证据，运行时
+    **NOT VERIFIED**；Web/X11 的同步执行同样 NOT VERIFIED。
 
 **2026-11-17 更新（命令侧）**：`MASSPROP` 已对精确 `Body3d{Solid, Exact}` 接线（C3a，见 §4.3）；
 `face_sources` 已由 `BrepTessellator` 写入 `brep:face:<shell>/<face>`（C3b）；`VSCURRENT` 已是

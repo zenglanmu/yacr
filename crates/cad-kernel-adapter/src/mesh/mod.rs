@@ -59,8 +59,11 @@ pub trait MeshModeler: Send + Sync {
 
     /// Execute one mesh operation.
     ///
-    /// The seam is synchronous and may be slow: callers must run it on a worker
-    /// thread and must never block the UI.
+    /// The seam is synchronous and may be slow. Native hosts run it on a worker
+    /// thread and must never block the UI; the `dom-canvas` wasm carrier has no
+    /// thread and runs it inline on the session thread under an explicit
+    /// `mesh.sync_budget` cap (ADR-0061), which is a deliberate, bounded
+    /// exception rather than a silent main-thread fallback.
     ///
     /// # Cancellation
     ///

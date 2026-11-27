@@ -41,8 +41,8 @@
   stored polyline 仍不可编辑，因此本表的“75.4%”不是“SketchUp 已复刻七成半”的营销结论。
 - P-MESH-1a/1b 已实现（2026-11-26；2026-11-27 起四个 `native-below` 载体均注入
   `ManifoldMeshModeler`）：Linux 有运行/契约证据，Windows/macOS/Android 只有跨目标编译/契约
-  证据（运行时 NOT VERIFIED）；`dom-canvas`（Web、X11/XWayland）按
-  `unsupported-runtime: mesh-modeler` 显式拒绝。
+  证据（运行时 NOT VERIFIED）；`dom-canvas`（Web、X11/XWayland）注入同一内核但走**同步例外**
+  （inline、阻塞 UI、无中途取消，总三角面 ≤ 200,000，超出按 `mesh.sync_budget` 拒绝）。
 
 ## 3. Toolbar 单元
 
