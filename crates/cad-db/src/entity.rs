@@ -125,6 +125,18 @@ pub struct EntityRenderAttributes {
     /// stages it through `update_entity_display`, so it bumps one revision and
     /// carries `ChangeMask::STYLE` exactly like the style attributes above.
     pub clip: Option<BlockClip>,
+    /// SketchUp's **Soften Edges** angle, in degrees (`0..=180`).
+    ///
+    /// `None` means "not softened" (every display edge is hard). `Some(angle)`
+    /// tells the representation to suppress edges whose two adjacent display
+    /// triangles meet at or below `angle`: coplanar triangles hide their shared
+    /// edge, a 90° cube keeps all twelve. It is display-only data (no geometry,
+    /// type or layer change), so it travels with the display state through
+    /// `update_entity_display` and one `SOFTENEDGES` write is one revision.
+    ///
+    /// Stored only when set (the archive key is omitted otherwise), so a
+    /// document nobody softened keeps its lower format minor.
+    pub soften: Option<f64>,
 }
 
 impl Default for EntityRenderAttributes {
@@ -138,6 +150,7 @@ impl Default for EntityRenderAttributes {
             geometry_source: GeometrySource::Analytic,
             annotative: AnnotativeAttributes::default(),
             clip: None,
+            soften: None,
         }
     }
 }

@@ -692,6 +692,7 @@ mod tests {
         let primitive = DisplayPrimitive::MeshWithStoredEdges {
             mesh: Arc::new(mesh),
             edges: Arc::from(Vec::new().into_boxed_slice()),
+            derive_when_empty: true,
         };
         let reps = vec![rep(50, Vec::new(), primitive, 1.0)];
         let selection = [

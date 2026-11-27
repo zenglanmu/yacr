@@ -305,6 +305,7 @@ mod recovery;
 mod scenes;
 mod select_filter;
 mod select_similar;
+mod soften;
 // SSX Express-Tool selection-filter contracts.
 mod ssx;
 mod style_tables;

@@ -146,6 +146,8 @@ impl CommandId {
                 | Self::InsertBlock
                 // SCALETEXT rewrites the selected text entities' glyph height.
                 | Self::ScaleText
+                // SOFTENEDGES writes per-entity display state (`render_attributes.soften`).
+                | Self::SoftenEdges
                 // BLOCK writes the block table, moves the selected entities into
                 // the new definition and inserts a reference.
                 | Self::DefineBlock

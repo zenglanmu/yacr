@@ -23,7 +23,7 @@ export const CONCEPT_TRAY: readonly TrayPanel[] = Object.freeze<TrayPanel[]>([
   pending('concept.shadows', 'concept.panel.shadows'),
   pending('concept.fog', 'concept.panel.fog'),
   pending('concept.match_photo', 'concept.panel.match_photo'),
-  pending('concept.soften_edges', 'concept.panel.soften_edges'),
+  { id: 'concept.soften_edges', titleKey: 'concept.panel.soften_edges', kind: 'soften' },
   pending('concept.overlays', 'concept.panel.overlays'),
   { id: 'concept.instructor', titleKey: 'concept.panel.instructor', kind: 'instructor' },
   pending('concept.outliner', 'concept.panel.outliner'),

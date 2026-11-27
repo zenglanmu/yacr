@@ -405,6 +405,54 @@ function ScenesBody() {
   );
 }
 
+/**
+ * The Soften Edges panel.
+ *
+ * SketchUp's dialog equivalent: one angle (degrees) applied to the current
+ * selection with `SOFTENEDGES <angle>`. All semantics live in the command (the
+ * selection must be 3D bodies, the range is `0..=180`, one undo step); the panel
+ * only validates the input enough to disable a meaningless click.
+ */
+function SoftenBody() {
+  const { t } = useI18n();
+  const shell = useShell();
+  const [angle, setAngle] = useState('20');
+  const parsed = Number(angle);
+  const valid = angle.trim() !== '' && Number.isFinite(parsed) && parsed >= 0 && parsed <= 180;
+  const available = shell.canCommand('SOFTENEDGES');
+  return (
+    <>
+      <p className="concept-panel__hint">{t('concept.soften.hint')}</p>
+      <div className="concept-scenes__save">
+        <input
+          type="number"
+          min={0}
+          max={180}
+          step={1}
+          className="concept-scenes__name"
+          value={angle}
+          aria-label={t('concept.soften.angle')}
+          onChange={event => setAngle(event.currentTarget.value)}
+        />
+        <button
+          type="button"
+          className="concept-panel__action"
+          disabled={!valid || !available}
+          onClick={() => shell.runCommand(`SOFTENEDGES ${parsed}`)}
+        >
+          {t('concept.soften.apply')}
+        </button>
+      </div>
+      {!valid ? (
+        <p className="concept-panel__hint" role="alert">{t('concept.soften.invalid')}</p>
+      ) : null}
+      {!available ? (
+        <p className="concept-panel__hint">{t('concept.soften.no_document')}</p>
+      ) : null}
+    </>
+  );
+}
+
 function PendingBody({ panel }: { readonly panel: TrayPanel }) {
   const { t } = useI18n();
   return <p className="concept-panel__hint">{panel.pendingText ?? t(panel.pendingKey ?? 'concept.pending.panel')}</p>;
@@ -421,6 +469,7 @@ function Body({ panel }: { readonly panel: TrayPanel }) {
     case 'mechanicalTree': return <MechanicalTreeBody />;
     case 'materials': return <MaterialsBody />;
     case 'scenes': return <ScenesBody />;
+    case 'soften': return <SoftenBody />;
     case 'pending':
     default: return <PendingBody panel={panel} />;
   }

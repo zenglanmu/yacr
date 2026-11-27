@@ -126,6 +126,7 @@ fn render_attributes_round_trip_with_nan_scale_and_clip() {
             scale: 1.25,
         },
         linetype_scale: f64::NAN,
+        soften: Some(12.5),
         geometry_source: GeometrySource::ProxyCache,
         annotative: AnnotativeAttributes {
             annotative: true,
@@ -166,6 +167,11 @@ fn render_attributes_round_trip_with_nan_scale_and_clip() {
         encoded["render_attributes"]["geometry_source"],
         json!({ "kind": "proxy_cache" })
     );
+    assert_eq!(
+        encoded["render_attributes"]["soften"],
+        json!(12.5),
+        "a set soften angle is written as degrees"
+    );
 
     let decoded = round_trip(&entity, Some(&attributes), false);
     let actual = decoded.attributes.expect("attributes");
@@ -174,6 +180,14 @@ fn render_attributes_round_trip_with_nan_scale_and_clip() {
         f64::NAN.to_bits(),
         "NaN survives by bits"
     );
+    // An unsoftened entity omits the key entirely (the minor-21 gate).
+    let plain = EntityRenderAttributes::default();
+    let encoded_plain = encode(&entity, Some(&plain), false, None, None).expect("encode");
+    assert!(
+        encoded_plain["render_attributes"].get("soften").is_none(),
+        "an unset soften key is omitted, never written as null"
+    );
+
     // Everything else is exact; compare with the NaN field neutralised.
     let mut expected = attributes.clone();
     expected.linetype_scale = 0.0;
@@ -196,10 +210,11 @@ fn render_attributes_round_trip_with_nan_scale_and_clip() {
         "geometry_source",
         "annotative",
         "clip",
+        "soften",
     ]
     .into_iter()
     .collect();
-    assert_eq!(keys, expected_keys, "every attribute field is written");
+    assert_eq!(keys, expected_keys, "every set attribute field is written");
 }
 
 #[test]

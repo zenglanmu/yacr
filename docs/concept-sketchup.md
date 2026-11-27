@@ -41,6 +41,9 @@
   轮廓/路径都保持原位、一次事务/一步撤销，拐角在角平分面上剪切，结果是单壳、外向、每面有
   `face_sources` 的 `AcDbSubDMesh`。轮廓可以是闭合直线 `LWPOLYLINE`、`LINE` 闭环或 `CIRCLE`
   （圆按 48 边形采样，SketchUp 的圆也是多边形）；弧线/bulge 轮廓、闭合路径与反向路径按名拒绝。
+  **柔化边线**（2026-11-27，ADR-0064）：`SOFTENEDGES [<angle>]` 把所选三维体的
+  `render_attributes.soften` 写成角度（默认 20°），渲染隐藏相邻面夹角 ≤ 阈值的边；无法与显示
+  三角形匹配的边保持可见；一次写入一步撤销，元素行只在设置时写键（minor 21）。
   **场景**（2026-11-27，ADR-0063）：`tables/scenes.json`（minor 20）存命名相机/空间/样式快照，
   `SCENE SAVE/RESTORE/LIST/DELETE` 各按一条 revision/一步撤销（RESTORE 是会话应用，记
   `ZOOM PREVIOUS`），托盘 Scenes 面板通过 `cad_scenes` host read 列表并 dispatch 恢复/保存/
@@ -166,7 +169,7 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
 | Shadows | pending | 无阴影设置 |
 | Fog | pending | 无雾 |
 | Match Photo | pending | 无照片匹配 |
-| Soften Edges | pending | 无边软化 |
+| Soften Edges | partial | 托盘面板（角度 0..=180 + 应用）+ `SOFTENEDGES [<angle>]`：按相邻显示三角形夹角隐藏柔化边（默认 20°，0 只隐藏共面边），per-entity 存 `render_attributes.soften`（minor 21），一次写入一步撤销；没有 Smooth normals/逐边手工柔化/场景快照 |
 | Overlays | pending | 无 overlay 系统 |
 | Outliner | pending | 无层级树编辑 |
 
@@ -193,6 +196,6 @@ New/Open/Save/Cut/Copy/Paste/Erase/Undo/Redo/Print/Toolbars 由既有文件与�
   21 个闭合网格修复成功、41 个开放网格按 `mesh.not_closed` 拒绝。该 SKP 测试仍是内核级；
   app 命令路径由 `mesh_command`/`mesh_real_samples` 覆盖。详见 `docs/validation-mesh-2026-11-26.md`。
 - 其余 `pending` 工具（Freehand/Protractor/3D Text/Outer Shell/Trim/Split/Camera/Walk/
-  Look Around/...）保持显式 pending；Shadows/Fog/Soften Edges/Overlays/Outliner 托盘面板仍是
-  pending，Scenes 已是有真实命令与面板的 `partial`。
+  Look Around/...）保持显式 pending；Shadows/Fog/Overlays/Outliner 托盘面板仍是 pending，
+  Scenes 与 Soften Edges 已是有真实命令与面板的 `partial`。
   任何一项实现都要同时改本表、改 UI（从 `pending` 改为命令）并补契约测试。

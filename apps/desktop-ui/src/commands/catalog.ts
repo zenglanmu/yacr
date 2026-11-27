@@ -1,5 +1,5 @@
-// The chrome's declarative command catalog, in AutoCAD-style listing order: a
-// plain sibling module (not a barrel) whose readers live in `commands.ts`.
+// The chrome's declarative command catalog, in AutoCAD-style order (readers in
+// `commands.ts`).
 
 /** One entry of the chrome's display catalog. */
 export interface CommandCatalogEntry {
@@ -15,7 +15,6 @@ import { INTERFACE_COMMAND_CATALOG } from './catalog-interface.ts';
 import { REFUSAL_COMMAND_CATALOG } from './catalog-refusals.ts';
 import { ACTION_RECORDER_COMMAND_CATALOG } from './catalog-recorder.ts';
 import { TABLE_COMMAND_CATALOG } from './catalog-tables.ts';
-
 /**
  * Every command name the app exposes in the chrome, in AutoCAD-style listing
  * order (file, draw, modify, view, measure, annotate, classify). `labelKey` is a
@@ -917,6 +916,7 @@ export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = Object.freeze([
   { id: 'EXTRUDE', labelKey: 'draw.kind.extrude', icon: 'pushPull', group: 'modify' },
   { id: 'FOLLOWME', labelKey: 'draw.kind.followme', icon: 'spline', group: 'modify' },
   { id: 'PAINT', labelKey: 'draw.kind.paint', icon: 'palette', group: 'modify' },
+  { id: 'SOFTENEDGES', labelKey: 'draw.kind.softenedges', icon: 'dot', group: 'modify' },
   { id: 'MATERIALS', labelKey: 'draw.kind.materials', icon: 'palette', group: 'modify' },
   { id: 'REVOLVE', labelKey: 'draw.kind.revolve', icon: 'dot', group: 'modify' },
   { id: 'SWEEP', labelKey: 'draw.kind.sweep', icon: 'dot', group: 'modify' },

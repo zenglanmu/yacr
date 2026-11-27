@@ -202,6 +202,15 @@ pub enum DisplayPrimitive {
     MeshWithStoredEdges {
         mesh: Arc<Mesh>,
         edges: Arc<[Point3]>,
+        /// Whether a consumer may derive a triangle-edge overlay when `edges`
+        /// is empty.
+        ///
+        /// `true` is the legacy/defensive behaviour (a hand-built fragment with
+        /// no stored segment still gets the surface-boundary overlay). A
+        /// **softened** body sets `false`: when every stored edge is softened
+        /// away the body must draw its fill with no hard edges, not a
+        /// tessellation-derived wireframe.
+        derive_when_empty: bool,
     },
     Text {
         text: String,
@@ -301,18 +310,21 @@ impl DisplayPrimitive {
             }
             // Both halves are world-space geometry: the mesh is transformed as
             // usual and every stored edge endpoint moves through the same map.
-            DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
-                DisplayPrimitive::MeshWithStoredEdges {
-                    mesh: Arc::new(transform_mesh(mesh, transform)),
-                    edges: Arc::from(
-                        edges
-                            .iter()
-                            .map(|point| transform.apply_point(*point))
-                            .collect::<Vec<Point3>>()
-                            .into_boxed_slice(),
-                    ),
-                }
-            }
+            DisplayPrimitive::MeshWithStoredEdges {
+                mesh,
+                edges,
+                derive_when_empty,
+            } => DisplayPrimitive::MeshWithStoredEdges {
+                mesh: Arc::new(transform_mesh(mesh, transform)),
+                edges: Arc::from(
+                    edges
+                        .iter()
+                        .map(|point| transform.apply_point(*point))
+                        .collect::<Vec<Point3>>()
+                        .into_boxed_slice(),
+                ),
+                derive_when_empty: *derive_when_empty,
+            },
             DisplayPrimitive::Text {
                 text,
                 origin,

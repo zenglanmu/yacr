@@ -114,6 +114,7 @@ fn text_glyph_is_explicit_and_stored_edges_are_never_text() {
     body_rep.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: Arc::new(mesh),
         edges: Arc::from(stored.into_boxed_slice()),
+        derive_when_empty: true,
     };
     let body_delta = SceneCache::default().build(&body_rep, stamp()).unwrap();
     let body = &body_delta.added[0];
@@ -199,6 +200,7 @@ fn body_mesh_batch_uses_its_stored_edges_not_the_triangle_derived_ones() {
     representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: Arc::new(mesh),
         edges: Arc::from(stored.into_boxed_slice()),
+        derive_when_empty: true,
     };
     let delta = SceneCache::default()
         .build(&representation, stamp())
@@ -248,6 +250,7 @@ fn body_stored_edges_are_deduplicated_and_degenerate_segments_dropped() {
     representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: Arc::new(mesh),
         edges: Arc::from(stored.into_boxed_slice()),
+        derive_when_empty: true,
     };
     let delta = SceneCache::default()
         .build(&representation, stamp())
@@ -287,6 +290,7 @@ fn body_stored_edges_are_relative_to_the_batch_local_origin() {
     representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: Arc::new(mesh),
         edges: Arc::from(stored.into_boxed_slice()),
+        derive_when_empty: true,
     };
     let delta = SceneCache::default()
         .build(&representation, stamp())
@@ -306,6 +310,7 @@ fn mesh_with_stored_edges_but_no_usable_segment_keeps_the_triangle_overlay() {
     representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: Arc::new(mesh),
         edges: Arc::from(Vec::<Point3>::new().into_boxed_slice()),
+        derive_when_empty: true,
     };
     let delta = SceneCache::default()
         .build(&representation, stamp())
@@ -858,6 +863,7 @@ fn a_body3d_still_emits_its_stored_edges() {
     representation.fragments[0].primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: Arc::new(mesh),
         edges: Arc::from(stored.into_boxed_slice()),
+        derive_when_empty: true,
     };
     let delta = SceneCache::default()
         .build(&representation, stamp())

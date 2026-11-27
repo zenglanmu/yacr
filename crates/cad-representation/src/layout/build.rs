@@ -356,7 +356,7 @@ pub fn build_paper_space(
                             }
                         }
                     }
-                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
                         // A body's stored edge set has no exact per-piece
                         // viewport cut: `clip_mesh` cuts the triangles only.
                         // A body whose every mesh vertex and stored edge
@@ -370,7 +370,11 @@ pub fn build_paper_space(
                         if clip.holds_all_points(mesh.vertices.iter().chain(edges.iter())) {
                             out.fragments.push(fragment_like(
                                 fragment,
-                                DisplayPrimitive::MeshWithStoredEdges { mesh, edges },
+                                DisplayPrimitive::MeshWithStoredEdges {
+                                    mesh,
+                                    edges,
+                                    derive_when_empty: true,
+                                },
                             ));
                             continue;
                         }
@@ -403,7 +407,11 @@ pub fn build_paper_space(
                                 );
                                 out.fragments.push(fragment_like(
                                     fragment,
-                                    DisplayPrimitive::MeshWithStoredEdges { mesh, edges },
+                                    DisplayPrimitive::MeshWithStoredEdges {
+                                        mesh,
+                                        edges,
+                                        derive_when_empty: true,
+                                    },
                                 ));
                             }
                         }

@@ -543,6 +543,7 @@ export const HOST_NAMES = [
   'FOLLOWME',
   'RECTANGROTATED',
   'PAINT',
+  'SOFTENEDGES',
   'MATERIALS',
   'PIE',
   'REVOLVE',

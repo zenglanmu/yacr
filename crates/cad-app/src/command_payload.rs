@@ -1,7 +1,6 @@
 //! The typed input payloads of the command funnel.
-//! Split out of the crate root for the code-size limit; every item is re-exported
-//! by [`crate`] under its original name, so public paths are unchanged.
-//! A payload describes the **input** of exactly one [`crate::CommandId`] and never carries behaviour: the command layer validates it, then writes or refuses.
+//! Split out for the code-size limit; every item is re-exported.
+//! A payload is the **input** of one [`crate::CommandId`]; it carries no behaviour.
 
 use cad_domain::{
     LayerId, MLeaderTextAngle, Point3, SelectionRef, SemanticGeometry, SpaceId, TextAlignH,
@@ -843,6 +842,8 @@ pub enum CommandPayload {
     View(ViewCommand),
     /// The typed `SCENE <option>` line (SketchUp pages).
     Scene(SceneCommand),
+    /// `SOFTENEDGES <angle>`: the soften angle in degrees (bare uses the default).
+    SoftenEdges(f64),
     ViewGo(String),
     VPoint(VPointInput),
     /// The 2026-11-07 layout/viewport batch; contract:
@@ -853,9 +854,8 @@ pub enum CommandPayload {
     /// [`crate::DimensionBatchPayload`]; contract in
     /// `command_id::dimension_edit`.
     Dimension(Box<crate::DimensionBatchPayload>),
-    /// The 2026-11-07 annotation/group batch (`GROUP`/`UNGROUP`/`GROUPEDIT`/
-    /// `QLEADER`/`LEADER`/`TEXTFIT`/`HATCHSETORIGIN`). Grouped in
-    /// [`crate::AnnotationBatchPayload`]; contract in `command_id::annot_batch`.
+    /// The 2026-11-07 annotation/group batch, grouped in
+    /// [`crate::AnnotationBatchPayload`] (`command_id::annot_batch`).
     Annotation(Box<crate::AnnotationBatchPayload>),
     /// `TRACE`: a closed 4-vertex band from `start` to `end` with `width`.
     /// Stored as one closed `Polyline`; no TRACE entity type exists.

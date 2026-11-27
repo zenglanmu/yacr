@@ -83,7 +83,7 @@ pub fn build_vector_document(
             // so the path document carries the same two layers the raster does.
             // The edge list is a flat set of independent endpoint pairs (the
             // `LineSegments` pairing rule), never a polyline.
-            DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+            DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
                 collect_mesh(&mut document, object, mesh, fragment, &vector_page);
                 if edges.len() % 2 != 0 {
                     document.report(

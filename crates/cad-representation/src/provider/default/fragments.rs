@@ -216,7 +216,9 @@ pub(super) fn body_fragment(
     context: &RepresentationContext,
     source: SelectionRef,
     representation: &mut DisplayRepresentation,
+    soften: Option<f64>,
 ) {
+    let soften = soften.filter(|angle| angle.is_finite() && (0.0..=180.0).contains(angle));
     let geometry_source = if body.is_exact() {
         GeometrySource::KernelMesh
     } else {
@@ -246,12 +248,23 @@ pub(super) fn body_fragment(
         } else {
             stored
         };
+        let segments = match soften {
+            Some(angle) => soften_edge_segments(&body.display.mesh, &segments, angle),
+            None => segments,
+        };
         if !segments.is_empty() {
             representation
                 .fragments
                 .push(fragment(DisplayPrimitive::LineSegments(Arc::from(
                     segments.into_boxed_slice(),
                 ))));
+            representation.completeness = body.display.completeness.clone();
+            return;
+        }
+        // Every stored edge is softened away: a wireframe request with no hard
+        // edge left draws nothing (no filled fallback), and the empty result is
+        // the soft state, not a missing geometry.
+        if soften.is_some() {
             representation.completeness = body.display.completeness.clone();
             return;
         }
@@ -289,11 +302,21 @@ pub(super) fn body_fragment(
         // triangles and whose display class stays "not a text glyph".
         let stored = body_edge_segments(&body.display.edges);
         let primitive = if stored.is_empty() {
+            // No stored edge exists to soften: the boundary overlay is the
+            // body's own (odd-use) edges, so a `Mesh` is already edge-exact.
             DisplayPrimitive::Mesh(Arc::new(body.display.mesh.clone()))
         } else {
+            let edges = match soften {
+                Some(angle) => soften_edge_segments(&body.display.mesh, &stored, angle),
+                None => stored,
+            };
             DisplayPrimitive::MeshWithStoredEdges {
                 mesh: Arc::new(body.display.mesh.clone()),
-                edges: Arc::from(stored.into_boxed_slice()),
+                edges: Arc::from(edges.into_boxed_slice()),
+                // A softened body keeps its fill with no hard edge when every
+                // stored edge is filtered out; the legacy overlay fallback must
+                // not reappear.
+                derive_when_empty: soften.is_none(),
             }
         };
         representation.fragments.push(fragment(primitive));
@@ -443,4 +466,71 @@ pub(super) fn push_chord_fragment(
             message: format!("{} produced no drawable points", entity.object.type_key),
         });
     }
+}
+
+/// The list of display edges whose adjacent triangles meet **above** `angle`
+/// degrees; an edge between two faces at or below the threshold is softened away.
+///
+/// Only edges that coincide exactly with a display-triangle edge are candidates
+/// (the stored edge endpoints are the mesh's own vertices for an imported body).
+/// A boundary edge (one adjacent triangle), a non-manifold edge (three or more)
+/// or an unmatched segment is kept: softening never invents a hidden silhouette,
+/// and an edge the mesh cannot explain stays visible.
+fn soften_edge_segments(mesh: &cad_domain::Mesh, segments: &[Point3], angle: f64) -> Vec<Point3> {
+    use std::collections::HashMap;
+    type Key = ((u64, u64, u64), (u64, u64, u64));
+    let vertex_key = |point: Point3| {
+        let bits = |value: f64| if value == 0.0 { 0 } else { value.to_bits() };
+        (bits(point.x), bits(point.y), bits(point.z))
+    };
+    let edge_key = |a: Point3, b: Point3| {
+        let (a, b) = (vertex_key(a), vertex_key(b));
+        if a <= b {
+            (a, b)
+        } else {
+            (b, a)
+        }
+    };
+    let mut normals: HashMap<Key, Vec<[f64; 3]>> = HashMap::new();
+    for triangle in &mesh.triangles {
+        let indices = triangle.map(|index| index as usize);
+        if indices.iter().any(|index| *index >= mesh.vertices.len()) {
+            continue;
+        }
+        let [a, b, c] = indices.map(|index| mesh.vertices[index]);
+        let u = [b.x - a.x, b.y - a.y, b.z - a.z];
+        let v = [c.x - a.x, c.y - a.y, c.z - a.z];
+        let normal = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let length = normal[0].hypot(normal[1]).hypot(normal[2]);
+        if !length.is_finite() || length <= 1e-12 {
+            continue;
+        }
+        let normal = [normal[0] / length, normal[1] / length, normal[2] / length];
+        for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+            let key = edge_key(mesh.vertices[indices[i]], mesh.vertices[indices[j]]);
+            normals.entry(key).or_default().push(normal);
+        }
+    }
+    segments
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|pair| {
+            let Some(adjacent) = normals.get(&edge_key(pair[0], pair[1])) else {
+                return true;
+            };
+            let [first, second] = adjacent.as_slice() else {
+                return true;
+            };
+            let dot = (first[0] * second[0] + first[1] * second[1] + first[2] * second[2])
+                .clamp(-1.0, 1.0);
+            dot.acos().to_degrees() > angle
+        })
+        .flatten()
+        .copied()
+        .collect()
 }

@@ -77,6 +77,7 @@ mod shape_block_arguments;
 mod shell_settings;
 mod snap_unit;
 mod snapshot;
+mod soften_arguments;
 mod space;
 mod status;
 mod status_view;
@@ -967,7 +968,6 @@ impl CadSession {
         }
         *self.resource_error.borrow_mut() = error;
     }
-
     /// After a failed resource install on a new document, clear the previous
     /// document's font/image caches on the render session so stale resources are
     /// never presented as if the new document resolved them. The GPU device is

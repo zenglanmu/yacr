@@ -245,6 +245,7 @@ mod trim_spline;
 // BEXTEND block-boundary commands), split out of `trim_extend` so the target
 // policy cannot drift between commands and every file stays inside the
 // code-size limit.
+mod soften;
 mod trim_targets;
 
 pub(crate) use helpers::{apply_drawing_patches, class_name, next_transaction_id};

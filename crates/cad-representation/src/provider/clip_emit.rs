@@ -77,9 +77,16 @@ pub(super) fn emit_clipped(
         // surviving piece is emitted as a plain `Mesh`, whose documented overlay
         // is derived from the clipped triangles, and the loss is reported once —
         // never stored edges *and* a derived overlay on the same piece.
-        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
             if region.holds_all_points(mesh.vertices.iter().chain(edges.iter())) {
-                emit(DisplayPrimitive::MeshWithStoredEdges { mesh, edges }, out);
+                emit(
+                    DisplayPrimitive::MeshWithStoredEdges {
+                        mesh,
+                        edges,
+                        derive_when_empty: true,
+                    },
+                    out,
+                );
                 return;
             }
             match clip_mesh_region(&mesh, region) {
@@ -105,7 +112,14 @@ pub(super) fn emit_clipped(
                         "the mesh cannot be clipped exactly (missing index or non-finite vertex), \
                          so it is kept unclipped",
                     );
-                    emit(DisplayPrimitive::MeshWithStoredEdges { mesh, edges }, out);
+                    emit(
+                        DisplayPrimitive::MeshWithStoredEdges {
+                            mesh,
+                            edges,
+                            derive_when_empty: true,
+                        },
+                        out,
+                    );
                 }
             }
         }

@@ -192,6 +192,7 @@ mod tests {
                         ]
                         .into_boxed_slice(),
                     ),
+                    derive_when_empty: true,
                 },
             }],
             completeness: Completeness::Complete,

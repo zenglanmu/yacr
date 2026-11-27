@@ -9,6 +9,7 @@
 //!
 //! | the document has | minor | what a minor-4 reader misses |
 //! |---|---|---|
+//! | a per-entity soften angle (minor 21) | `21` | `render_attributes.soften` |
 //! | scenes (`tables/scenes.json`) | `20` | the scene table |
 //! | document materials (`tables/materials.json`) | `19` | the paint table |
 //! | persisted named views (`tables/views.json`) | `18` | the `VIEW` table |
@@ -102,6 +103,9 @@ pub(crate) const FORMAT_MINOR_MATERIALS: u32 = 19;
 /// A document that carries scenes (`tables/scenes.json`).
 pub(crate) const FORMAT_MINOR_SCENES: u32 = 20;
 
+/// A document with a per-entity soften angle (minor 21).
+pub(crate) const FORMAT_MINOR_SOFTEN: u32 = 21;
+
 // The chain is a compile-time fact, not a convention: a future tier inserted in
 // the middle cannot silently leave the constants out of order. `16` (constraints)
 // is reserved by another lane, so the top tiers are checked by explicit offsets.
@@ -110,6 +114,7 @@ const _: () = assert!(FORMAT_MINOR_GROUPS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 3);
 const _: () = assert!(FORMAT_MINOR_NAMED_VIEWS == FORMAT_MINOR_BLOCK_ATTRIBUTES + 4);
 const _: () = assert!(FORMAT_MINOR_MATERIALS == FORMAT_MINOR_NAMED_VIEWS + 1);
 const _: () = assert!(FORMAT_MINOR_SCENES == FORMAT_MINOR_MATERIALS + 1);
+const _: () = assert!(FORMAT_MINOR_SOFTEN == FORMAT_MINOR_SCENES + 1);
 const _: () = assert!(FORMAT_MINOR_APPLICATION_DOMAIN + 1 == FORMAT_MINOR_BLOCK_ATTRIBUTES);
 const _: () = assert!(FORMAT_MINOR_VENDOR + 1 == FORMAT_MINOR_APPLICATION_DOMAIN);
 const _: () = assert!(FORMAT_MINOR_RELATIONS + 1 == FORMAT_MINOR_VENDOR);
@@ -129,8 +134,13 @@ const _: () = assert!(FORMAT_MINOR_PLAIN + 1 == FORMAT_MINOR_RESOURCES);
 /// tier here is about archive entries and the header flag, both of which the
 /// store already models.
 pub(crate) fn document_minor(snapshot: &DocumentSnapshot) -> u32 {
-    // Scenes are the newest tier: a minor-19 reader refuses the
-    // `tables/scenes.json` path rather than dropping the scenes.
+    // Soften is the newest tier: a minor-20 reader refuses the unknown
+    // `render_attributes.soften` key rather than drawing hard edges.
+    if snapshot.has_soften() {
+        return FORMAT_MINOR_SOFTEN;
+    }
+    // Scenes come next: a minor-19 reader refuses the `tables/scenes.json`
+    // path rather than dropping the scenes.
     if snapshot.has_scenes() {
         return FORMAT_MINOR_SCENES;
     }
@@ -223,7 +233,8 @@ mod tests {
     /// The top tier is the format constant, not an independent number.
     #[test]
     fn the_top_tier_is_the_format_minor() {
-        assert_eq!(FORMAT_MINOR_SCENES, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_SOFTEN, cad_domain::ymodel::FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR_SOFTEN, FORMAT_MINOR_SCENES + 1);
         assert_eq!(FORMAT_MINOR_SCENES, FORMAT_MINOR_MATERIALS + 1);
         assert_eq!(FORMAT_MINOR_MATERIALS, FORMAT_MINOR_NAMED_VIEWS + 1);
         assert_eq!(FORMAT_MINOR_NAMED_VIEWS, FORMAT_MINOR_BLOCK_ATTRIBUTES + 4);

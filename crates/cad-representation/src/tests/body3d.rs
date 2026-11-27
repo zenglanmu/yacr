@@ -88,7 +88,7 @@ fn exact_sheet_body_mesh_keeps_kernel_source_and_body_precision() {
     );
     assert_eq!(rep.completeness, Completeness::Complete);
     match &rep.fragments[0].primitive {
-        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
             assert_eq!(mesh.triangles.len(), 2);
             assert_eq!(edges.len(), 2, "one stored pair, not per-triangle edges");
             assert_eq!(edges[0], p(0.0, 0.0));
@@ -265,7 +265,7 @@ fn body_wireframe_off_keeps_the_mesh_with_stored_edges() {
     );
     assert_eq!(rep.fragments.len(), 1);
     match &rep.fragments[0].primitive {
-        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
             assert_eq!(mesh.triangles.len(), 2);
             assert_eq!(edges.len(), 2);
         }
@@ -312,10 +312,11 @@ fn transforming_a_body_primitive_moves_its_stored_edges() {
     let primitive = DisplayPrimitive::MeshWithStoredEdges {
         mesh: std::sync::Arc::new(plane_mesh()),
         edges: std::sync::Arc::from(vec![p(0.0, 0.0), p(1.0, 0.0)].into_boxed_slice()),
+        derive_when_empty: true,
     };
     let moved = primitive.transformed(&Transform3::translation(p(10.0, 5.0)));
     match moved {
-        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
             assert_eq!(edges[0], p(10.0, 5.0));
             assert_eq!(edges[1], p(11.0, 5.0));
             assert_eq!(mesh.vertices[0], p(10.0, 5.0));

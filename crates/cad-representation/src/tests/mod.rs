@@ -32,6 +32,7 @@ mod linetype;
 mod mask;
 mod material_paint;
 mod polyline_width;
+mod soften;
 mod table_appearance;
 mod xclip;
 mod xclip_depth;

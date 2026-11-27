@@ -251,6 +251,7 @@ pub(crate) fn run_build_representation(
                         cad_representation::DisplayPrimitive::MeshWithStoredEdges {
                             mesh,
                             edges,
+                            ..
                         } => {
                             // A body is one mesh primitive; its stored wireframe
                             // positions are part of the same draw, so they are

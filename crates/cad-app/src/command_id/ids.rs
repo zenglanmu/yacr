@@ -25,6 +25,8 @@ pub enum CommandId {
     Zoom,
     FitDrawing,
     ResetView,
+    /// `SOFTENEDGES [<angle>]`: SketchUp's soften-edges display write.
+    SoftenEdges,
     /// `SCENE SAVE|RESTORE|LIST|DELETE`: persisted scenes (`tables/scenes.json`).
     Scene,
     ToggleLayer,

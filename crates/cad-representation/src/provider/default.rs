@@ -51,7 +51,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
         entity: &DbEntity,
         context: &RepresentationContext,
     ) -> CadResult<DisplayRepresentation> {
-        self.build_inner(entity, context, None)
+        self.build_inner(entity, context, None, None)
     }
 
     /// Apply the imported annotative state: an annotative text/MTEXT entity is
@@ -67,13 +67,13 @@ impl RepresentationProvider for DefaultRepresentationProvider {
     ) -> CadResult<DisplayRepresentation> {
         let annotative = attributes.annotative.annotative;
         let Some(scale) = context.annotation_scale.as_ref().filter(|_| annotative) else {
-            return self.build_inner(entity, context, None);
+            return self.build_inner(entity, context, None, attributes.soften);
         };
         let factor = scale.factor;
         if !factor.is_finite() || factor <= 0.0 {
             // An unusable factor must not silently scale by 1.0; report it and
             // draw the base geometry so the entity is still visible.
-            let mut representation = self.build_inner(entity, context, None)?;
+            let mut representation = self.build_inner(entity, context, None, attributes.soften)?;
             representation.completeness =
                 representation
                     .completeness
@@ -98,6 +98,7 @@ impl RepresentationProvider for DefaultRepresentationProvider {
                 rotation: over.map(|o| o.rotation),
                 height: over.and_then(|o| o.height),
             }),
+            attributes.soften,
         )?;
 
         // Annotative scaling is implemented for text/MTEXT only. Any other
@@ -131,8 +132,9 @@ impl DefaultRepresentationProvider {
         entity: &DbEntity,
         context: &RepresentationContext,
         annotative: Option<TextScale>,
+        soften: Option<f64>,
     ) -> CadResult<DisplayRepresentation> {
-        self.build_geometry(entity, &entity.geometry, context, annotative)
+        self.build_geometry(entity, &entity.geometry, context, annotative, soften)
     }
 
     fn build_geometry(
@@ -141,6 +143,7 @@ impl DefaultRepresentationProvider {
         geometry: &SemanticGeometry,
         context: &RepresentationContext,
         annotative: Option<TextScale>,
+        soften: Option<f64>,
     ) -> CadResult<DisplayRepresentation> {
         // A HATCH with `FILL OFF` draws its boundary loops only: the fill
         // (solid/gradient mesh or pattern lines) is the part `FILL` governs, and
@@ -156,7 +159,7 @@ impl DefaultRepresentationProvider {
                 };
                 for child in super::display_modes::hatch_outline_geometry(hatch) {
                     let child_representation =
-                        self.build_geometry(entity, &child, context, annotative)?;
+                        self.build_geometry(entity, &child, context, annotative, soften)?;
                     representation
                         .fragments
                         .extend(child_representation.fragments);
@@ -204,7 +207,7 @@ impl DefaultRepresentationProvider {
             };
             for child in children {
                 let child_representation =
-                    self.build_geometry(entity, child, context, annotative)?;
+                    self.build_geometry(entity, child, context, annotative, soften)?;
                 representation
                     .fragments
                     .extend(child_representation.fragments);
@@ -644,7 +647,7 @@ impl DefaultRepresentationProvider {
                 }
             }
             SemanticGeometry::Body3d(b) => {
-                body_fragment(entity, b, context, source, &mut representation)
+                body_fragment(entity, b, context, source, &mut representation, soften)
             }
             other => push_chord_fragment(
                 entity,

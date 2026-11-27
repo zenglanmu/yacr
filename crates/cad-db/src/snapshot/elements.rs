@@ -224,7 +224,7 @@ fn encode_render_attributes(attributes: &EntityRenderAttributes) -> Value {
     let geometry_source = encode_geometry_source(&attributes.geometry_source);
     let clip = attributes.clip.as_ref().map_or(Value::Null, encode_clip);
     // `linetype_scale` uses the shared codec, so NaN survives as `$f64:"nan"`.
-    fields(vec![
+    let mut row = fields(vec![
         ("transparency", encode_transparency(attributes.transparency)),
         ("color", encode_color(attributes.color)),
         ("lineweight", encode_lineweight(attributes.lineweight)),
@@ -233,7 +233,15 @@ fn encode_render_attributes(attributes: &EntityRenderAttributes) -> Value {
         ("geometry_source", geometry_source),
         ("annotative", encode_annotative(&attributes.annotative)),
         ("clip", clip),
-    ])
+    ]);
+    // Soften is written **only when set**, so an unsoftened element keeps the
+    // shape a minor-20 reader accepts.
+    if let Some(angle) = attributes.soften {
+        if let Value::Object(map) = &mut row {
+            map.insert("soften".to_string(), json::encode_f64(angle));
+        }
+    }
+    row
 }
 
 fn encode_transparency(value: EntityTransparency) -> Value {
@@ -604,7 +612,21 @@ impl Reader {
             geometry_source: reader.take_geometry_source("geometry_source")?,
             annotative: reader.take_annotative("annotative")?,
             clip: reader.take_clip("clip")?,
+            soften: match reader.opt_take("soften") {
+                Some(value) => Some(
+                    json::decode_f64(&value)
+                        .map_err(|error| reader.error(format!("soften: {error}")))?,
+                ),
+                None => None,
+            },
         };
+        if let Some(angle) = attributes.soften {
+            if !angle.is_finite() || !(0.0..=180.0).contains(&angle) {
+                return Err(reader.error(format!(
+                    "soften: {angle} is outside the accepted 0..=180 degree range"
+                )));
+            }
+        }
         reader.finish()?;
         Ok(Some(attributes))
     }

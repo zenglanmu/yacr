@@ -42,6 +42,7 @@ export type TrayPanelKind =
   | 'bimQuery'
   | 'mechanicalTree'
   | 'materials'
+  | 'soften'
   | 'pending';
 
 /** One tray panel, in vertical order. */

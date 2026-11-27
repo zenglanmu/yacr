@@ -232,6 +232,8 @@ impl CadSession {
             super::commands::PAINT_SELECTOR => self.paint_argument(argument, text),
             // `SCENE <option>`: persisted scenes (SketchUp pages).
             super::commands::SCENE_SELECTOR => self.scene_argument(argument, text),
+            // `SOFTENEDGES [<angle>]`: the SketchUp soften-edges display write.
+            super::commands::SOFTENEDGES_SELECTOR => self.softenedges_argument(argument, text),
             super::commands::NEWVIEW_SELECTOR => self.newview_argument(argument, text),
             super::commands::VPOINT_SELECTOR => self.vpoint_argument(argument, text),
             // The 2026-11-07 layout/viewport batch typed forms, including the

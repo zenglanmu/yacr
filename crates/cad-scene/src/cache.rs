@@ -492,7 +492,11 @@ impl SceneCache {
                 // pairs, never from the triangle topology. De-duplication
                 // and the defensive empty fallback live in
                 // [`stored_edge_positions`].
-                DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+                DisplayPrimitive::MeshWithStoredEdges {
+                    mesh,
+                    edges,
+                    derive_when_empty,
+                } => {
                     let MeshStreams {
                         origin,
                         verts,
@@ -504,13 +508,10 @@ impl SceneCache {
                         pbr,
                     } = mesh_streams(mesh);
                     let mut edge_positions = stored_edge_positions(edges, origin);
-                    if edge_positions.is_empty() {
-                        // Defensive only: the provider emits this variant
-                        // with at least one stored segment. If a hand-built
-                        // fragment carries none, keep the legacy
-                        // triangle-derived overlay (which also keeps
-                        // `is_text_glyph` false) rather than drawing a
-                        // body with no wireframe.
+                    if edge_positions.is_empty() && *derive_when_empty {
+                        // Legacy/defensive fallback. A softened body sets the
+                        // flag false, so a fully smooth body keeps its fill and
+                        // draws no hard edge instead of a tessellation overlay.
                         edge_positions = triangle_edge_positions(&kept, &verts);
                     }
                     (

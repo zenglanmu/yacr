@@ -171,7 +171,11 @@ pub const FORMAT_WRITE: u32 = 2;
 /// `20` adds scenes (`tables/scenes.json`, SketchUp pages): a named camera/space
 /// snapshot plus the visual-style token. A document without scenes keeps the
 /// lower tier; a pre-20 reader refuses the table path instead of dropping them.
-pub const FORMAT_MINOR: u32 = 20;
+///
+/// `21` adds the per-entity `render_attributes.soften` angle (SketchUp's Soften
+/// Edges). The key is omitted unless set, so an unsoftened document keeps the
+/// lower tier; a pre-21 reader refuses the key instead of drawing hard edges.
+pub const FORMAT_MINOR: u32 = 21;
 
 /// Stable failure markers.
 ///

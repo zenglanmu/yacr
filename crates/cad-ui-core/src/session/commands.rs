@@ -763,7 +763,7 @@ pub const COMMAND_TABLE: &[(&str, CommandId)] = &[
     ("CYLINDER", CommandId::Extended(ExtendedCommandId::Cylinder)), ("SPHERE", CommandId::Extended(ExtendedCommandId::Sphere)),
     ("TORUS", CommandId::Extended(ExtendedCommandId::Torus)), ("WEDGE", CommandId::Extended(ExtendedCommandId::Wedge)),
     ("PYRAMID", CommandId::Extended(ExtendedCommandId::Pyramid)), ("POLYSOLID", CommandId::Extended(ExtendedCommandId::PolySolid)),
-    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
+    ("EXTRUDE", CommandId::Extended(ExtendedCommandId::Extrude)), ("FOLLOWME", CommandId::Extended(ExtendedCommandId::FollowMe)), ("RECTANGROTATED", CommandId::Extended(ExtendedCommandId::RectangRotated)), ("PIE", CommandId::Extended(ExtendedCommandId::Pie)), ("PAINT", CommandId::Extended(ExtendedCommandId::Paint)), ("MATERIALS", CommandId::Extended(ExtendedCommandId::Materials)), ("SCENE", CommandId::Scene), ("SOFTENEDGES", CommandId::SoftenEdges), ("REVOLVE", CommandId::Extended(ExtendedCommandId::Revolve)),
     ("SWEEP", CommandId::Extended(ExtendedCommandId::Sweep)), ("LOFT", CommandId::Extended(ExtendedCommandId::Loft)),
     ("INTERSECT", CommandId::Extended(ExtendedCommandId::Intersect)), ("UNION", CommandId::Extended(ExtendedCommandId::Union)),
     ("SUBTRACT", CommandId::Extended(ExtendedCommandId::Subtract)), ("SLICE", CommandId::Extended(ExtendedCommandId::Slice)),
@@ -901,7 +901,8 @@ mod paint_grammar;
 pub use paint_grammar::*;
 mod scene_grammar;
 pub use scene_grammar::*;
-
+mod soften_grammar;
+pub use soften_grammar::*;
 // The typed `PYRAMID` regular n-gon base line (the one typed 3D primitive).
 mod solid_arguments;
 pub use solid_arguments::*;
@@ -962,7 +963,6 @@ pub use table::*;
 // The 2026-11-07 layout/viewport grammars (`LAYOUT` … `LAYVPI`).
 mod layout;
 pub use layout::*;
-
 // The 2026-11-07 extras grammars (`-PAN`, `TRACE` … `LINETYPE`).
 mod extras;
 pub use extras::*;

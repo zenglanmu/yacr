@@ -231,6 +231,8 @@ impl<'a> ImporterBuilder<'a> {
                 GeometrySource::Analytic
             },
             annotative,
+            // AutoCAD has no soften model; an imported entity starts hard.
+            soften: None,
         };
 
         let record = DbEntity {

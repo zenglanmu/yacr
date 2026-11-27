@@ -496,6 +496,24 @@ impl DocumentSnapshot {
             .get(TableKind::Scenes)
             .is_some_and(|rows| !rows.is_empty())
     }
+
+    /// Whether any element carries a **Soften Edges** angle (minor 21).
+    ///
+    /// The writer omits `render_attributes.soften` unless it is set, so a
+    /// present key is the only evidence of the tier; an ordinary document never
+    /// pays the minor-21 gate.
+    pub fn has_soften(&self) -> bool {
+        self.shards
+            .iter()
+            .flat_map(|shard| shard.elements.iter())
+            .any(|element| {
+                element
+                    .payload
+                    .get("render_attributes")
+                    .and_then(|attributes| attributes.get("soften"))
+                    .is_some_and(|value| !value.is_null())
+            })
+    }
 }
 
 /// Whether an encoded expression tree carries a P1-only tag.

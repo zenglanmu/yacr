@@ -45,7 +45,8 @@ impl DefaultRepresentationProvider {
                 .get(index)
                 .copied()
                 .unwrap_or(cad_domain::TableDisplayAppearance::NONE);
-            let child_representation = match self.build_geometry(entity, child, context, annotative)
+            let child_representation = match self
+                .build_geometry(entity, child, context, annotative, None)
             {
                 Ok(child) => child,
                 Err(error) => {

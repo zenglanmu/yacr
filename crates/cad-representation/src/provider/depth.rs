@@ -56,7 +56,7 @@ pub(super) fn primitive_depth_span(primitive: &DisplayPrimitive) -> Option<(f64,
         // The span covers the filled mesh **and** its stored wireframe: a body
         // whose edge set reaches outside the display triangles is still tested as
         // one primitive.
-        DisplayPrimitive::MeshWithStoredEdges { mesh, edges } => {
+        DisplayPrimitive::MeshWithStoredEdges { mesh, edges, .. } => {
             mesh_with_edges_depth_span(mesh, edges)
         }
         DisplayPrimitive::Text { origin, .. } => Some((origin.z, origin.z)),
